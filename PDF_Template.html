@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title><?= title ?></title>
+<style>
+  @page { size: A4; margin: 12mm 14mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', 'NanumGothic', sans-serif; color: #111; font-size: 11px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .pdf-wrap { width: 100%; }
+
+  .pdf-title { text-align: center; font-size: 24px; font-weight: 700; letter-spacing: 12px; padding: 6px 0 4px; border-bottom: 2.5px solid #111; margin-bottom: 8px; }
+  .pdf-title.prc { color: #333; }
+  .pdf-subtitle { text-align: center; font-size: 9px; color: #666; letter-spacing: 4px; margin-top: -6px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 0.5px solid #ccc; }
+  .pdf-subtitle.prc { color: #5832a0; }
+
+  .top-meta { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; font-size: 10.5px; }
+  .top-meta .doc-no { font-weight: 700; font-size: 14px; letter-spacing: 1px; }
+  .top-meta .issue-date { font-weight: 700; font-size: 14px; letter-spacing: 0.5px; color: #111; }
+  .top-meta .meta-label { font-size: 9.5px; color: #888; margin-top: 2px; }
+
+  /* 결재 블록 영역: 메타행 + 줄바꿈 2번 아래, 우측 정렬 / REQ 좌 · PRC 우 */
+  .approval-row { display: flex; justify-content: flex-end; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+  .approval-block { border: 1.5px solid #111; }
+  .approval-block table { border-collapse: collapse; }
+  .approval-block th { background: #f0f0f0; border: 1px solid #111; padding: 3px 0; font-size: 9px; font-weight: 700; min-width: 56px; letter-spacing: 0.5px; }
+  .approval-block td { border: 1px solid #111; padding: 0; vertical-align: middle; height: 48px; text-align: center; min-width: 56px; }
+  .approval-block .stamp-name { font-size: 13px; font-weight: 700; color: #c0392b; letter-spacing: 2px; padding: 6px 4px 2px; line-height: 1; }
+  .approval-block .stamp-date { font-size: 8.5px; color: #888; padding: 0 4px 6px; line-height: 1; font-family: 'Consolas', monospace; }
+  .approval-block .stamp-pending { font-size: 10px; color: #aaa; letter-spacing: 1px; }
+  .approval-block .stamp-rejected { font-size: 12px; font-weight: 700; color: #444; letter-spacing: 2px; padding: 6px 4px 2px; line-height: 1; }
+  .approval-block .label { background: #f7f7f7; color: #555; font-size: 8px; padding: 2px 6px; border-bottom: 1px solid #111; letter-spacing: 1px; text-align: center; font-weight: 700; }
+
+  /* 1차 = REQ (녹색) */
+  .approval-block.parent { border-color: #1f7a3e; }
+  .approval-block.parent th { background: #eef5ec; color: #1f7a3e; border-color: #1f7a3e; }
+  .approval-block.parent td { border-color: #1f7a3e; }
+  .approval-block.parent .stamp-name { color: #1f7a3e; }
+  .approval-block.parent .label { background: #eef5ec; color: #1f7a3e; border-bottom: 1px solid #1f7a3e; }
+
+  /* 2차 = PRC (푸른색) */
+  .approval-block.prc-block { border-color: #2a5bd7; }
+  .approval-block.prc-block th { background: #e7eefc; color: #1c46b8; border-color: #2a5bd7; }
+  .approval-block.prc-block td { border-color: #2a5bd7; }
+  .approval-block.prc-block .stamp-name { color: #1c46b8; }
+  .approval-block.prc-block .label { background: #e7eefc; color: #1c46b8; border-bottom: 1px solid #2a5bd7; }
+
+  .clearfix::after { content: ''; display: table; clear: both; }
+
+  table.info { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  table.info th { background: #f0f0f0; border: 0.5px solid #888; padding: 5px 8px; text-align: left; font-size: 10px; font-weight: 700; color: #444; width: 90px; }
+  table.info td { border: 0.5px solid #888; padding: 5px 8px; font-size: 11px; color: #111; }
+
+  .section-title { background: #444; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 2px; margin: 10px 0 0; }
+
+  table.items { width: 100%; border-collapse: collapse; margin-top: 0; }
+  table.items th { background: #f0f0f0; border: 0.5px solid #555; padding: 5px 4px; text-align: center; font-size: 9.5px; font-weight: 700; color: #333; }
+  table.items td { border: 0.5px solid #888; padding: 4px 6px; font-size: 10.5px; vertical-align: middle; }
+  table.items td.num { text-align: center; color: #888; font-size: 10px; }
+  table.items td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  table.items tfoot td { background: #f8f8f8; font-weight: 700; padding: 6px 6px; font-size: 11px; }
+  table.items tfoot td.label { text-align: right; }
+  table.items tfoot td.value { text-align: right; font-size: 12.5px; letter-spacing: 0.5px; }
+
+  .parent-ref { background: #f7f7f7; border-left: 3px solid #6a3eb5; padding: 6px 10px; margin: 10px 0; font-size: 10px; color: #444; border-radius: 0 3px 3px 0; }
+  .parent-ref b { color: #6a3eb5; }
+
+  .footer { margin-top: 16px; padding-top: 8px; border-top: 0.5px solid #ccc; font-size: 8.5px; color: #999; display: flex; justify-content: space-between; }
+  .footer .left { letter-spacing: 0.5px; }
+  .footer .right { font-family: 'Consolas', monospace; }
+
+  .compliance-note { font-size: 8.5px; color: #888; margin-top: 6px; padding: 4px 8px; background: #fafafa; border: 0.5px dashed #ccc; text-align: center; letter-spacing: 0.5px; }
+</style>
+</head>
+<body>
+<div class="pdf-wrap">
+
+  <div class="pdf-title <?= isPrc ? 'prc' : '' ?>"><?= isPrc ? '구 매 품 의 서 ( P R C )' : '구 매 품 의 서' ?></div>
+  <div class="pdf-subtitle <?= isPrc ? 'prc' : '' ?>"><?= isPrc ? 'PURCHASE  TEAM  REQUISITION' : 'PURCHASE  REQUISITION' ?></div>
+
+  <!-- 상단 메타: PO/REQ 번호(좌) ↔ 발행일자(우) 대칭 -->
+  <div class="top-meta">
+    <div>
+      <div class="doc-no"><?= docNo ?></div>
+      <div class="meta-label"><?= isPrc ? '구매팀 발번 / PRC' : 'REQ 발번' ?></div>
+    </div>
+    <div style="text-align:right;">
+      <div class="issue-date"><?= issueDate ?></div>
+      <div class="meta-label">발행일자</div>
+    </div>
+  </div>
+
+  <!-- 줄바꿈 2번 -->
+  <br><br>
+
+  <!-- 결재 테이블: 우측 정렬, 1차(REQ) 좌 · 2차(PRC) 우 -->
+  <div class="approval-row">
+
+    <? if (isPrc && hasParentApprovers) { ?>
+      <div class="approval-block parent">
+        <div class="label">1차 결재 (REQ)</div>
+        <table>
+          <thead><tr>
+            <? for (var i = 0; i < parentApprovers.length; i++) { ?>
+              <th><?= parentApprovers[i].label ?></th>
+            <? } ?>
+          </tr></thead>
+          <tbody><tr>
+            <? for (var i = 0; i < parentApprovers.length; i++) { var pa = parentApprovers[i]; ?>
+              <? if (pa.status === '승인') { ?>
+                <td>
+                  <div class="stamp-name"><?= pa.name ?></div>
+                  <div class="stamp-date"><?= pa.processedAt ?></div>
+                </td>
+              <? } else if (pa.status === '반려') { ?>
+                <td>
+                  <div class="stamp-rejected">반려</div>
+                  <div class="stamp-date"><?= pa.processedAt ?></div>
+                </td>
+              <? } else { ?>
+                <td><div class="stamp-pending">대기</div></td>
+              <? } ?>
+            <? } ?>
+          </tr></tbody>
+        </table>
+      </div>
+    <? } ?>
+
+    <div class="approval-block <?= isPrc ? 'prc-block' : '' ?>">
+      <div class="label"><?= isPrc ? '2차 결재 (PRC)' : '결재' ?></div>
+      <table>
+        <thead><tr>
+          <? for (var i = 0; i < approvers.length; i++) { ?>
+            <th><?= approvers[i].label ?></th>
+          <? } ?>
+        </tr></thead>
+        <tbody><tr>
+          <? for (var i = 0; i < approvers.length; i++) { var ap = approvers[i]; ?>
+            <? if (ap.status === '승인') { ?>
+              <td>
+                <div class="stamp-name"><?= ap.name ?></div>
+                <div class="stamp-date"><?= ap.processedAt ?></div>
+              </td>
+            <? } else if (ap.status === '반려') { ?>
+              <td>
+                <div class="stamp-rejected">반려</div>
+                <div class="stamp-date"><?= ap.processedAt ?></div>
+              </td>
+            <? } else { ?>
+              <td><div class="stamp-pending">대기</div></td>
+            <? } ?>
+          <? } ?>
+        </tr></tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <? if (isPrc && parentDocNo) { ?>
+    <div class="parent-ref">
+      <b>참조 원본 REQ:</b> <?= parentDocNo ?>
+      <? if (parentSubmitAt) { ?> &nbsp;|&nbsp; 1차 제출 <?= parentSubmitAt ?><? } ?>
+    </div>
+  <? } ?>
+
+  <table class="info">
+    <tr>
+      <th>기 안 자</th><td><?= drafter ?></td>
+    </tr>
+    <tr>
+      <th>품의제목</th><td style="font-size:12px;font-weight:700;"><?= subject ?></td>
+    </tr>
+    <tr>
+      <th>용도/내역</th><td><?= purpose || '-' ?></td>
+    </tr>
+  </table>
+
+  <div class="section-title">공급업체<? if (isPrc) { ?> / 구매 조건<? } ?></div>
+  <table class="info">
+    <tr>
+      <th>업체명</th><td style="width:32%;"><?= vendorName ?></td>
+      <th>담당자</th><td><?= vendorContact || '-' ?></td>
+    </tr>
+    <tr>
+      <th>담당자 이메일</th><td><?= vendorEmail || '-' ?></td>
+      <th>연락처</th><td><?= vendorPhone || '-' ?></td>
+    </tr>
+    <tr>
+      <th>납기일</th><td><?= deliveryDate || '-' ?></td>
+      <th>납품장소</th><td><?= deliveryAddr || '-' ?></td>
+    </tr>
+    <? if (isPrc) { ?>
+    <tr>
+      <th>구매방법</th><td><?= purchaseMethod || '-' ?></td>
+      <th>결제조건</th><td><?= paymentInfo || '-' ?></td>
+    </tr>
+    <? } ?>
+  </table>
+
+  <div class="section-title">품목 내역</div>
+  <? var _cur = (items && items.length && items[0] && items[0].currency) ? String(items[0].currency) : 'KRW';
+     var _sym = (_cur === 'KRW') ? '원' : _cur;
+     var _isKrw = (_cur === 'KRW');
+     var _vat = Number(totalVat) - Number(totalAmt); ?>
+  <table class="items">
+    <colgroup>
+      <col style="width:32px"><col><col style="width:120px"><col style="width:50px"><col style="width:90px"><col style="width:110px">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>No.</th><th>품목명</th><th>규격</th><th>수량</th><th>단가 (<?= _cur ?>)</th><th>금액 (<?= _cur ?>)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <? for (var i = 0; i < items.length; i++) { var it = items[i]; var amt = (Number(it.qty)||0) * (Number(it.price)||0); ?>
+        <tr>
+          <td class="num"><?= i + 1 ?></td>
+          <td><?= it.name ?></td>
+          <td><?= it.spec || '-' ?></td>
+          <td class="amt"><?= Number(it.qty || 0).toLocaleString() ?></td>
+          <td class="amt"><?= Number(it.price || 0).toLocaleString() ?></td>
+          <td class="amt"><?= amt.toLocaleString() ?></td>
+        </tr>
+      <? } ?>
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" class="label">공급가액</td>
+        <td class="value"><?= Number(totalAmt).toLocaleString() ?> <?= _sym ?></td>
+      </tr>
+      <tr>
+        <td colspan="5" class="label"><?= _isKrw ? '부가세 (10%)' : '부가세 (해당없음)' ?></td>
+        <td class="value"><?= _isKrw ? (_vat.toLocaleString() + ' ' + _sym) : '-' ?></td>
+      </tr>
+      <tr>
+        <td colspan="5" class="label">합계 금액</td>
+        <td class="value" style="color:#c0392b;"><?= Number(totalVat).toLocaleString() ?> <?= _sym ?></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="compliance-note">
+    본 구매품의서는 내부 결재 시스템에서 자동 생성되었으며, 표시된 결재자명 및 일시는 시스템 로그와 동일합니다.
+  </div>
+
+  <div class="footer">
+    <div class="left">InLC Technology 구매품의 시스템</div>
+  </div>
+
+</div>
+</body>
+</html>

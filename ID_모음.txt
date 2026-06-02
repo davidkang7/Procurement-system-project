@@ -1,0 +1,16 @@
+Staging_ID : 17MouMkuLeAcIkfml9kRwIs6OQVdYKKRc
+Final_ID : 1_dXx1O-jyKHa1mnJ48eLzTEhzGB1t9VE
+Sheet URL : 1Jg0BfLiMrI9MUDMqwU7DWIAA8loVU5XwfumiWHMqMTA
+web app : https://script.google.com/a/macros/inlct.com/s/AKfycbw-iL2l4m59rcZLuiBSgWkumFjBhg80QRm3Y2Kdz1_l9YJYqnWPDw_lhuTurXiCJ8Ip/exec
+
+구매팀 배열
+davidkang@inlct.com
+//mhpark@inlct.com
+//bret@inlct.com
+//kskim@inlct.com
+mujung@inlct.com
+
+관리팀 배열
+davidkang@inlct.com
+
+

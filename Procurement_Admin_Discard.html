@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>관리자 — 강제 폐기</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1a1d23; --ink-soft: #4a5260; --ink-mute: #8b94a3;
+    --line: #e3e6eb; --line-soft: #eef0f3;
+    --accent: #1a6fc4; --accent-soft: #e8f1fb;
+    --procurement: #6a3eb5; --procurement-soft: #f0eafa;
+    --admin: #b91c1c; --admin-soft: #fdecec;
+    --warn: #d97706; --warn-soft: #fef3e2;
+    --danger: #d64541; --danger-soft: #fdecec;
+    --ok: #27ae60; --ok-soft: #e8f6ee;
+    --neutral-soft: #f0f2f5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.55; min-height: 100vh; padding: 20px 28px; }
+
+  /* 페이지 헤더 */
+  .page-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .page-title { font-size: 18px; font-weight: 700; }
+  .page-title .url-hint { font-size: 13px; color: var(--ink-mute); font-weight: 500; }
+  .page-sub { color: var(--ink-mute); font-size: 12px; margin-top: 3px; }
+  .back-link { color: var(--accent); text-decoration: none; font-size: 12px; font-weight: 600; }
+  .back-link:hover { text-decoration: underline; }
+
+  /* 버튼 */
+  .btn { padding: 7px 14px; border-radius: 5px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn:hover:not(:disabled) { background: var(--neutral-soft); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover:not(:disabled) { background: #1559a3; }
+  .btn-danger { background: var(--admin); color: #fff; border-color: var(--admin); }
+  .btn-danger:hover:not(:disabled) { background: #991616; }
+  .btn-ghost { background: transparent; border-color: var(--line); color: var(--ink-soft); }
+
+  /* 검색 필터 */
+  .filter-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+  .filter-row { display: grid; grid-template-columns: repeat(4, 1fr) auto auto; gap: 10px; align-items: end; }
+  .filter-field label { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .filter-field input, .filter-field select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px; }
+  .date-range { display: flex; gap: 6px; align-items: center; }
+  .date-range input { flex: 1; }
+  .date-range .sep { color: var(--ink-mute); }
+
+  /* 테이블 */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; overflow: hidden; }
+  .panel-head { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: #fbfbfc; }
+  .panel-title { font-weight: 700; font-size: 13.5px; }
+  .panel-sub { color: var(--ink-mute); font-size: 11.5px; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 9px 14px; color: var(--ink-mute); font-size: 11px; font-weight: 700; text-transform: uppercase; background: #fbfbfc; border-bottom: 1px solid var(--line); }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.row-clickable { cursor: pointer; }
+  tr.row-clickable:hover { background: var(--admin-soft); }
+  tr.row-selected { background: var(--admin-soft); }
+  tr.row-protected { background: var(--neutral-soft); color: var(--ink-mute); cursor: not-allowed; }
+  tr.row-protected:hover { background: var(--neutral-soft); }
+  tr.row-protected .docno { color: var(--ink-mute); }
+
+  /* 환원 강조 (PRC 폐기 후 부모 REQ) */
+  tr.row-restored {
+    background: linear-gradient(to right, #fff7c4 0%, #fffbe5 100%) !important;
+    box-shadow: inset 4px 0 0 0 #f59e0b;
+    animation: restoredPulse 1.2s ease-out;
+  }
+  tr.row-restored:hover { background: #fff3a8 !important; }
+  tr.row-restored.row-selected { background: linear-gradient(to right, #ffe89a 0%, #fff5cc 100%) !important; }
+  @keyframes restoredPulse {
+    0% { background: #fff7c4; } 25% { background: #ffea7a; }
+    50% { background: #fff7c4; } 75% { background: #ffea7a; }
+    100% { background: #fff7c4; }
+  }
+  .badge-restored {
+    display: inline-block; padding: 2px 7px; border-radius: 3px;
+    font-size: 10px; font-weight: 700;
+    background: #f59e0b; color: #1a1d23; margin-left: 6px;
+    animation: badgeBlink 1s ease-in-out 3;
+  }
+  @keyframes badgeBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .docno { color: var(--accent); font-weight: 600; }
+  .docno.prc { color: var(--procurement); }
+  td.mono { font-family: 'Consolas', monospace; font-size: 11.5px; }
+
+  /* 상태 배지 */
+  .status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+  .status.review     { background: var(--accent-soft); color: var(--accent); }
+  .status.in_appr    { background: var(--warn-soft); color: var(--warn); }
+  .status.approved   { background: var(--ok-soft); color: var(--ok); }
+  .status.rejected   { background: var(--danger-soft); color: var(--danger); }
+  .status.resubmit   { background: var(--warn-soft); color: var(--warn); }
+  .status.final      { background: #ede7f6; color: #6a3eb5; }
+  .status.prc_draft  { background: var(--procurement-soft); color: var(--procurement); }
+  .status.unknown    { background: var(--neutral-soft); color: var(--ink-mute); }
+  .badge-protected { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; background: var(--ink-soft); color: #fff; margin-left: 6px; }
+  .badge-claimed { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 700; background: var(--warn-soft); color: var(--warn); margin-left: 6px; }
+
+  /* 액션 바 */
+  .action-bar { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; display: flex; align-items: end; gap: 12px; }
+  .reason-field { flex: 1; }
+  .reason-field label { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .reason-field label .req { color: var(--danger); margin-left: 2px; }
+  .reason-field textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px; resize: vertical; min-height: 38px; }
+  .selected-info { background: var(--admin-soft); border: 1px solid var(--admin); border-radius: 4px; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--admin); min-width: 220px; }
+  .selected-info.empty { background: var(--neutral-soft); border-color: var(--line); color: var(--ink-mute); }
+
+  /* 모달 */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 9000; align-items: center; justify-content: center; padding: 20px; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--panel); border-radius: 8px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; }
+  .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--admin-soft); }
+  .modal-title { font-weight: 700; font-size: 15px; color: var(--admin); }
+  .modal-body { padding: 18px 20px; font-size: 13px; line-height: 1.6; overflow-y: auto; }
+  .modal-foot { padding: 14px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; background: #fbfbfc; }
+  .confirm-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed var(--line-soft); }
+  .confirm-row:last-child { border-bottom: 0; }
+  .confirm-key { color: var(--ink-mute); font-weight: 600; font-size: 11.5px; }
+  .confirm-val { color: var(--ink); font-weight: 600; max-width: 280px; text-align: right; word-break: break-word; }
+  .confirm-warn { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 4px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: var(--warn); font-weight: 600; }
+  .confirm-cascade { background: var(--procurement-soft); border: 1px solid var(--procurement); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--procurement); font-weight: 600; }
+  .confirm-notify { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .confirm-notify ul li { margin: 3px 0; font-weight: 600; color: var(--ink); }
+  .confirm-notify-empty { background: var(--neutral-soft); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--ink-mute); font-weight: 500; }
+
+  /* 결과 안내 */
+  .truncate-banner { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 4px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; color: var(--warn); font-weight: 600; }
+
+  /* 로딩 / 빈 상태 */
+  .loading { padding: 40px; text-align: center; color: var(--ink-mute); font-size: 13px; }
+  .loading::before { content: '⏳'; display: block; font-size: 24px; margin-bottom: 8px; }
+  .empty-state { padding: 40px 20px; text-align: center; color: var(--ink-mute); font-size: 13px; }
+  .error-state { padding: 24px; text-align: center; color: var(--danger); font-size: 13px; background: var(--danger-soft); border-radius: 4px; }
+
+  /* 토스트 */
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 11px 22px; border-radius: 6px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none; max-width: 80%; }
+  .toast.show { opacity: 1; }
+  .toast.ok { background: var(--ok); color: #fff; }
+  .toast.err { background: var(--danger); color: #fff; }
+
+  /* 진행 인디케이터 (모달 안) */
+  .progress-overlay { display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.85); align-items: center; justify-content: center; z-index: 10; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+  .progress-overlay.show { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <div class="page-title">🛠 강제 폐기 <span class="url-hint">/ ?action=admin&fn=discard</span></div>
+    <div class="page-sub">진행 중인 REQ/PRC 문서를 관리자 권한으로 강제 폐기합니다. <strong>최종승인(PRC)</strong>은 폐기 불가 (보호 대상).</div>
+  </div>
+  <a class="back-link" id="back-link" href="#">← 홈으로</a>
+</div>
+
+<!-- 검색 필터 -->
+<div class="filter-panel">
+  <div class="filter-row">
+    <div class="filter-field">
+      <label>제출일 기간</label>
+      <div class="date-range">
+        <input type="date" id="f-date-from">
+        <span class="sep">~</span>
+        <input type="date" id="f-date-to">
+      </div>
+    </div>
+    <div class="filter-field">
+      <label>기안자 (이름/이메일)</label>
+      <input type="text" id="f-requester" placeholder="홍길동 또는 hong@inlct.com">
+    </div>
+    <div class="filter-field">
+      <label>상태</label>
+      <select id="f-status">
+        <option value="">전체</option>
+        <option value="검토중">검토중</option>
+        <option value="결재중">결재중</option>
+        <option value="최종승인">최종승인 (APPROVED_1ST)</option>
+        <option value="PRC_DRAFT">PRC_DRAFT</option>
+        <option value="반려">반려</option>
+        <option value="최종승인(PRC)">최종승인(PRC) - 보호 대상</option>
+      </select>
+    </div>
+    <div class="filter-field">
+      <label>문서번호 (부분)</label>
+      <input type="text" id="f-docno" placeholder="REQ-2026-01...">
+    </div>
+    <button class="btn btn-primary" onclick="searchDocs()">검색</button>
+    <button class="btn btn-ghost" onclick="resetFilters()">초기화</button>
+  </div>
+</div>
+
+<!-- 결과 초과 안내 -->
+<div id="truncate-banner" class="truncate-banner" style="display:none;"></div>
+
+<!-- 문서 목록 -->
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="panel-title">폐기 대상 문서</span>
+      <span class="panel-sub" id="result-count" style="margin-left:8px;"></span>
+    </div>
+    <div class="panel-sub">💡 행을 클릭해 선택하세요. 회색 행은 보호 대상으로 선택 불가합니다.</div>
+  </div>
+  <div id="table-container">
+    <div class="loading">문서 목록을 불러오는 중...</div>
+  </div>
+</div>
+
+<!-- 액션 바 -->
+<div class="action-bar">
+  <div class="selected-info empty" id="selected-info">선택된 문서가 없습니다</div>
+  <div class="reason-field">
+    <label>폐기 사유<span class="req">*</span> (관리자 액션 필수 기록 항목)</label>
+    <textarea id="reason-input" placeholder="예: 중복 제출로 인한 정리, 거래처 변경으로 재작성 필요 등"
+      oninput="onReasonInput(this.value)"></textarea>
+  </div>
+  <button class="btn btn-danger" id="execute-btn" disabled onclick="openConfirm()">
+    강제 폐기 실행
+  </button>
+</div>
+
+<!-- 확인 모달 -->
+<div class="modal-overlay" id="confirm-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title">⚠ 강제 폐기 최종 확인</div>
+    </div>
+    <div class="modal-body" id="confirm-modal-body"></div>
+    <div class="progress-overlay" id="confirm-progress">⏳ 폐기 처리 중...</div>
+    <div class="modal-foot">
+      <button class="btn" id="confirm-cancel-btn" onclick="closeConfirm()">취소</button>
+      <button class="btn btn-danger" id="confirm-exec-btn" onclick="executeDiscard()">강제 폐기 실행</button>
+    </div>
+  </div>
+</div>
+
+<!-- 토스트 -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// 상태
+// ============================================================
+var WEBAPP_URL = '<?= webappUrl ?>';
+var state = {
+  docs: [],
+  selectedToken: null,
+  reason: '',
+  truncated: false,
+  maxRows: 100,
+  totalScanned: 0,
+};
+
+// ============================================================
+// 초기화
+// ============================================================
+document.getElementById('back-link').href = WEBAPP_URL;
+
+window.addEventListener('DOMContentLoaded', function() {
+  loadDocs({});  // 필터 없이 첫 로딩
+});
+
+// ============================================================
+// 서버 호출
+// ============================================================
+function loadDocs(filter) {
+  document.getElementById('table-container').innerHTML = '<div class="loading">문서 목록을 불러오는 중...</div>';
+
+  if (typeof google === 'undefined' || !google.script || !google.script.run) {
+    document.getElementById('table-container').innerHTML =
+      '<div class="error-state">Google Apps Script 환경에서만 동작합니다.</div>';
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res && res.ok) {
+        state.docs = res.docs || [];
+        state.truncated = !!res.truncated;
+        state.maxRows = res.maxRows || 100;
+        state.totalScanned = res.totalScanned || 0;
+        state.selectedToken = null;
+        renderTable();
+        updateSelectionUI();
+      } else {
+        document.getElementById('table-container').innerHTML =
+          '<div class="error-state">목록 조회 실패: ' + escHtml(res && res.message || '알 수 없는 오류') + '</div>';
+      }
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('table-container').innerHTML =
+        '<div class="error-state">목록 조회 실패: ' + escHtml(err && err.message ? err.message : err) + '</div>';
+    })
+    .adminListDiscardableForClient(filter);
+}
+
+// ============================================================
+// 검색 / 초기화
+// ============================================================
+function searchDocs() {
+  var filter = {
+    dateFrom:  document.getElementById('f-date-from').value,
+    dateTo:    document.getElementById('f-date-to').value,
+    requester: document.getElementById('f-requester').value.trim(),
+    status:    document.getElementById('f-status').value,
+    docNoLike: document.getElementById('f-docno').value.trim(),
+  };
+  loadDocs(filter);
+}
+
+function resetFilters() {
+  document.getElementById('f-date-from').value = '';
+  document.getElementById('f-date-to').value = '';
+  document.getElementById('f-requester').value = '';
+  document.getElementById('f-status').value = '';
+  document.getElementById('f-docno').value = '';
+  loadDocs({});
+}
+
+// ============================================================
+// 테이블 렌더링
+// ============================================================
+function renderTable() {
+  var docs = state.docs;
+
+  // 결과 카운트 / 잘림 안내
+  var countText = docs.length + '건';
+  if (state.totalScanned) {
+    countText += ' (전체 ' + state.totalScanned + '건 스캔)';
+  }
+  document.getElementById('result-count').textContent = countText;
+
+  var banner = document.getElementById('truncate-banner');
+  if (state.truncated) {
+    banner.style.display = '';
+    banner.innerHTML = '⚠ 결과가 최대 ' + state.maxRows + '건을 초과합니다. 누락 방지를 위해 검색 조건을 좁혀주세요.';
+  } else {
+    banner.style.display = 'none';
+  }
+
+  if (docs.length === 0) {
+    document.getElementById('table-container').innerHTML =
+      '<div class="empty-state">조건에 맞는 폐기 가능 문서가 없습니다.</div>';
+    return;
+  }
+
+  var html = '<table><thead><tr>'
+    + '<th>문서번호</th>'
+    + '<th>유형</th>'
+    + '<th>기안자</th>'
+    + '<th>거래처</th>'
+    + '<th style="text-align:right;">금액</th>'
+    + '<th>상태</th>'
+    + '<th>제출일</th>'
+    + '</tr></thead><tbody>';
+
+  docs.forEach(function(d) { html += renderRow(d); });
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+function renderRow(d) {
+  var isSelected = state.selectedToken === d.token;
+  var isRestored = !!d._justRestored;
+  var cls;
+  if (d.isProtected) cls = 'row-protected';
+  else if (isRestored) cls = 'row-clickable row-restored' + (isSelected ? ' row-selected' : '');
+  else if (isSelected) cls = 'row-clickable row-selected';
+  else cls = 'row-clickable';
+
+  var onclick = d.isProtected ? '' : 'onclick="selectDoc(\'' + escAttr(d.token) + '\')"';
+  var docnoCls = d.docType === 'PRC' ? 'docno prc' : 'docno';
+  var statusCls = mapStatusClass(d.status);
+  var amountStr = (d.amount || 0).toLocaleString();
+
+  return '<tr class="' + cls + '" ' + onclick + '>'
+    + '<td class="mono"><span class="' + docnoCls + '">' + escHtml(d.docNo) + '</span></td>'
+    + '<td>' + escHtml(d.docType) + '</td>'
+    + '<td>' + escHtml(d.drafter) + '</td>'
+    + '<td>' + escHtml(d.vendor) + '</td>'
+    + '<td style="text-align:right;font-variant-numeric:tabular-nums;">' + amountStr + '</td>'
+    + '<td>'
+    +   '<span class="status ' + statusCls + '">' + escHtml(d.status) + '</span>'
+    +   (d.isProtected ? '<span class="badge-protected">보호된 문서</span>' : '')
+    +   (d.claimedBy ? '<span class="badge-claimed">🔒 ' + escHtml(d.claimedBy.split('@')[0]) + ' 점유 중</span>' : '')
+    +   (isRestored ? '<span class="badge-restored">🔄 방금 환원됨</span>' : '')
+    + '</td>'
+    + '<td>' + escHtml(d.timestamp || '') + '</td>'
+    + '</tr>';
+}
+
+function mapStatusClass(status) {
+  if (status === '검토중')         return 'review';
+  if (status === '결재중')         return 'in_appr';
+  if (status === '최종승인')       return 'final';
+  if (status === '최종승인(PRC)')  return 'approved';
+  if (status === 'PRC_DRAFT')      return 'prc_draft';
+  if (status === '반려')           return 'rejected';
+  if (status === '재제출')         return 'resubmit';
+  return 'unknown';
+}
+
+// ============================================================
+// 선택 / 사유 입력
+// ============================================================
+function selectDoc(token) {
+  state.selectedToken = token;
+  renderTable();
+  updateSelectionUI();
+}
+
+function onReasonInput(val) {
+  state.reason = val;
+  updateExecuteButton();
+}
+
+function updateSelectionUI() {
+  var sel = findDoc(state.selectedToken);
+  var info = document.getElementById('selected-info');
+  if (sel) {
+    info.classList.remove('empty');
+    info.innerHTML = '선택: <span style="font-family:Consolas,monospace;">' + escHtml(sel.docNo) + '</span>';
+  } else {
+    info.classList.add('empty');
+    info.textContent = '선택된 문서가 없습니다';
+  }
+  updateExecuteButton();
+}
+
+function updateExecuteButton() {
+  var btn = document.getElementById('execute-btn');
+  if (!btn) return;
+  btn.disabled = !(state.selectedToken && state.reason.trim().length > 0);
+}
+
+function findDoc(token) {
+  if (!token) return null;
+  for (var i = 0; i < state.docs.length; i++) {
+    if (state.docs[i].token === token) return state.docs[i];
+  }
+  return null;
+}
+
+// ============================================================
+// 확인 모달
+// ============================================================
+function openConfirm() {
+  var sel = findDoc(state.selectedToken);
+  if (!sel || !state.reason.trim()) return;
+
+  // 발송 대상 미리 계산 (관리자 본인 이메일은 서버가 알고 있어 클라에서는 모두 표시)
+  // 서버 측 _sendAdminDiscardNotifications와 동일 룰 (단, 관리자 본인 제외는 서버에서 최종 처리)
+  var previewMap = {};
+  function addPreview(email, label) {
+    if (!email) return;
+    if (!previewMap[email]) previewMap[email] = [];
+    previewMap[email].push(label);
+  }
+  addPreview(sel.requesterEmail, '기안자');
+  if (sel.claimedBy) addPreview(sel.claimedBy, 'REQ 락 점유자');
+  if (sel.docType === 'PRC' && sel.parentClaimedBy) addPreview(sel.parentClaimedBy, '부모 REQ 점유자');
+
+  var previewKeys = Object.keys(previewMap);
+  var notifyBlock = '';
+  if (previewKeys.length > 0) {
+    var items = previewKeys.map(function(email) {
+      return '<li><strong>' + escHtml(email) + '</strong> <span style="color:var(--ink-mute);font-size:11px;">('
+        + previewMap[email].join(' + ') + ')</span></li>';
+    }).join('');
+    notifyBlock = '<div class="confirm-notify">'
+      + '📧 강제 폐기 후 다음 ' + previewKeys.length + '명에게 알림 이메일이 발송됩니다 (관리자 본인은 자동 제외):'
+      + '<ul style="margin:6px 0 0 18px;padding:0;font-size:12px;">' + items + '</ul>'
+      + '</div>';
+  } else {
+    notifyBlock = '<div class="confirm-notify-empty">'
+      + 'ℹ 알림 이메일 발송 대상이 없습니다.'
+      + '</div>';
+  }
+
+  var cascadeBlock = '';
+  if (sel.claimedBy) {
+    cascadeBlock += '<div class="confirm-warn">'
+      + '⚠ 이 REQ는 현재 <strong>' + escHtml(sel.claimedBy) + '</strong>님이 PRC 작업을 위해 락을 점유 중입니다'
+      + (sel.claimedAt ? ' (점유 시각: ' + escHtml(sel.claimedAt) + ')' : '')
+      + '.<br>강제 폐기 시 락이 자동 해제됩니다.'
+      + '</div>';
+  }
+  if (sel.docType === 'PRC' && sel.parentToken && sel.parentDocNo) {
+    cascadeBlock += '<div class="confirm-cascade">'
+      + '🔗 PRC 폐기 연쇄 처리: 부모 REQ <strong>' + escHtml(sel.parentDocNo) + '</strong>의 락'
+      + (sel.parentClaimedBy ? '(' + escHtml(sel.parentClaimedBy) + ')' : '')
+      + '이 자동 해제되어 APPROVED_1ST 인박스로 환원됩니다.<br>'
+      + '<span style="font-weight:500;font-size:11px;color:var(--ink-mute);">※ REQ 원기안자에게는 알림 미발송 (REQ는 살아있고 인박스로 복귀하므로)</span>'
+      + '</div>';
+  }
+
+  var statusCls = mapStatusClass(sel.status);
+  document.getElementById('confirm-modal-body').innerHTML =
+    '<div style="margin-bottom:12px;">아래 문서를 정말 강제 폐기하시겠습니까? <strong style="color:var(--admin);">이 작업은 되돌릴 수 없습니다.</strong></div>'
+    + '<div class="confirm-row"><span class="confirm-key">문서번호</span><span class="confirm-val" style="font-family:Consolas,monospace;">' + escHtml(sel.docNo) + '</span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">유형</span><span class="confirm-val">' + escHtml(sel.docType) + '</span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">기안자</span><span class="confirm-val">' + escHtml(sel.drafter) + ' <span style="color:var(--ink-mute);font-weight:500;">(' + escHtml(sel.requesterEmail) + ')</span></span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">현재 상태</span><span class="confirm-val"><span class="status ' + statusCls + '">' + escHtml(sel.status) + '</span></span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">폐기 사유</span><span class="confirm-val">' + escHtml(state.reason) + '</span></div>'
+    + cascadeBlock + notifyBlock;
+
+  document.getElementById('confirm-modal').classList.add('show');
+}
+
+function closeConfirm() {
+  document.getElementById('confirm-modal').classList.remove('show');
+  document.getElementById('confirm-progress').classList.remove('show');
+  document.getElementById('confirm-exec-btn').disabled = false;
+  document.getElementById('confirm-cancel-btn').disabled = false;
+}
+
+// ============================================================
+// 폐기 실행
+// ============================================================
+function executeDiscard() {
+  var sel = findDoc(state.selectedToken);
+  if (!sel || !state.reason.trim()) return;
+
+  // 진행 인디케이터 표시
+  document.getElementById('confirm-progress').classList.add('show');
+  document.getElementById('confirm-exec-btn').disabled = true;
+  document.getElementById('confirm-cancel-btn').disabled = true;
+
+  if (typeof google === 'undefined' || !google.script || !google.script.run) {
+    closeConfirm();
+    toast('Google Apps Script 환경에서만 동작합니다.', 'err');
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      closeConfirm();
+      if (res && res.ok) {
+        // 클라이언트 측 시각적 반영
+        var token = sel.token;
+        var parentToken = sel.parentToken;
+
+        // 1) 대상 문서 제거 (목록에서 hidden)
+        state.docs = state.docs.filter(function(d) { return d.token !== token; });
+
+        // 2) PRC 폐기 시 부모 REQ 환원 시각화
+        if (res.restoredParent && parentToken) {
+          var parent = findDoc(parentToken);
+          if (parent) {
+            parent.claimedBy = '';
+            parent.claimedAt = '';
+            parent._justRestored = true;
+            // 8초 후 강조 해제
+            setTimeout(function() {
+              var p = findDoc(parentToken);
+              if (p) {
+                p._justRestored = false;
+                renderTable();
+              }
+            }, 8000);
+          }
+        }
+
+        state.selectedToken = null;
+        state.reason = '';
+        document.getElementById('reason-input').value = '';
+        renderTable();
+        updateSelectionUI();
+
+        var msg = sel.docNo + ' 강제 폐기 완료';
+        if (res.restoredParent) {
+          msg += ' (부모 REQ ' + res.restoredParent.docNo + ' 인박스로 환원됨)';
+        }
+        toast(msg, 'ok');
+      } else {
+        toast('폐기 실패: ' + (res && res.message || '알 수 없는 오류'), 'err');
+      }
+    })
+    .withFailureHandler(function(err) {
+      closeConfirm();
+      toast('폐기 실패: ' + (err && err.message ? err.message : err), 'err');
+    })
+    .adminForceDiscardForClient({
+      token:  sel.token,
+      reason: state.reason,
+    });
+}
+
+// ============================================================
+// 유틸
+// ============================================================
+function toast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (type || 'ok');
+  setTimeout(function() { t.classList.remove('show'); }, 3500);
+}
+
+function escHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function escAttr(s) {
+  return escHtml(s).replace(/`/g, '&#96;');
+}
+</script>
+
+</body>
+</html>

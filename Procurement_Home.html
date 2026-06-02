@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>InLC 구매결재 시스템</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1a1d23; --ink-soft: #4a5260; --ink-mute: #8b94a3;
+    --line: #e3e6eb; --line-soft: #eef0f3;
+    --accent: #1a6fc4; --accent-soft: #e8f1fb;
+    --procurement: #6a3eb5; --procurement-soft: #f0eafa;
+    --warn: #d97706; --warn-soft: #fef3e2;
+    --danger: #d64541; --danger-soft: #fdecec;
+    --ok: #27ae60; --ok-soft: #e8f6ee;
+    --neutral-soft: #f0f2f5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.55; min-height: 100vh; }
+
+  .app-header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .brand-mark { width: 32px; height: 32px; background: var(--accent); color: #fff; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+  .brand-text { font-weight: 700; font-size: 15px; }
+  .brand:hover .brand-text { color: var(--accent); }
+  .brand-sub { color: var(--ink-mute); font-size: 11.5px; font-weight: 500; }
+
+  .user-chip { display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; background: var(--neutral-soft); border-radius: 24px; border: 1px solid var(--line); }
+  .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; }
+  .user-name { font-weight: 600; font-size: 12.5px; }
+  .user-email { color: var(--ink-mute); font-size: 11px; }
+  .role-pills { margin-left: 4px; display: flex; gap: 3px; }
+  .role-pill { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+  .role-pill.user { background: var(--accent); color: #fff; }
+  .role-pill.proc { background: var(--procurement); color: #fff; }
+  .role-pill.admin { background: var(--danger); color: #fff; }
+
+  .layout { display: grid; grid-template-columns: 230px 1fr; min-height: calc(100vh - 70px); }
+  .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 12px; }
+  .nav-section { margin-bottom: 20px; }
+  .nav-section-title { color: var(--ink-mute); font-size: 10.5px; letter-spacing: 0.8px; text-transform: uppercase; font-weight: 700; padding: 0 10px 6px; display: flex; align-items: center; gap: 6px; }
+  .nav-section-title.proc { color: var(--procurement); }
+  .nav-section-title.admin { color: var(--danger); }
+  .nav-section-title::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+  .nav-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 5px; cursor: pointer; color: var(--ink-soft); font-size: 12.5px; font-weight: 500; user-select: none; }
+  .nav-item:hover { background: var(--line-soft); color: var(--ink); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-section.proc .nav-item.active { background: var(--procurement-soft); color: var(--procurement); }
+  .nav-section.admin .nav-item:hover { background: #fdecec; color: var(--danger); }
+  .nav-section.admin .nav-item.active { background: #fdecec; color: var(--danger); font-weight: 600; }
+  .nav-count { background: var(--ink-mute); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; min-width: 18px; text-align: center; }
+  .nav-item.urgent .nav-count { background: var(--danger); }
+  .nav-item.active .nav-count { background: var(--accent); }
+  .nav-section.proc .nav-item.active .nav-count { background: var(--procurement); }
+
+  .content { padding: 22px 28px; }
+  .page-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .page-title { font-size: 18px; font-weight: 700; }
+  .page-sub { color: var(--ink-mute); font-size: 12px; margin-top: 3px; }
+  .btn { padding: 7px 14px; border-radius: 5px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn:hover { background: var(--neutral-soft); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: #155ba8; }
+  .btn-proc { background: var(--procurement); color: #fff; border-color: var(--procurement); }
+  .btn-proc:hover { background: #5832a0; }
+  .btn:disabled { cursor: not-allowed; opacity: 0.6; }
+  .btn:disabled:hover { background: var(--accent); }
+  .btn-inline-spin { display: inline-block; width: 11px; height: 11px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .kpi-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; }
+  .kpi-card.highlight { border-color: var(--accent); background: linear-gradient(135deg, #fff 0%, var(--accent-soft) 100%); }
+  .kpi-label { color: var(--ink-mute); font-size: 11.5px; font-weight: 600; margin-bottom: 6px; }
+  .kpi-value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .kpi-unit { font-size: 12px; color: var(--ink-mute); font-weight: 500; margin-left: 2px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 18px; overflow: hidden; }
+  .panel-head { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: #fbfbfc; }
+  .panel-title { font-weight: 700; font-size: 13.5px; }
+  .scope-tag { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 3px; font-size: 10px; font-weight: 700; background: var(--neutral-soft); color: var(--ink-mute); }
+  .scope-tag.proc { background: var(--procurement-soft); color: var(--procurement); }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 9px 16px; color: var(--ink-mute); font-size: 11px; font-weight: 700; text-transform: uppercase; background: #fbfbfc; border-bottom: 1px solid var(--line); }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.row-clickable { cursor: pointer; }
+  tr.row-clickable:hover { background: var(--line-soft); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.mono { font-family: 'Consolas', monospace; font-size: 12px; }
+  .docno { color: var(--accent); font-weight: 600; }
+  .docno.prc { color: var(--procurement); }
+
+  .status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10.5px; font-weight: 700; }
+  .status.review     { background: var(--accent-soft); color: var(--accent); }
+  .status.in_appr    { background: var(--warn-soft); color: var(--warn); }
+  .status.approved   { background: var(--ok-soft); color: var(--ok); }
+  .status.rejected   { background: var(--danger-soft); color: var(--danger); }
+  .status.resubmit   { background: var(--warn-soft); color: var(--warn); }
+  .status.final      { background: #ede7f6; color: #6a3eb5; }
+  .status.prc_made   { background: var(--procurement-soft); color: var(--procurement); }
+  .status.unknown    { background: var(--neutral-soft); color: var(--ink-mute); }
+
+  .empty { padding: 40px 20px; text-align: center; color: var(--ink-mute); }
+  .empty-icon { font-size: 32px; margin-bottom: 8px; opacity: 0.5; }
+
+  .loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .spinner { width: 36px; height: 36px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 12px 22px; border-radius: 6px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 2000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.ok { background: var(--ok); color: #fff; }
+  .toast.err { background: var(--danger); color: #fff; }
+  .toast.info { background: var(--ink); color: #fff; }
+
+  /* ─── PRC 픽업 모달 ─────────────────────────────────── */
+  .pkmodal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.55); display: flex; align-items: center; justify-content: center; z-index: 3000; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+  .pkmodal-backdrop.show { opacity: 1; pointer-events: auto; }
+  .pkmodal { background: var(--panel); border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); width: 440px; max-width: calc(100vw - 32px); overflow: hidden; transform: translateY(8px) scale(0.98); transition: transform 0.2s ease; }
+  .pkmodal-backdrop.show .pkmodal { transform: translateY(0) scale(1); }
+  .pkmodal-header { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
+  .pkmodal-title { font-size: 15px; font-weight: 700; color: var(--ink); margin: 0; }
+  .pkmodal-body { padding: 22px; min-height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  .pkmodal-footer { padding: 12px 22px 18px; display: flex; justify-content: flex-end; gap: 8px; min-height: 32px; }
+  .pkmodal-footer.empty { padding: 0; min-height: 0; }
+  .pkmodal-message { font-size: 13.5px; font-weight: 600; text-align: center; margin: 0; color: var(--ink); }
+  .pkmodal-message.ok { color: var(--ok); }
+  .pkmodal-message.err { color: var(--danger); }
+  .pkmodal-detail { font-size: 12px; color: var(--ink-mute); text-align: center; margin: 0; line-height: 1.6; }
+  .pkmodal-detail-row { display: flex; align-items: center; gap: 6px; justify-content: center; }
+
+  .pkmodal-spinner { width: 42px; height: 42px; border: 3px solid var(--line); border-top-color: var(--procurement); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .pkmodal-spinner.sm { width: 14px; height: 14px; border-width: 2px; }
+
+  .pkmodal-success { width: 46px; height: 46px; border-radius: 50%; background: var(--ok); display: flex; align-items: center; justify-content: center; animation: pkpop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .pkmodal-success svg { width: 22px; height: 22px; stroke: #fff; stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 30; stroke-dashoffset: 30; animation: pkdraw 0.4s 0.2s ease forwards; }
+  .pkmodal-error { width: 46px; height: 46px; border-radius: 50%; background: var(--danger); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; animation: pkpop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); font-family: inherit; line-height: 1; }
+  @keyframes pkpop { 0% { transform: scale(0); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+  @keyframes pkdraw { to { stroke-dashoffset: 0; } }
+
+  .pkmodal-steps { width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .pkmodal-step { display: flex; align-items: center; gap: 9px; padding: 7px 11px; background: var(--line-soft); border-radius: 5px; font-size: 11.5px; color: var(--ink-mute); transition: all 0.3s ease; }
+  .pkmodal-step.active { background: var(--procurement-soft); color: var(--procurement); font-weight: 600; }
+  .pkmodal-step.done { background: var(--ok-soft); color: var(--ok); }
+  .pkmodal-step-dot { width: 14px; height: 14px; border-radius: 50%; background: #d1d5db; flex-shrink: 0; position: relative; transition: background 0.3s ease; }
+  .pkmodal-step.active .pkmodal-step-dot { background: var(--procurement); }
+  .pkmodal-step.active .pkmodal-step-dot::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--procurement); opacity: 0.4; animation: pkpulse 1.2s ease-in-out infinite; }
+  .pkmodal-step.done .pkmodal-step-dot { background: var(--ok); }
+  .pkmodal-step.done .pkmodal-step-dot::after { content: '✓'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 10px; font-weight: 700; }
+  @keyframes pkpulse { 0%,100% { transform: scale(1); opacity: 0.4; } 50% { transform: scale(1.25); opacity: 0; } }
+
+  .pkmodal-info { width: 100%; background: var(--line-soft); border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; font-size: 11.5px; }
+  .pkmodal-info-row { display: flex; justify-content: space-between; padding: 2px 0; gap: 12px; }
+  .pkmodal-info-row .lbl { color: var(--ink-mute); }
+  .pkmodal-info-row .val { font-weight: 600; color: var(--ink); text-align: right; word-break: break-all; }
+
+  .pkmodal-btn { padding: 7px 14px; border-radius: 5px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; transition: all 0.15s; }
+  .pkmodal-btn.primary { background: var(--procurement); color: #fff; border-color: var(--procurement); }
+  .pkmodal-btn.primary:hover { background: #5832a0; border-color: #5832a0; }
+  .pkmodal-btn.secondary { background: var(--panel); color: var(--ink-soft); border-color: var(--line); }
+  .pkmodal-btn.secondary:hover { background: var(--line-soft); }
+
+  .claim-info { font-size: 11px; color: var(--procurement); font-weight: 600; }
+  .claim-info.other { color: var(--warn); }
+  .pickup-btn { background: var(--procurement); color: #fff; border: none; padding: 5px 12px; border-radius: 4px; font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .pickup-btn:hover { background: #5832a0; }
+  .pickup-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding: 0 16px; background: #fbfbfc; }
+  .tab { padding: 9px 14px; font-size: 12px; font-weight: 600; color: var(--ink-mute); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--ink); }
+
+  .role-empty-state { padding: 60px 24px; text-align: center; color: var(--ink-mute); }
+  .role-empty-state h3 { font-size: 16px; color: var(--ink); margin-bottom: 6px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div class="brand" onclick="showMenu('mydocs')">
+    <div class="brand-mark">IL</div>
+    <div>
+      <div class="brand-text">구매결재 시스템</div>
+      <div class="brand-sub">InLC Technology · Procurement Approval</div>
+    </div>
+  </div>
+  <div class="user-chip">
+    <div class="user-avatar" id="user-avatar">·</div>
+    <div>
+      <div class="user-name" id="user-name">로딩 중...</div>
+      <div class="user-email" id="user-email">-</div>
+    </div>
+    <div class="role-pills" id="user-roles"></div>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="empty"><div class="spinner" style="margin:0 auto 8px;"></div>메뉴 로딩 중...</div>
+  </aside>
+  <main class="content" id="content">
+    <div class="empty"><div class="spinner" style="margin:0 auto 8px;"></div>대시보드 데이터 로딩 중...</div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ─── PRC 픽업 모달 ─────────────────────────────────── -->
+<div class="pkmodal-backdrop" id="pkmodal-backdrop" aria-hidden="true">
+  <div class="pkmodal" role="dialog" aria-modal="true" aria-labelledby="pkmodal-title">
+    <div class="pkmodal-header">
+      <div class="pkmodal-title" id="pkmodal-title">PRC 픽업 처리 중</div>
+    </div>
+    <div class="pkmodal-body" id="pkmodal-body"></div>
+    <div class="pkmodal-footer empty" id="pkmodal-footer"></div>
+  </div>
+</div>
+
+<script>
+var WEBAPP_URL = '<?= webappUrl ?>';
+var STATE = {
+  user: null,
+  data: null,
+  currentMenu: 'mydocs',
+  myDocsTab: 'all',
+  loading: false,
+};
+
+// ─── 부팅 ─────────────────────────────
+function boot(){
+  loadHome();
+}
+
+function loadHome(){
+  // 연타 방지: 이미 로딩 중이면 새 호출을 발사하지 않음
+  if(STATE.loading) return;
+  STATE.loading = true;
+  setRefreshButtonsLoading(true);
+  if(typeof google === 'undefined'){
+    STATE.loading = false;
+    setRefreshButtonsLoading(false);
+    showError('Google Apps Script 환경에서만 실행 가능합니다.');
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(res){
+      STATE.loading = false;
+      setRefreshButtonsLoading(false);
+      if(!res || !res.ok){
+        showError('데이터 로드 실패: ' + (res ? res.message : '응답이 비어있습니다.'));
+        return;
+      }
+      STATE.data = res;
+      STATE.user = res.user;
+      renderUser();
+      renderSidebar();
+      renderContent();
+    })
+    .withFailureHandler(function(err){
+      STATE.loading = false;
+      setRefreshButtonsLoading(false);
+      showError('네트워크 오류: ' + (err && err.message ? err.message : err));
+    })
+    .getHomeDataForClient();
+}
+
+// 새로고침/다시시도 버튼들의 로딩 상태를 토글
+// (loadHome을 호출하는 모든 버튼에 적용 — 동적으로 렌더되므로 호출 시점에 탐색)
+function setRefreshButtonsLoading(isLoading){
+  var btns = document.querySelectorAll('button[onclick="loadHome()"]');
+  Array.prototype.forEach.call(btns, function(btn){
+    if(isLoading){
+      // 원래 라벨 보존 (최초 1회만)
+      if(!btn.hasAttribute('data-label')){
+        btn.setAttribute('data-label', btn.textContent);
+      }
+      btn.disabled = true;
+      btn.innerHTML = '<span class="btn-inline-spin"></span>' + btn.getAttribute('data-label');
+    } else {
+      btn.disabled = false;
+      if(btn.hasAttribute('data-label')){
+        btn.textContent = btn.getAttribute('data-label');
+      }
+    }
+  });
+}
+
+// ─── 사용자 표시 ─────────────────────────────
+function renderUser(){
+  var u = STATE.user || {};
+  var email = u.email || '(미인증)';
+  var initial = (email[0] || '?').toUpperCase();
+  document.getElementById('user-avatar').textContent = initial;
+  document.getElementById('user-name').textContent = email.split('@')[0] || email;
+  document.getElementById('user-email').textContent = email;
+
+  var pills = '<span class="role-pill user">사용자</span>';
+  if(u.isProcurement) pills += '<span class="role-pill proc">구매팀</span>';
+  if(u.isAdmin) pills += '<span class="role-pill admin">관리자</span>';
+  document.getElementById('user-roles').innerHTML = pills;
+}
+
+// ─── 사이드바 ─────────────────────────────
+function renderSidebar(){
+  var d = STATE.data || {};
+  var u = STATE.user || {};
+
+  var common = [
+    { key: 'mydocs',  label: '내 기안 문서', count: (d.myDocs || []).length },
+    { key: 'pending', label: '내 결재 대기', count: (d.myPending || []).length, urgent: (d.myPending || []).length > 0 },
+  ];
+  var proc = u.isProcurement ? [
+    { key: 'inbox',  label: 'APPROVED_1ST 인박스', count: (d.approvedInbox || []).length, urgent: (d.approvedInbox || []).length > 0 },
+    { key: 'myprc',  label: '진행 중 PRC', count: (d.myPrc || []).length },
+  ] : [];
+
+  var html = '';
+  html += '<div class="nav-section">';
+  html += '<div class="nav-section-title">기본 메뉴</div>';
+  common.forEach(function(m){
+    html += renderNavItem(m);
+  });
+  html += '<div class="nav-item" data-menu="new" style="background:var(--accent);color:#fff;margin-top:8px;font-weight:600;justify-content:center;">+ 신규 작성</div>';
+  html += '</div>';
+
+  if(proc.length > 0){
+    html += '<div class="nav-section proc">';
+    html += '<div class="nav-section-title proc">구매팀 메뉴</div>';
+    proc.forEach(function(m){ html += renderNavItem(m); });
+    html += '</div>';
+  }
+
+  // 관리자 메뉴 (isAdmin === true일 때만 표시)
+  if(u.isAdmin){
+    html += '<div class="nav-section admin">';
+    html += '<div class="nav-section-title admin">⚙ 관리자 메뉴</div>';
+    html += '<div class="nav-item" data-menu="admin_discard">'
+         +    '<span>강제 폐기</span>'
+         + '</div>';
+    html += '<div class="nav-item" data-menu="admin_force_release_lock">'
+         +    '<span>강제 락 해제</span>'
+         + '</div>';
+    // 향후 추가 자리:
+    // <div class="nav-item disabled"><span>대리 결재</span><span class="nav-soon">SOON</span></div>
+    // <div class="nav-item disabled"><span>결재자 변경</span><span class="nav-soon">SOON</span></div>
+    // <div class="nav-item disabled"><span>상태 강제 변경</span><span class="nav-soon">SOON</span></div>
+    html += '</div>';
+  }
+
+  var bar = document.getElementById('sidebar');
+  bar.innerHTML = html;
+  Array.from(bar.querySelectorAll('.nav-item')).forEach(function(el){
+    el.addEventListener('click', function(){
+      var key = el.getAttribute('data-menu');
+      if(key === 'new'){
+        // 신규 작성 — ?action=new로 이동
+        window.top.location.href = WEBAPP_URL + '?action=new';
+        return;
+      }
+      if(key === 'admin_discard'){
+        // 관리자 강제 폐기 — ?action=admin&fn=discard로 이동
+        window.top.location.href = WEBAPP_URL + '?action=admin&fn=discard';
+        return;
+      }
+      if(key === 'admin_force_release_lock'){
+        // 관리자 강제 락 해제 — ?action=admin&fn=force_release_lock로 이동
+        window.top.location.href = WEBAPP_URL + '?action=admin&fn=force_release_lock';
+        return;
+      }
+      showMenu(key);
+    });
+  });
+}
+
+function renderNavItem(m){
+  return '<div class="nav-item ' + (STATE.currentMenu === m.key ? 'active' : '') + ' ' + (m.urgent ? 'urgent' : '') + '" data-menu="' + m.key + '">'
+    + '<span>' + escHtml(m.label) + '</span>'
+    + '<span class="nav-count">' + m.count + '</span>'
+    + '</div>';
+}
+
+function showMenu(key){
+  STATE.currentMenu = key;
+  renderSidebar();
+  renderContent();
+}
+
+// ─── 콘텐츠 ─────────────────────────────
+function renderContent(){
+  var key = STATE.currentMenu;
+  var html;
+  if(key === 'mydocs')  html = renderMyDocs();
+  else if(key === 'pending') html = renderPending();
+  else if(key === 'inbox')   html = renderInbox();
+  else if(key === 'myprc')   html = renderMyPrc();
+  else html = '<div class="empty">알 수 없는 메뉴입니다.</div>';
+  document.getElementById('content').innerHTML = html;
+  attachContentHandlers();
+}
+
+function attachContentHandlers(){
+  // 탭
+  Array.from(document.querySelectorAll('[data-tab]')).forEach(function(el){
+    el.addEventListener('click', function(){
+      STATE.myDocsTab = el.getAttribute('data-tab');
+      renderContent();
+    });
+  });
+  // 픽업 버튼
+  Array.from(document.querySelectorAll('[data-pickup]')).forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      pickupReq(el.getAttribute('data-pickup'));
+    });
+  });
+  // 행 클릭 → 뷰어
+  Array.from(document.querySelectorAll('[data-view-token]')).forEach(function(el){
+    el.addEventListener('click', function(){
+      var token = el.getAttribute('data-view-token');
+      var docNo = el.getAttribute('data-docno') || '';
+      window.top.location.href = WEBAPP_URL + '?action=view&token=' + encodeURIComponent(token) + '&docNo=' + encodeURIComponent(docNo);
+    });
+  });
+  // PRC 재진입 버튼
+  Array.from(document.querySelectorAll('[data-prc-resume]')).forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var parentToken = el.getAttribute('data-prc-resume');
+      window.top.location.href = WEBAPP_URL + '?action=prc&parentId=' + encodeURIComponent(parentToken);
+    });
+  });
+}
+
+// ─── 메뉴별 렌더 ─────────────────────────────
+function renderMyDocs(){
+  var d = STATE.data || {};
+  var docs = d.myDocs || [];
+
+  // 상태별 분류
+  var grouped = {
+    all:      docs,
+    review:   docs.filter(function(x){ return x.status === '검토중' || x.status.indexOf('결재중') >= 0 || x.status === '재상신'; }),
+    approved: docs.filter(function(x){ return x.status === '최종승인' || x.status === '최종승인(PRC)' || x.status === 'PRC생성됨'; }),
+    rejected: docs.filter(function(x){ return x.status === '반려'; }),
+  };
+  var current = grouped[STATE.myDocsTab] || grouped.all;
+
+  var kpiHtml = '<div class="kpi-grid">'
+    + kpi('전체', docs.length, 'highlight')
+    + kpi('진행 중', grouped.review.length)
+    + kpi('완료', grouped.approved.length)
+    + kpi('반려', grouped.rejected.length)
+    + '</div>';
+
+  var tabsHtml = '<div class="tabs">'
+    + tab('all', '전체', grouped.all.length)
+    + tab('review', '진행 중', grouped.review.length)
+    + tab('approved', '완료', grouped.approved.length)
+    + tab('rejected', '반려', grouped.rejected.length)
+    + '</div>';
+
+  return pageHead('내 기안 문서', '내가 작성한 구매품의서의 전체 진행 상태입니다.')
+    + kpiHtml
+    + '<div class="panel">' + tabsHtml + tableOfDocs(current, 'mydocs') + '</div>';
+}
+
+function renderPending(){
+  var d = STATE.data || {};
+  var rows = d.myPending || [];
+  return pageHead('내 결재 대기함', '내가 다음에 결재해야 할 문서 목록입니다.')
+    + '<div class="panel">'
+    + '<div class="panel-head"><div><span class="panel-title">결재 대기 중인 문서</span><span class="scope-tag">' + rows.length + '건</span></div></div>'
+    + tableOfDocs(rows, 'pending')
+    + '</div>';
+}
+
+function renderInbox(){
+  var d = STATE.data || {};
+  var rows = d.approvedInbox || [];
+  return pageHead('APPROVED_1ST 인박스',
+    '1차 결재가 완료된 REQ가 모이는 구매팀 작업 대기열입니다. 선착순으로 픽업하여 PRC를 생성할 수 있습니다.')
+    + '<div class="panel">'
+    + '<div class="panel-head"><div><span class="panel-title">픽업 대기 (FIFO 정렬)</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
+    + tableOfDocs(rows, 'inbox')
+    + '</div>';
+}
+
+function renderMyPrc(){
+  var d = STATE.data || {};
+  var rows = d.myPrc || [];
+  return pageHead('진행 중 PRC', '내가 점유한 REQ 또는 내가 생성한 PRC 목록입니다.')
+    + '<div class="panel">'
+    + '<div class="panel-head"><div><span class="panel-title">진행 중 작업</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
+    + tableOfDocs(rows, 'myprc')
+    + '</div>';
+}
+
+// ─── 표 렌더 ─────────────────────────────
+function tableOfDocs(rows, mode){
+  if(!rows || rows.length === 0){
+    return '<div class="empty"><div class="empty-icon">📭</div>표시할 문서가 없습니다.</div>';
+  }
+  var html = '<table>';
+  if(mode === 'inbox'){
+    html += '<thead><tr><th>품의번호</th><th>제목</th><th>기안자</th><th>거래처</th><th class="num">금액</th><th>1차 승인일</th><th>점유</th><th></th></tr></thead><tbody>';
+    rows.forEach(function(r){ html += inboxRow(r); });
+  } else if(mode === 'myprc'){
+    html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>거래처</th><th class="num">금액</th><th>상태</th><th></th></tr></thead><tbody>';
+    rows.forEach(function(r){ html += myPrcRow(r); });
+  } else if(mode === 'pending'){
+    html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>기안자</th><th>거래처</th><th class="num">금액</th><th>상태</th></tr></thead><tbody>';
+    rows.forEach(function(r){ html += pendingRow(r); });
+  } else {
+    html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>거래처</th><th class="num">금액</th><th>상태</th><th>제출일</th></tr></thead><tbody>';
+    rows.forEach(function(r){ html += docRow(r); });
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+function inboxRow(r){
+  var actor = (STATE.user || {}).email || '';
+  var claimed = r.claimedBy || '';
+  var claimDisplay = '';
+  if(claimed){
+    if(claimed === actor){
+      claimDisplay = '<span class="claim-info">내가 점유 중</span>';
+    } else {
+      claimDisplay = '<span class="claim-info other">' + escHtml(claimed) + ' 작업 중</span>';
+    }
+  } else {
+    claimDisplay = '<span style="color:var(--ink-mute);font-size:11px;">대기 중</span>';
+  }
+  var canPickup = !claimed || claimed === actor;
+  return '<tr>'
+    + '<td><span class="docno">' + escHtml(r.docNo) + '</span></td>'
+    + '<td>' + escHtml(r.subject) + '</td>'
+    + '<td>' + escHtml(r.drafter) + ' <span style="color:var(--ink-mute);font-size:11px;">(' + escHtml(r.dept) + ')</span></td>'
+    + '<td>' + escHtml(r.vendorName) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td>' + escHtml(r.submitAt) + '</td>'
+    + '<td>' + claimDisplay + '</td>'
+    + '<td>' + (canPickup ?
+        '<button class="pickup-btn" data-pickup="' + escAttr(r.token) + '">' + (claimed === actor ? '계속 작업' : 'PRC 생성') + '</button>'
+        : '<button class="pickup-btn" disabled>다른 담당자</button>')
+    + '</td></tr>';
+}
+
+function myPrcRow(r){
+  var type = r._type === 'claimed_req' ? 'REQ(점유)' : 'PRC';
+  var typeClass = r._type === 'claimed_req' ? 'docno' : 'docno prc';
+  var actionBtn = '';
+  if(r._type === 'claimed_req'){
+    actionBtn = '<button class="pickup-btn" data-prc-resume="' + escAttr(r.token) + '">계속 작성</button>';
+  }
+  return '<tr class="row-clickable" data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '">'
+    + '<td><span class="' + typeClass + '">' + type + '</span></td>'
+    + '<td><span class="docno' + (r._type !== 'claimed_req' ? ' prc' : '') + '">' + escHtml(r.docNo) + '</span></td>'
+    + '<td>' + escHtml(r.subject) + '</td>'
+    + '<td>' + escHtml(r.vendorName) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td>' + statusBadge(r.status) + '</td>'
+    + '<td>' + actionBtn + '</td>'
+    + '</tr>';
+}
+
+function pendingRow(r){
+  return '<tr class="row-clickable" data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '">'
+    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docType) + '</span></td>'
+    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docNo) + '</span></td>'
+    + '<td>' + escHtml(r.subject) + '</td>'
+    + '<td>' + escHtml(r.drafter) + '</td>'
+    + '<td>' + escHtml(r.vendorName) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td>' + statusBadge(r.status) + '</td>'
+    + '</tr>';
+}
+
+function docRow(r){
+  return '<tr class="row-clickable" data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '">'
+    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docType) + '</span></td>'
+    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docNo) + '</span></td>'
+    + '<td>' + escHtml(r.subject) + '</td>'
+    + '<td>' + escHtml(r.vendorName) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td>' + statusBadge(r.status) + '</td>'
+    + '<td>' + escHtml(r.submitAt) + '</td>'
+    + '</tr>';
+}
+
+// ─── PRC 픽업 ─────────────────────────────
+// v2.1: 토스트 + setTimeout(600ms) 경쟁 조건 제거
+//       → 모달 기반 처리 (페이지 전환 완료까지 모달 유지, 백드롭으로 입력 차단)
+var PKMODAL = {
+  el: null, body: null, footer: null, title: null,
+  stepTimers: [],
+  parentToken: null,
+};
+
+function pkmodalInit(){
+  if(PKMODAL.el) return;
+  PKMODAL.el     = document.getElementById('pkmodal-backdrop');
+  PKMODAL.body   = document.getElementById('pkmodal-body');
+  PKMODAL.footer = document.getElementById('pkmodal-footer');
+  PKMODAL.title  = document.getElementById('pkmodal-title');
+}
+
+function pkmodalOpen(){
+  pkmodalInit();
+  PKMODAL.el.classList.add('show');
+  PKMODAL.el.setAttribute('aria-hidden','false');
+}
+
+function pkmodalClose(){
+  pkmodalInit();
+  PKMODAL.el.classList.remove('show');
+  PKMODAL.el.setAttribute('aria-hidden','true');
+  pkmodalClearStepTimers();
+}
+
+function pkmodalClearStepTimers(){
+  for(var i = 0; i < PKMODAL.stepTimers.length; i++){
+    clearTimeout(PKMODAL.stepTimers[i]);
+  }
+  PKMODAL.stepTimers = [];
+}
+
+function pkmodalSetTitle(text){ PKMODAL.title.textContent = text; }
+function pkmodalSetFooter(html){
+  PKMODAL.footer.innerHTML = html || '';
+  PKMODAL.footer.className = 'pkmodal-footer' + (html ? '' : ' empty');
+}
+
+// 처리 중 화면 (스피너 + 4단계 진행 표시)
+// step: 'lock' | 'verify' | 'commit' | 'navigate'
+function pkmodalRenderProcessing(step){
+  pkmodalSetTitle('PRC 픽업 처리 중');
+  pkmodalSetFooter('');
+  var steps = [
+    { key:'lock',     label:'구매팀 락(Lock) 점유 요청' },
+    { key:'verify',   label:'REQ 상태 및 권한 확인' },
+    { key:'commit',   label:'점유자 정보 기록' },
+    { key:'navigate', label:'PRC 작성 화면으로 이동' }
+  ];
+  var idx = 0;
+  for(var i = 0; i < steps.length; i++){ if(steps[i].key === step){ idx = i; break; } }
+
+  var html = '<div class="pkmodal-spinner"></div>'
+    + '<p class="pkmodal-message">픽업 처리 중...</p>'
+    + '<p class="pkmodal-detail">잠시만 기다려 주세요. 완료되면 자동으로 화면이 전환됩니다.</p>'
+    + '<div class="pkmodal-steps">';
+  for(var j = 0; j < steps.length; j++){
+    var cls = '';
+    if(j < idx) cls = 'done';
+    else if(j === idx) cls = 'active';
+    html += '<div class="pkmodal-step ' + cls + '"><div class="pkmodal-step-dot"></div>'
+         + escHtml(steps[j].label) + '</div>';
+  }
+  html += '</div>';
+  PKMODAL.body.innerHTML = html;
+}
+
+// 성공 화면
+function pkmodalRenderSuccess(res){
+  pkmodalSetTitle('픽업 완료');
+  var claimedBy = (res && res.claimedBy) ? res.claimedBy : '';
+  var claimedAt = (res && res.claimedAt) ? res.claimedAt : '';
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-success"><svg viewBox="0 0 24 24"><polyline points="5 12 10 17 19 8"/></svg></div>'
+    + '<p class="pkmodal-message ok">픽업 완료</p>'
+    + '<div class="pkmodal-info">'
+      + '<div class="pkmodal-info-row"><span class="lbl">점유자</span><span class="val">' + escHtml(claimedBy) + '</span></div>'
+      + '<div class="pkmodal-info-row"><span class="lbl">점유 시각</span><span class="val">' + escHtml(claimedAt) + '</span></div>'
+      + '<div class="pkmodal-info-row"><span class="lbl">다음 단계</span><span class="val">PRC 작성 화면으로 이동</span></div>'
+    + '</div>'
+    + '<p class="pkmodal-detail pkmodal-detail-row" id="pkmodal-success-status">'
+      + '<span class="pkmodal-spinner sm"></span>'
+      + 'PRC 작성 화면을 여는 중...'
+    + '</p>';
+  // 사용자 클릭 컨텍스트에서 navigation을 보장하기 위한 fallback 버튼 (항상 표시)
+  pkmodalSetFooter('<button type="button" class="pkmodal-btn primary" onclick="pickupGoToPrc()">PRC 작성 화면으로 이동</button>');
+}
+
+// PRC 작성 화면으로 이동
+// 두 경로에서 호출됨:
+//   1) 자동 시도 (setTimeout 콜백) — user activation 만료 시 SecurityError throw → catch로 안내 텍스트 갱신
+//   2) 사용자가 모달 버튼 클릭 — fresh activation 보장 → 항상 성공
+function pickupGoToPrc(){
+  var token = PKMODAL.parentToken;
+  if(!token) return;
+  try {
+    window.top.location.href = WEBAPP_URL + '?action=prc&parentId=' + encodeURIComponent(token);
+  } catch(err){
+    // 자동 nav가 user activation 만료로 차단됨 — 사용자에게 버튼 클릭 유도
+    var statusEl = document.getElementById('pkmodal-success-status');
+    if(statusEl){
+      statusEl.innerHTML =
+        '<span style="color:var(--danger);font-weight:600;">⚠ 자동 전환이 차단되었습니다.</span>'
+        + '<br><span style="color:var(--ink-mute);">아래 버튼을 눌러 PRC 작성 화면으로 이동해 주세요.</span>';
+    }
+  }
+}
+
+// 실패 화면 (claimed / not-req / auth / network 등)
+function pkmodalRenderError(opts){
+  pkmodalSetTitle('픽업 실패');
+  var msg     = opts.message || '알 수 없는 오류';
+  var infoRows = opts.infoRows || [];
+  var isNetwork = !!opts.isNetwork;
+  var canRetry  = !!opts.canRetry;
+
+  var infoHtml = '';
+  if(infoRows.length){
+    infoHtml = '<div class="pkmodal-info">';
+    for(var i = 0; i < infoRows.length; i++){
+      infoHtml += '<div class="pkmodal-info-row"><span class="lbl">' + escHtml(infoRows[i][0])
+               + '</span><span class="val">' + escHtml(infoRows[i][1]) + '</span></div>';
+    }
+    infoHtml += '</div>';
+  }
+
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-error">!</div>'
+    + '<p class="pkmodal-message err">' + escHtml(msg) + '</p>'
+    + (opts.detail ? '<p class="pkmodal-detail">' + escHtml(opts.detail) + '</p>' : '')
+    + infoHtml;
+
+  var footer = '<button type="button" class="pkmodal-btn secondary" onclick="pkmodalClose()">닫기</button>';
+  if(canRetry){
+    footer += '<button type="button" class="pkmodal-btn primary" onclick="pickupRetry()">다시 시도</button>';
+  } else if(!isNetwork){
+    // 점유 충돌·상태 오류 → 인박스 새로고침이 유효한 액션
+    footer += '<button type="button" class="pkmodal-btn primary" onclick="pkmodalClose();loadHome();">인박스 새로고침</button>';
+  }
+  pkmodalSetFooter(footer);
+}
+
+// 재시도 (네트워크 오류 시)
+function pickupRetry(){
+  if(PKMODAL.parentToken) pickupReq(PKMODAL.parentToken);
+}
+
+function pickupReq(parentToken){
+  if(!confirm('이 REQ를 픽업하여 PRC 생성을 시작하시겠습니까?\n(30초간 락이 점유되며, 동안 다른 담당자는 이 REQ를 픽업할 수 없습니다.)')) return;
+
+  PKMODAL.parentToken = parentToken;
+  pkmodalOpen();
+  pkmodalClearStepTimers();
+  pkmodalRenderProcessing('lock');
+
+  // 응답 대기 동안 단계 표시를 시각적으로 진행 (실제 서버 단계와 1:1 대응은 아니며 UX용)
+  // 첫 진입 cold start (~2-3초) 시 사용자에게 "멈춘 게 아님"을 보여주기 위함
+  PKMODAL.stepTimers.push(setTimeout(function(){ pkmodalRenderProcessing('verify'); }, 500));
+  PKMODAL.stepTimers.push(setTimeout(function(){ pkmodalRenderProcessing('commit'); }, 1400));
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      pkmodalClearStepTimers();
+      if(res && res.ok){
+        // 최종 단계 표시 → 성공 화면 → 페이지 전환
+        // 페이지 전환은 모달이 열린 상태에서 트리거됨. 새 페이지 로드 시 자연스럽게 사라짐.
+        pkmodalRenderProcessing('navigate');
+        setTimeout(function(){
+          pkmodalRenderSuccess(res);
+          // 자동 전환 시도 (warm 상태에서는 성공, cold start로 activation 만료 시엔 catch로 빠져 안내 텍스트 갱신)
+          // 어느 경우든 모달의 [PRC 작성 화면으로 이동] 버튼이 fallback으로 항상 작동
+          setTimeout(function(){
+            pickupGoToPrc();
+          }, 700);
+        }, 250);
+      } else {
+        var msg = (res && res.message) ? res.message : '알 수 없는 오류';
+        var info = [];
+        if(res && res.claimedBy){
+          info.push(['점유자', res.claimedBy]);
+          if(res.claimedAt) info.push(['점유 시각', res.claimedAt]);
+        }
+        pkmodalRenderError({
+          message: '픽업 실패',
+          detail: msg,
+          infoRows: info,
+          canRetry: false
+        });
+      }
+    })
+    .withFailureHandler(function(err){
+      pkmodalClearStepTimers();
+      var emsg = (err && err.message) ? err.message : String(err);
+      pkmodalRenderError({
+        message: '네트워크 오류',
+        detail: emsg + '\n잠시 후 다시 시도해 주세요.',
+        isNetwork: true,
+        canRetry: true
+      });
+    })
+    .claimRequestForClient({ parentToken: parentToken });
+}
+
+// ─── 보조 ─────────────────────────────
+function pageHead(title, sub){
+  return '<div class="page-head"><div><div class="page-title">' + escHtml(title) + '</div>'
+    + (sub ? '<div class="page-sub">' + escHtml(sub) + '</div>' : '')
+    + '</div><div><button class="btn btn-primary" onclick="loadHome()">새로고침</button></div></div>';
+}
+function kpi(label, value, klass){
+  return '<div class="kpi-card ' + (klass || '') + '"><div class="kpi-label">' + escHtml(label) + '</div>'
+    + '<div class="kpi-value">' + value + '<span class="kpi-unit"> 건</span></div></div>';
+}
+function tab(key, label, count){
+  return '<div class="tab ' + (STATE.myDocsTab === key ? 'active' : '') + '" data-tab="' + key + '">'
+    + escHtml(label) + ' <span style="opacity:0.6;font-weight:500;">(' + count + ')</span></div>';
+}
+function statusBadge(status){
+  var cls = 'unknown';
+  if(status === '검토중') cls = 'review';
+  else if(status.indexOf('결재중') >= 0) cls = 'in_appr';
+  else if(status === '최종승인' || status === '최종승인(PRC)') cls = 'final';
+  else if(status === '반려') cls = 'rejected';
+  else if(status === '재상신') cls = 'resubmit';
+  else if(status === 'PRC생성됨') cls = 'prc_made';
+  return '<span class="status ' + cls + '">' + escHtml(status) + '</span>';
+}
+function fmtAmt(n){
+  if(!n) return '-';
+  return Number(n).toLocaleString('ko-KR') + ' 원';
+}
+function escHtml(s){
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function escAttr(s){ return escHtml(s).replace(/'/g, '&#39;'); }
+
+function toast(type, msg){
+  var el = document.getElementById('toast');
+  el.className = 'toast ' + type + ' show';
+  el.textContent = msg;
+  setTimeout(function(){ el.className = 'toast'; }, 3000);
+}
+function showError(msg){
+  document.getElementById('content').innerHTML =
+    '<div class="role-empty-state"><h3>오류 발생</h3><div>' + escHtml(msg) + '</div>'
+    + '<div style="margin-top:16px;"><button class="btn btn-primary" onclick="loadHome()">다시 시도</button></div></div>';
+}
+
+boot();
+</script>
+</body>
+</html>

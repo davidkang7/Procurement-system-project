@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>관리자 — 강제 락 해제</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1a1d23; --ink-soft: #4a5260; --ink-mute: #8b94a3;
+    --line: #e3e6eb; --line-soft: #eef0f3;
+    --accent: #1a6fc4; --accent-soft: #e8f1fb;
+    --procurement: #6a3eb5; --procurement-soft: #f0eafa;
+    --admin: #b91c1c; --admin-soft: #fdecec;
+    --warn: #d97706; --warn-soft: #fef3e2;
+    --danger: #d64541; --danger-soft: #fdecec;
+    --ok: #27ae60; --ok-soft: #e8f6ee;
+    --neutral-soft: #f0f2f5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.55; min-height: 100vh; padding: 20px 28px; }
+
+  /* 페이지 헤더 */
+  .page-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .page-title { font-size: 18px; font-weight: 700; }
+  .page-title .url-hint { font-size: 13px; color: var(--ink-mute); font-weight: 500; }
+  .page-sub { color: var(--ink-mute); font-size: 12px; margin-top: 3px; }
+  .back-link { color: var(--accent); text-decoration: none; font-size: 12px; font-weight: 600; }
+  .back-link:hover { text-decoration: underline; }
+
+  /* 버튼 */
+  .btn { padding: 7px 14px; border-radius: 5px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn:hover:not(:disabled) { background: var(--neutral-soft); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover:not(:disabled) { background: #1559a3; }
+  .btn-warning { background: var(--warn); color: #fff; border-color: var(--warn); }
+  .btn-warning:hover:not(:disabled) { background: #b45f04; }
+  .btn-ghost { background: transparent; border-color: var(--line); color: var(--ink-soft); }
+
+  /* 검색 필터 */
+  .filter-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+  .filter-row { display: grid; grid-template-columns: 1.4fr 1.4fr auto auto auto; gap: 10px; align-items: end; }
+  .filter-field label { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .filter-field input { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px; }
+  .filter-check { display: flex; align-items: center; gap: 6px; padding-bottom: 7px; }
+  .filter-check input { width: 15px; height: 15px; }
+  .filter-check label { font-size: 12px; font-weight: 600; color: var(--ink-soft); text-transform: none; letter-spacing: 0; margin: 0; cursor: pointer; }
+
+  /* 테이블 */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; overflow: hidden; }
+  .panel-head { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: #fbfbfc; }
+  .panel-title { font-weight: 700; font-size: 13.5px; }
+  .panel-sub { color: var(--ink-mute); font-size: 11.5px; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 9px 14px; color: var(--ink-mute); font-size: 11px; font-weight: 700; text-transform: uppercase; background: #fbfbfc; border-bottom: 1px solid var(--line); }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.row-clickable { cursor: pointer; }
+  tr.row-clickable:hover { background: var(--warn-soft); }
+  tr.row-selected { background: var(--warn-soft); }
+  tr.row-abnormal { background: var(--neutral-soft); color: var(--ink-mute); cursor: not-allowed; }
+  tr.row-abnormal:hover { background: var(--neutral-soft); }
+  tr.row-abnormal .docno { color: var(--ink-mute); }
+
+  /* 해제 완료 후 페이드아웃 */
+  tr.row-released {
+    background: linear-gradient(to right, #e8f6ee 0%, #f3fbf6 100%) !important;
+    box-shadow: inset 4px 0 0 0 var(--ok);
+    animation: releasedPulse 1.2s ease-out;
+  }
+  @keyframes releasedPulse {
+    0% { background: #d4f0e0; } 50% { background: #eafaf1; } 100% { background: #d4f0e0; }
+  }
+
+  .docno { color: var(--accent); font-weight: 600; }
+  td.mono { font-family: 'Consolas', monospace; font-size: 11.5px; }
+
+  /* 점유자 / 경과시간 / TTL 배지 */
+  .claimer { font-weight: 600; color: var(--ink); }
+  .claimer-mail { color: var(--ink-mute); font-size: 11px; }
+  .elapsed { font-variant-numeric: tabular-nums; }
+  .ttl-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+  .ttl-badge.fresh  { background: var(--ok-soft); color: var(--ok); }
+  .ttl-badge.aging  { background: var(--warn-soft); color: var(--warn); }
+  .ttl-badge.stale  { background: var(--danger-soft); color: var(--danger); }
+  .badge-abnormal { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-weight: 700; background: var(--admin); color: #fff; margin-left: 6px; }
+
+  /* 액션 바 */
+  .action-bar { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; display: flex; align-items: end; gap: 12px; }
+  .reason-field { flex: 1; }
+  .reason-field label { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .reason-field label .req { color: var(--danger); margin-left: 2px; }
+  .reason-field textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px; resize: vertical; min-height: 38px; }
+  .selected-info { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 4px; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--warn); min-width: 220px; }
+  .selected-info.empty { background: var(--neutral-soft); border-color: var(--line); color: var(--ink-mute); }
+
+  /* 모달 */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 9000; align-items: center; justify-content: center; padding: 20px; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--panel); border-radius: 8px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; }
+  .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--warn-soft); }
+  .modal-title { font-weight: 700; font-size: 15px; color: var(--warn); }
+  .modal-body { padding: 18px 20px; font-size: 13px; line-height: 1.6; overflow-y: auto; }
+  .modal-foot { padding: 14px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; background: #fbfbfc; }
+  .confirm-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed var(--line-soft); }
+  .confirm-row:last-child { border-bottom: 0; }
+  .confirm-key { color: var(--ink-mute); font-weight: 600; font-size: 11.5px; }
+  .confirm-val { color: var(--ink); font-weight: 600; max-width: 280px; text-align: right; word-break: break-word; }
+  .confirm-warn { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 4px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: var(--warn); font-weight: 600; }
+  .confirm-warn ul { margin: 6px 0 0 18px; padding: 0; }
+  .confirm-warn ul li { margin: 3px 0; font-weight: 600; color: var(--ink); }
+  .confirm-notify { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .confirm-notify strong { color: var(--ink); }
+  .confirm-notify-empty { background: var(--neutral-soft); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--ink-mute); font-weight: 500; }
+
+  /* 로딩 / 빈 상태 */
+  .loading { padding: 40px; text-align: center; color: var(--ink-mute); font-size: 13px; }
+  .loading::before { content: '⏳'; display: block; font-size: 24px; margin-bottom: 8px; }
+  .empty-state { padding: 40px 20px; text-align: center; color: var(--ink-mute); font-size: 13px; }
+  .empty-state::before { content: '🔓'; display: block; font-size: 28px; margin-bottom: 10px; }
+  .error-state { padding: 24px; text-align: center; color: var(--danger); font-size: 13px; background: var(--danger-soft); border-radius: 4px; }
+
+  /* 토스트 */
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 11px 22px; border-radius: 6px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none; max-width: 80%; }
+  .toast.show { opacity: 1; }
+  .toast.ok { background: var(--ok); color: #fff; }
+  .toast.err { background: var(--danger); color: #fff; }
+
+  /* 진행 인디케이터 (모달 안) */
+  .progress-overlay { display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.85); align-items: center; justify-content: center; z-index: 10; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+  .progress-overlay.show { display: flex; }
+
+  /* 정보 배너 */
+  .info-banner { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 4px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: var(--ink-soft); line-height: 1.6; }
+  .info-banner strong { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <div class="page-title">🔓 강제 락 해제 <span class="url-hint">/ ?action=admin&fn=force_release_lock</span></div>
+    <div class="page-sub">PRC 작성을 위해 점유된 REQ 락을 관리자 권한으로 강제 해제합니다. 해제 시 인박스에 다시 노출되어 다른 구매팀원이 픽업할 수 있습니다.</div>
+  </div>
+  <a class="back-link" id="back-link" href="#">← 홈으로</a>
+</div>
+
+<div class="info-banner">
+  💡 <strong>락이란?</strong> 구매팀원이 인박스에서 REQ를 픽업하면 해당 REQ가 점유(잠금)되어 다른 사람이 동시에 PRC를 만들지 못하게 됩니다.
+  점유자가 작업을 끝내지 못하거나(외근·휴가·퇴사 등) 24시간(TTL) 자동 만료를 기다릴 수 없을 때, 관리자가 이 화면에서 락을 즉시 해제할 수 있습니다.
+</div>
+
+<!-- 필터 -->
+<div class="filter-panel">
+  <div class="filter-row">
+    <div class="filter-field">
+      <label>문서번호</label>
+      <input type="text" id="f-docno" placeholder="예: REQ-2026" onkeydown="if(event.key==='Enter')searchLocks()">
+    </div>
+    <div class="filter-field">
+      <label>점유자 (이메일)</label>
+      <input type="text" id="f-claimer" placeholder="예: kskim" onkeydown="if(event.key==='Enter')searchLocks()">
+    </div>
+    <div class="filter-check">
+      <input type="checkbox" id="f-stale" onchange="searchLocks()">
+      <label for="f-stale">TTL 만료(24h↑)만</label>
+    </div>
+    <button class="btn btn-primary" onclick="searchLocks()">검색</button>
+    <button class="btn btn-ghost" onclick="resetFilters()">초기화</button>
+  </div>
+</div>
+
+<!-- 결과 테이블 -->
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <span class="panel-title">락 점유 중인 REQ</span>
+      <span class="panel-sub" id="result-count" style="margin-left:8px;"></span>
+    </div>
+    <div class="panel-sub">💡 행을 클릭해 선택하세요. 회색 행은 비정상(PRC 락)으로 이 화면에서 해제 불가합니다.</div>
+  </div>
+  <div id="table-container">
+    <div class="loading">락 목록을 불러오는 중...</div>
+  </div>
+</div>
+
+<!-- 액션 바 -->
+<div class="action-bar">
+  <div class="selected-info empty" id="selected-info">선택된 문서가 없습니다</div>
+  <div class="reason-field">
+    <label>해제 사유<span class="req">*</span> (관리자 액션 필수 기록 항목)</label>
+    <textarea id="reason-input" placeholder="예: 점유자 긴급 외근으로 다른 담당자에게 양도 필요" oninput="onReasonInput(this.value)"></textarea>
+  </div>
+  <button class="btn btn-warning" id="execute-btn" disabled onclick="openConfirm()">
+    🔓 강제 해제
+  </button>
+</div>
+
+<!-- 확인 모달 -->
+<div class="modal-overlay" id="confirm-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title">⚠ 강제 락 해제 확인</div>
+    </div>
+    <div class="modal-body" id="confirm-modal-body"></div>
+    <div class="progress-overlay" id="confirm-progress">⏳ 락 해제 처리 중...</div>
+    <div class="modal-foot">
+      <button class="btn" id="confirm-cancel-btn" onclick="closeConfirm()">취소</button>
+      <button class="btn btn-warning" id="confirm-exec-btn" onclick="executeRelease()">강제 해제 실행</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// 상태
+// ============================================================
+var WEBAPP_URL = '<?= webappUrl ?>';
+var state = {
+  locks: [],
+  selectedToken: null,
+  reason: '',
+  totalScanned: 0,
+  ttlHours: 24,
+};
+
+// ============================================================
+// 초기화
+// ============================================================
+document.getElementById('back-link').href = WEBAPP_URL;
+
+window.addEventListener('DOMContentLoaded', function() {
+  loadLocks({});
+});
+
+// ============================================================
+// 서버 호출
+// ============================================================
+function loadLocks(filter) {
+  document.getElementById('table-container').innerHTML = '<div class="loading">락 목록을 불러오는 중...</div>';
+
+  if (typeof google === 'undefined' || !google.script || !google.script.run) {
+    document.getElementById('table-container').innerHTML =
+      '<div class="error-state">Google Apps Script 환경에서만 동작합니다.</div>';
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res && res.ok) {
+        state.locks = res.locks || [];
+        state.totalScanned = res.totalScanned || 0;
+        state.ttlHours = res.ttlHours || 24;
+        state.selectedToken = null;
+        renderTable();
+        updateSelectionUI();
+      } else {
+        document.getElementById('table-container').innerHTML =
+          '<div class="error-state">목록 조회 실패: ' + escHtml(res && res.message || '알 수 없는 오류') + '</div>';
+      }
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('table-container').innerHTML =
+        '<div class="error-state">목록 조회 실패: ' + escHtml(err && err.message ? err.message : err) + '</div>';
+    })
+    .adminListClaimedLocksForClient(filter);
+}
+
+// ============================================================
+// 검색 / 초기화
+// ============================================================
+function searchLocks() {
+  var filter = {
+    docNoLike:   document.getElementById('f-docno').value.trim(),
+    claimerLike: document.getElementById('f-claimer').value.trim(),
+    staleOnly:   document.getElementById('f-stale').checked,
+  };
+  loadLocks(filter);
+}
+
+function resetFilters() {
+  document.getElementById('f-docno').value = '';
+  document.getElementById('f-claimer').value = '';
+  document.getElementById('f-stale').checked = false;
+  loadLocks({});
+}
+
+// ============================================================
+// 테이블 렌더링
+// ============================================================
+function renderTable() {
+  var locks = state.locks;
+
+  var countText = locks.length + '건';
+  if (state.totalScanned) {
+    countText += ' (전체 ' + state.totalScanned + '행 스캔, TTL ' + state.ttlHours + 'h)';
+  }
+  document.getElementById('result-count').textContent = countText;
+
+  if (locks.length === 0) {
+    document.getElementById('table-container').innerHTML =
+      '<div class="empty-state">현재 락이 걸린 REQ가 없습니다.</div>';
+    return;
+  }
+
+  var html = '<table><thead><tr>'
+    + '<th>문서번호</th>'
+    + '<th>기안자</th>'
+    + '<th>거래처</th>'
+    + '<th style="text-align:right;">금액</th>'
+    + '<th>점유자</th>'
+    + '<th>점유 시각</th>'
+    + '<th>경과</th>'
+    + '<th>TTL 상태</th>'
+    + '</tr></thead><tbody>';
+
+  locks.forEach(function(lk) { html += renderRow(lk); });
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+function renderRow(lk) {
+  var isSelected = state.selectedToken === lk.token;
+  var isReleased = !!lk._justReleased;
+  var cls;
+  if (lk.isAbnormal) cls = 'row-abnormal';
+  else if (isReleased) cls = 'row-released';
+  else if (isSelected) cls = 'row-clickable row-selected';
+  else cls = 'row-clickable';
+
+  var onclick = lk.isAbnormal ? '' : 'onclick="selectLock(\'' + escAttr(lk.token) + '\')"';
+  var amountStr = (lk.amount || 0).toLocaleString();
+  var ttl = ttlBadge(lk);
+  var claimerShort = lk.claimedBy ? lk.claimedBy.split('@')[0] : '-';
+
+  return '<tr class="' + cls + '" ' + onclick + '>'
+    + '<td class="mono"><span class="docno">' + escHtml(lk.docNo) + '</span>'
+    +   (lk.isAbnormal ? '<span class="badge-abnormal">⚠ PRC 락 (이상)</span>' : '')
+    + '</td>'
+    + '<td>' + escHtml(lk.drafter) + '</td>'
+    + '<td>' + escHtml(lk.vendor) + '</td>'
+    + '<td style="text-align:right;font-variant-numeric:tabular-nums;">' + amountStr + '</td>'
+    + '<td><span class="claimer">' + escHtml(claimerShort) + '</span> '
+    +   '<span class="claimer-mail">' + escHtml(lk.claimedBy) + '</span></td>'
+    + '<td class="mono">' + escHtml(lk.claimedAt || '-') + '</td>'
+    + '<td class="elapsed">' + formatElapsed(lk.elapsedHours) + '</td>'
+    + '<td>' + ttl + '</td>'
+    + '</tr>';
+}
+
+function ttlBadge(lk) {
+  if (lk.isStale) {
+    return '<span class="ttl-badge stale">만료 (' + lk.elapsedHours + 'h)</span>';
+  }
+  // TTL의 75% 이상 경과하면 aging
+  var ratio = lk.elapsedHours / (state.ttlHours || 24);
+  if (ratio >= 0.75) {
+    return '<span class="ttl-badge aging">임박</span>';
+  }
+  return '<span class="ttl-badge fresh">정상</span>';
+}
+
+function formatElapsed(hours) {
+  if (!hours || hours < 1) return '1시간 미만';
+  if (hours < 24) return hours + '시간';
+  var days = Math.floor(hours / 24);
+  var rem = hours % 24;
+  return days + '일' + (rem ? ' ' + rem + '시간' : '');
+}
+
+// ============================================================
+// 선택 / 사유 입력
+// ============================================================
+function selectLock(token) {
+  state.selectedToken = token;
+  renderTable();
+  updateSelectionUI();
+}
+
+function onReasonInput(val) {
+  state.reason = val;
+  updateExecuteButton();
+}
+
+function updateSelectionUI() {
+  var sel = findLock(state.selectedToken);
+  var info = document.getElementById('selected-info');
+  if (sel) {
+    info.classList.remove('empty');
+    info.innerHTML = '선택: <span style="font-family:Consolas,monospace;">' + escHtml(sel.docNo) + '</span>'
+      + ' <span style="font-weight:500;">(' + escHtml(sel.claimedBy.split('@')[0]) + ' 점유)</span>';
+  } else {
+    info.classList.add('empty');
+    info.textContent = '선택된 문서가 없습니다';
+  }
+  updateExecuteButton();
+}
+
+function updateExecuteButton() {
+  var btn = document.getElementById('execute-btn');
+  if (!btn) return;
+  btn.disabled = !(state.selectedToken && state.reason.trim().length > 0);
+}
+
+function findLock(token) {
+  if (!token) return null;
+  for (var i = 0; i < state.locks.length; i++) {
+    if (state.locks[i].token === token) return state.locks[i];
+  }
+  return null;
+}
+
+// ============================================================
+// 확인 모달 (Q2: 손실 경고 + 점유자 통지 안내)
+// ============================================================
+function openConfirm() {
+  var sel = findLock(state.selectedToken);
+  if (!sel || !state.reason.trim()) return;
+
+  // 영향 경고 (Q2 결정 — 관리자 화면 경고)
+  var warnBlock = '<div class="confirm-warn">'
+    + '이 작업은 다음 영향을 미칩니다:'
+    + '<ul>'
+    +   '<li>점유자 <strong>' + escHtml(sel.claimedBy) + '</strong>님이 PRC 작성 화면에서 입력 중인 내용이 저장되지 않을 수 있습니다.</li>'
+    +   '<li>이 REQ는 즉시 구매팀 인박스에 다시 노출되어 다른 담당자가 픽업할 수 있게 됩니다.</li>'
+    + '</ul>'
+    + '</div>';
+
+  // 점유자 통지 안내 (Q3: 점유자에게만, 관리자 본인 제외는 서버에서 최종 처리)
+  var notifyBlock = '<div class="confirm-notify">'
+    + '📧 강제 해제 후 점유자 <strong>' + escHtml(sel.claimedBy) + '</strong>님에게 해제 통지 이메일이 발송됩니다.'
+    + '<br><span style="font-weight:500;font-size:11px;color:var(--ink-mute);">※ 점유자가 관리자 본인인 경우 발송되지 않습니다.</span>'
+    + '</div>';
+
+  document.getElementById('confirm-modal-body').innerHTML =
+    '<div style="margin-bottom:12px;">아래 REQ의 PRC 작성 락을 강제 해제하시겠습니까?</div>'
+    + '<div class="confirm-row"><span class="confirm-key">문서번호</span><span class="confirm-val" style="font-family:Consolas,monospace;">' + escHtml(sel.docNo) + '</span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">기안자</span><span class="confirm-val">' + escHtml(sel.drafter) + '</span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">현재 점유자</span><span class="confirm-val">' + escHtml(sel.claimedBy) + '</span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">점유 시각</span><span class="confirm-val">' + escHtml(sel.claimedAt || '-') + ' (' + formatElapsed(sel.elapsedHours) + ' 경과)</span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">해제 사유</span><span class="confirm-val">' + escHtml(state.reason) + '</span></div>'
+    + warnBlock + notifyBlock;
+
+  document.getElementById('confirm-modal').classList.add('show');
+}
+
+function closeConfirm() {
+  document.getElementById('confirm-modal').classList.remove('show');
+  document.getElementById('confirm-progress').classList.remove('show');
+  document.getElementById('confirm-exec-btn').disabled = false;
+  document.getElementById('confirm-cancel-btn').disabled = false;
+}
+
+// ============================================================
+// 해제 실행
+// ============================================================
+function executeRelease() {
+  var sel = findLock(state.selectedToken);
+  if (!sel || !state.reason.trim()) return;
+
+  document.getElementById('confirm-progress').classList.add('show');
+  document.getElementById('confirm-exec-btn').disabled = true;
+  document.getElementById('confirm-cancel-btn').disabled = true;
+
+  if (typeof google === 'undefined' || !google.script || !google.script.run) {
+    closeConfirm();
+    toast('Google Apps Script 환경에서만 동작합니다.', 'err');
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      closeConfirm();
+      if (res && res.ok) {
+        var token = sel.token;
+        var docNo = sel.docNo;
+
+        // 목록에서 제거 (락이 풀렸으므로 더 이상 점유 목록에 없음)
+        state.locks = state.locks.filter(function(lk) { return lk.token !== token; });
+
+        state.selectedToken = null;
+        state.reason = '';
+        document.getElementById('reason-input').value = '';
+        renderTable();
+        updateSelectionUI();
+
+        var msg;
+        if (res.skipped) {
+          msg = docNo + ' 락이 이미 해제되어 있었습니다';
+        } else {
+          msg = docNo + ' 락 해제 완료';
+          if (res.previousClaimer) {
+            msg += ' (점유자 ' + res.previousClaimer.split('@')[0] + '에게 통지)';
+          }
+        }
+        toast(msg, 'ok');
+      } else {
+        toast('해제 실패: ' + (res && res.message || '알 수 없는 오류'), 'err');
+      }
+    })
+    .withFailureHandler(function(err) {
+      closeConfirm();
+      toast('해제 실패: ' + (err && err.message ? err.message : err), 'err');
+    })
+    .adminForceReleaseLockForClient({
+      token:  sel.token,
+      reason: state.reason,
+    });
+}
+
+// ============================================================
+// 유틸
+// ============================================================
+function toast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (type || 'ok');
+  setTimeout(function() { t.classList.remove('show'); }, 3500);
+}
+
+function escHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function escAttr(s) {
+  return escHtml(s).replace(/`/g, '&#96;');
+}
+</script>
+
+</body>
+</html>

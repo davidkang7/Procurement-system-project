@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>결재 처리</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.card{background:#fff;border-radius:10px;box-shadow:0 2px 16px rgba(0,0,0,.10);padding:36px 40px;max-width:480px;width:100%;}
+.logo{text-align:center;font-size:13px;color:#888;margin-bottom:8px;letter-spacing:1px;}
+.title{text-align:center;font-size:20px;font-weight:700;color:#111;margin-bottom:4px;}
+.doc-no{text-align:center;font-size:13px;color:#666;margin-bottom:24px;}
+.badge{display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:20px;}
+.badge.approve{background:#e8f5e9;color:#2e7d32;}
+.badge.reject{background:#fdecea;color:#c62828;}
+.info-box{background:#f9f9f9;border:1px solid #eee;border-radius:6px;padding:14px 16px;margin-bottom:20px;font-size:13px;line-height:1.8;}
+.info-box .row{display:flex;gap:8px;}
+.info-box .lbl{color:#888;min-width:70px;}
+.info-box .val{color:#111;font-weight:600;}
+.field{margin-bottom:16px;}
+.field label{display:block;font-size:12px;color:#666;margin-bottom:5px;font-weight:600;}
+.field textarea{width:100%;border:1px solid #ccc;border-radius:6px;padding:10px 12px;font-size:13px;color:#111;font-family:inherit;resize:vertical;}
+.field textarea:focus{outline:none;border-color:#666;}
+.btn-row{display:flex;gap:10px;}
+.btn{flex:1;padding:12px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;border:none;}
+.btn-approve{background:#27ae60;color:#fff;}
+.btn-approve:hover{background:#219a52;}
+.btn-reject{background:#d64541;color:#fff;border:2px solid #d64541;}
+.btn-reject:hover{background:#b03a37;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.result{text-align:center;padding:24px 0;}
+.result .icon{font-size:48px;margin-bottom:12px;}
+.result .msg{font-size:16px;font-weight:700;color:#111;margin-bottom:6px;}
+.result .sub{font-size:13px;color:#888;}
+.spinner{display:none;text-align:center;padding:20px 0;font-size:13px;color:#888;}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">구매품의 시스템</div>
+  <div class="title">결재 요청</div>
+  <div class="doc-no" id="doc-no-display"></div>
+  <div id="content-area">
+    <div class="spinner" id="spinner">처리 중...</div>
+    <div id="form-area">
+      <div class="info-box" id="info-box"></div>
+      <div class="field">
+        <label>의견 (선택사항)</label>
+        <textarea id="comment" rows="3" placeholder="승인 의견을 입력하세요."></textarea>
+      </div>
+      <div class="btn-row" id="btn-row">
+        <button class="btn btn-reject" id="reject-btn" onclick="decide('reject')">반 려</button>
+        <button class="btn btn-approve" onclick="decide('approve')">승 인</button>
+      </div>
+    </div>
+    <div id="result-area" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+  var TOKEN      = '<?= token ?>';
+  var DECISION   = '<?= decision ?>';
+  var DOC_NO     = '<?= docNo ?>';
+  var IDX        = parseInt('<?= approverIndex ?>') || 0;
+  var WEBAPP_URL = '<?!= webappUrl ?>';
+
+  var docNoEl = document.getElementById('doc-no-display');
+  if(docNoEl) docNoEl.textContent = '품의번호: ' + DOC_NO;
+
+  var infoHtml = [
+    '<div class="row"><span class="lbl">품의번호</span><span class="val">' + DOC_NO + '</span></div>',
+    '<div class="row"><span class="lbl">결재순서</span><span class="val">결재자 ' + (IDX + 1) + '</span></div>',
+  ].join('');
+  var infoEl = document.getElementById('info-box');
+  if(infoEl) infoEl.innerHTML = infoHtml;
+
+  if (DECISION === 'approve') {
+    var rejectBtn = document.getElementById('reject-btn');
+    if(rejectBtn) rejectBtn.style.display = 'none';
+    var badge = document.createElement('div');
+    badge.className = 'badge approve';
+    badge.textContent = '승인 요청 드립니다.';
+    badge.style.cssText = 'display:block;text-align:center;margin-bottom:16px;';
+    if(infoEl) infoEl.after(badge);
+  } else if (DECISION === 'reject') {
+    var approveBtn = document.querySelector('.btn-approve');
+    if(approveBtn) approveBtn.style.display = 'none';
+    var badge2 = document.createElement('div');
+    badge2.className = 'badge reject';
+    badge2.textContent = '반려 처리합니다.';
+    badge2.style.cssText = 'display:block;text-align:center;margin-bottom:16px;';
+    if(infoEl) infoEl.after(badge2);
+    var commentEl = document.getElementById('comment');
+    if(commentEl) commentEl.placeholder = '반려 사유를 입력해 주세요. (필수)';
+  }
+
+  function decide(decision) {
+    var commentEl = document.getElementById('comment');
+    var comment   = commentEl ? commentEl.value.trim() : '';
+
+    if(decision === 'reject' && !comment) {
+      alert('반려 시 사유를 입력해 주세요.');
+      if(commentEl) commentEl.focus();
+      return;
+    }
+
+    var formEl    = document.getElementById('form-area');
+    var spinnerEl = document.getElementById('spinner');
+    if(formEl)    formEl.style.display    = 'none';
+    if(spinnerEl) spinnerEl.style.display = 'block';
+
+    var payload = {
+      action:   'decide',
+      token:    TOKEN,
+      decision: decision,
+      comment:  comment,
+      idx:      IDX,
+    };
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if(spinnerEl) spinnerEl.style.display = 'none';
+        showResult(decision, res);
+      })
+      .withFailureHandler(function(err) {
+        if(spinnerEl) spinnerEl.style.display = 'none';
+        showResult('error', { ok: false, message: err.message || err.toString() });
+      })
+      .processDecisionFromClient(payload);
+  }
+
+  function showResult(decision, res) {
+    var area = document.getElementById('result-area');
+    if(!area) return;
+    area.style.display = 'block';
+    if (!res || !res.ok) {
+      area.innerHTML = '<div class="result"><div class="icon">⚠️</div><div class="msg">처리 실패</div><div class="sub">' + (res ? res.message : '오류가 발생했습니다.') + '</div></div>';
+      return;
+    }
+    if (decision === 'approve') {
+      area.innerHTML = '<div class="result"><div class="icon">✅</div><div class="msg">승인 완료</div><div class="sub">결재가 정상적으로 처리되었습니다.</div></div>';
+    } else if (decision === 'reject') {
+      area.innerHTML = '<div class="result"><div class="icon">🔴</div><div class="msg">반려 처리</div><div class="sub">기안자에게 반려 알림이 발송되었습니다.</div></div>';
+    }
+  }
+</script>
+</body>
+</html>

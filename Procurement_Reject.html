@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>반려 확인 및 재상신</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5f5f5;padding:20px;}
+.wrap{max-width:820px;margin:0 auto;}
+.sys-label{text-align:center;font-size:12px;color:#888;margin-bottom:6px;letter-spacing:1px;}
+.reject-banner{background:#FDECEA;border:1px solid #F5C2C2;border-radius:8px;padding:14px 18px;margin-bottom:18px;}
+.reject-banner .rb-title{font-size:14px;font-weight:700;color:#C62828;margin-bottom:8px;}
+.reject-banner .rb-row{display:flex;gap:8px;font-size:13px;margin-bottom:4px;}
+.reject-banner .rb-lbl{color:#888;min-width:64px;}
+.reject-banner .rb-val{color:#333;font-weight:500;}
+.hist-box{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:12px 16px;margin-bottom:18px;}
+.hist-title{font-size:12px;font-weight:700;color:#F57F17;margin-bottom:6px;}
+.hist-entry{font-size:11px;color:#555;line-height:1.8;border-bottom:1px solid #ffe082;padding-bottom:4px;margin-bottom:4px;}
+.hist-entry:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
+.info-banner{background:#E3F2FD;border:1px solid #90CAF9;border-radius:8px;padding:10px 14px;margin-bottom:18px;font-size:12px;color:#1565C0;line-height:1.6;}
+.form-card{background:#fff;border:1px solid #ddd;border-radius:10px;overflow:hidden;margin-bottom:16px;}
+.form-card-head{background:#f0f0f0;padding:9px 16px;font-size:12px;font-weight:700;color:#444;letter-spacing:0.8px;border-bottom:1px solid #ddd;}
+.form-card-body{padding:12px 16px;}
+.row{display:grid;gap:10px;margin-bottom:8px;}
+.row:last-child{margin-bottom:0;}
+.row.c2{grid-template-columns:repeat(2,minmax(0,1fr));}
+.row.c3{grid-template-columns:repeat(3,minmax(0,1fr));}
+.row.c4{grid-template-columns:repeat(4,minmax(0,1fr));}
+.field{display:flex;flex-direction:column;gap:3px;}
+.field label{font-size:10px;color:#777;font-weight:600;}
+.field input,.field textarea{border:1px solid #ccc;border-radius:4px;padding:4px 8px;font-size:12px;color:#111;background:#fff;width:100%;font-family:inherit;}
+.field input:focus,.field textarea:focus{outline:none;border-color:#555;}
+.field textarea{resize:vertical;}
+.tbl-wrap{overflow-x:auto;}
+table.items{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
+table.items th{background:#f0f0f0;color:#444;font-weight:700;padding:5px 4px;border:1px solid #ccc;text-align:center;font-size:10px;}
+table.items td{border:1px solid #ccc;padding:2px 4px;}
+table.items input{border:none;background:transparent;width:100%;padding:3px;font-size:11px;color:#111;outline:none;font-family:inherit;}
+table.items input:focus{background:#f9f9f9;border-radius:3px;}
+table.items td.amt{background:#f7f7f7;text-align:right;padding-right:8px;}
+table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding:4px 6px;}
+.add-row-btn{font-size:11px;color:#1a6fc4;background:none;border:none;cursor:pointer;margin-top:6px;padding:2px 0;font-family:inherit;}
+.del-btn{background:none;border:none;cursor:pointer;color:#c0392b;font-size:14px;line-height:1;font-family:inherit;}
+.del-btn:disabled{color:#ccc;cursor:not-allowed;}
+.total-bar{display:flex;justify-content:flex-end;align-items:center;gap:16px;padding-top:6px;}
+.total-bar .tl{font-size:11px;color:#666;}
+.total-bar .tv{font-size:14px;font-weight:700;color:#111;}
+.attach-zone{border:1px dashed #bbb;border-radius:4px;padding:8px;text-align:center;cursor:pointer;background:#fafafa;margin-bottom:6px;}
+.attach-zone:hover{border-color:#555;}
+.attach-zone p{font-size:11px;color:#777;}
+.attach-item{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#666;padding:4px 0;border-bottom:1px solid #eee;}
+.attach-item.err{color:#c0392b;}
+.action-bar{display:flex;gap:12px;justify-content:center;margin-top:4px;}
+.btn{padding:10px 32px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.btn-resubmit{background:#1a6fc4;color:#fff;border:1px solid #1a6fc4;}
+.btn-resubmit:hover{background:#155da0;}
+.btn-resubmit:disabled{background:#aaa;border-color:#aaa;cursor:not-allowed;}
+.btn-discard{background:#fff;color:#c0392b;border:1px solid #c0392b;}
+.btn-discard:hover{background:#fdecea;}
+.btn-discard:disabled{background:#f5f5f5;color:#aaa;border-color:#ccc;cursor:not-allowed;}
+.status-msg{display:none;text-align:center;padding:12px;border-radius:6px;margin-top:12px;font-size:13px;font-weight:600;}
+.status-msg.success{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;}
+.status-msg.error{background:#fdecea;color:#c62828;border:1px solid #ef9a9a;}
+.status-msg.loading{background:#fff8e1;color:#f57f17;border:1px solid #ffe082;}
+.progress-wrap{display:none;margin-top:10px;}
+.progress-bar{height:6px;background:#eee;border-radius:3px;overflow:hidden;}
+.progress-fill{height:100%;background:#1a6fc4;width:0%;transition:width 0.3s;}
+.progress-text{font-size:11px;color:#666;text-align:center;margin-top:4px;}
+.confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;}
+.confirm-overlay.show{display:flex;}
+.confirm-box{background:#fff;border-radius:10px;padding:24px 28px;max-width:340px;width:90%;text-align:center;}
+.confirm-box .ctitle{font-size:15px;font-weight:700;color:#111;margin-bottom:8px;}
+.confirm-box .csub{font-size:13px;color:#666;margin-bottom:18px;line-height:1.6;}
+.confirm-btns{display:flex;gap:10px;}
+.cbtn{flex:1;padding:9px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
+.cbtn-cancel{background:#f0f0f0;color:#444;border:1px solid #ccc;}
+.cbtn-ok{background:#c0392b;color:#fff;border:1px solid #c0392b;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="sys-label">구매품의 시스템</div>
+  <div class="reject-banner">
+    <div class="rb-title">반려 알림 — 품의서가 반려되었습니다.</div>
+    <div class="rb-row"><span class="rb-lbl">품의번호</span><span class="rb-val" id="display-docno"><?= docNo ?></span></div>
+    <div class="rb-row"><span class="rb-lbl">반려자</span><span class="rb-val" id="display-rejecter">로딩 중...</span></div>
+    <div class="rb-row"><span class="rb-lbl">반려일시</span><span class="rb-val" id="display-rejecttime">—</span></div>
+    <div class="rb-row"><span class="rb-lbl">반려사유</span><span class="rb-val" id="display-reason">—</span></div>
+  </div>
+  <div class="hist-box" id="hist-box" style="display:none;">
+    <div class="hist-title">반려 이력 (누적)</div>
+    <div id="hist-content"></div>
+  </div>
+  <div class="info-banner">
+    ℹ️ 반려와 함께 기존 첨부파일은 삭제되었습니다. 재상신 시 필요한 파일을 다시 업로드해 주세요.
+  </div>
+  <div class="form-card">
+    <div class="form-card-head">기본 정보</div>
+    <div class="form-card-body">
+      <div class="row c4">
+        <div class="field"><label>품의번호 (변경 불가)</label><input type="text" id="docNo" readonly style="background:#f5f5f5;color:#888;"></div>
+        <div class="field"><label>발행 일자</label><input type="date" id="issueDate"></div>
+        <div class="field"><label>기안자</label><input type="text" id="drafter"></div>
+        <div class="field"><label>소속 부서</label><input type="text" id="dept"></div>
+      </div>
+      <div class="row c2">
+        <div class="field"><label>품의 제목</label><input type="text" id="subject"></div>
+        <div class="field"><label>용도 / 공사내역</label><input type="text" id="purpose"></div>
+      </div>
+    </div>
+  </div>
+  <div class="form-card">
+    <div class="form-card-head">공급업체 정보</div>
+    <div class="form-card-body">
+      <div class="row c3">
+        <div class="field"><label>업체명</label><input type="text" id="vendorName"></div>
+        <div class="field"><label>사업자번호</label><input type="text" id="vendorBiz"></div>
+        <div class="field"><label>담당자</label><input type="text" id="vendorContact"></div>
+      </div>
+      <div class="row c3">
+        <div class="field"><label>연락처</label><input type="text" id="vendorPhone"></div>
+        <div class="field"><label>납기일</label><input type="date" id="deliveryDate"></div>
+        <div class="field"><label>납품장소 / 배송지</label><input type="text" id="deliveryAddr"></div>
+      </div>
+    </div>
+  </div>
+  <div class="form-card">
+    <div class="form-card-head">품목 내역</div>
+    <div class="form-card-body">
+      <div class="tbl-wrap">
+        <table class="items">
+          <colgroup><col style="width:32px"><col style="width:28%"><col style="width:12%"><col style="width:9%"><col style="width:14%"><col style="width:15%"><col style="width:26px"></colgroup>
+          <thead><tr><th>No.</th><th>품목명</th><th>규격/단위</th><th>수량</th><th>단가 (원)</th><th>금액 (원)</th><th></th></tr></thead>
+          <tbody id="items-body"></tbody>
+          <tfoot><tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">합 계</td><td class="amt" id="grand-total">0</td><td style="background:#f0f0f0;"></td></tr></tfoot>
+        </table>
+      </div>
+      <button class="add-row-btn" onclick="addRow()">+ 품목 추가</button>
+      <div class="total-bar"><span class="tl">총 금액 (부가세 포함)</span><span class="tv" id="total-vat">0 원</span></div>
+    </div>
+  </div>
+  <div class="form-card">
+    <div class="form-card-head">첨부파일 <span style="font-size:10px;color:#888;font-weight:400;">— 허용: pdf, jpg, png, xlsx, docx, pptx, hwp, zip / 파일당 최대 25MB</span></div>
+    <div class="form-card-body">
+      <div class="attach-zone" onclick="document.getElementById('file-in').click()">
+        <input type="file" id="file-in" multiple style="display:none" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.doc,.pptx,.hwp,.zip" onchange="handleFiles(this.files)">
+        <p>클릭하여 파일 추가 (견적서 등 — PDF, XLSX, DOCX)</p>
+      </div>
+      <div id="attach-list"></div>
+    </div>
+  </div>
+  <div class="form-card">
+    <div class="form-card-head">비고 / 특이사항</div>
+    <div class="form-card-body">
+      <div class="field"><textarea id="remarks" rows="2" placeholder="수정 내용이나 특이사항을 입력하세요."></textarea></div>
+    </div>
+  </div>
+  <div class="action-bar">
+    <button class="btn btn-discard" id="discard-btn" onclick="showDiscardConfirm()">기안 폐기</button>
+    <button class="btn btn-resubmit" id="resubmit-btn" onclick="doResubmit()">수정 후 재상신</button>
+  </div>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-text" id="progress-text">준비 중...</div>
+  </div>
+  <div class="status-msg" id="status-msg"></div>
+</div>
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <div class="ctitle">기안을 폐기하시겠습니까?</div>
+    <div class="csub">폐기 후에는 복구가 불가합니다.<br>Drive의 품의서 폴더 전체도 휴지통으로 이동됩니다.</div>
+    <div class="confirm-btns">
+      <button class="cbtn cbtn-cancel" onclick="hideConfirm()">취소</button>
+      <button class="cbtn cbtn-ok" onclick="doDiscard()">폐기 확인</button>
+    </div>
+  </div>
+</div>
+<script>
+var MAX_FILE_SIZE = 25 * 1024 * 1024;
+var ALLOWED_EXTS  = ['pdf','jpg','jpeg','png','xlsx','xls','docx','doc','pptx','hwp','zip'];
+
+var TOKEN = '<?= token ?>';
+var DOC_NO = '<?= docNo ?>';
+var rowCount = 0;
+var attachedFiles = [];
+var cachedApprovers = [];
+
+function loadData(){
+  if(typeof google === 'undefined'){
+    showStatus('error','Google Apps Script 환경에서만 실행 가능합니다.');
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res || !res.ok){
+        showStatus('error',(res && res.message) || '데이터를 불러올 수 없습니다.');
+        return;
+      }
+      var d = res.data;
+      document.getElementById('display-rejecter').textContent = d.rejectApprover || '-';
+      document.getElementById('display-rejecttime').textContent = d.rejectTime || '-';
+      document.getElementById('display-reason').textContent = d.rejectReason || '-';
+      if(d.rejectHistory && d.rejectHistory.trim()){
+        var entries = d.rejectHistory.trim().split('\n');
+        if(entries.length > 1){
+          document.getElementById('hist-box').style.display = 'block';
+          document.getElementById('hist-content').innerHTML = entries.map(function(e){
+            return '<div class="hist-entry">'+escHtml(e)+'</div>';
+          }).join('');
+        }
+      }
+      ['docNo','issueDate','drafter','dept','subject','purpose','vendorName','vendorBiz','vendorContact','vendorPhone','deliveryDate','deliveryAddr','remarks'].forEach(function(id){
+        var el = document.getElementById(id);
+        if(el && d[id] !== undefined) el.value = d[id] || '';
+      });
+      document.getElementById('items-body').innerHTML = '';
+      rowCount = 0;
+      (d.items || []).forEach(function(it){addRow(it);});
+      if(!d.items || d.items.length === 0){addRow();addRow();addRow();}
+      calcTotal();
+      loadApproversFromViewer();
+    })
+    .withFailureHandler(function(err){
+      showStatus('error','데이터 로드 오류: ' + (err && err.message ? err.message : err));
+    })
+    .getRejectDataForClient(TOKEN);
+}
+
+function loadApproversFromViewer(){
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res && res.ok && res.data && res.data.approvers){
+        cachedApprovers = res.data.approvers.map(function(a){
+          return {label: a.label, name: a.name, email: a.email};
+        });
+      }
+    })
+    .withFailureHandler(function(){})
+    .getRequisitionForViewer(TOKEN);
+}
+
+function addRow(item){
+  rowCount++;
+  var id = 'r' + rowCount;
+  var tr = document.createElement('tr');
+  tr.id = id;
+  tr.innerHTML = '<td class="no-cell" style="text-align:center;font-size:11px;color:#666;"></td>'+
+    '<td><input type="text" class="item-name" placeholder="품목명" style="min-width:100px" value="'+esc(item&&item.name||'')+'"></td>'+
+    '<td><input type="text" class="item-spec" placeholder="EA" style="text-align:center" value="'+esc(item&&item.spec||'')+'"></td>'+
+    '<td><input type="number" min="0" value="'+(item&&item.qty||1)+'" class="qty" oninput="calcRow(this)" style="text-align:right;min-width:40px"></td>'+
+    '<td><input type="number" min="0" value="'+(item&&item.price||0)+'" class="price" oninput="calcRow(this)" style="text-align:right;min-width:70px"></td>'+
+    '<td class="row-amt amt" style="background:#f7f7f7;text-align:right;padding-right:8px">0</td>'+
+    '<td style="text-align:center;background:#f7f7f7"><button class="del-btn item-del" onclick="delRow(\''+id+'\')">×</button></td>';
+  document.getElementById('items-body').appendChild(tr);
+  reNum();
+  calcRow(tr.querySelector('.qty'));
+}
+function delRow(id){
+  var rows = document.querySelectorAll('#items-body tr');
+  if(rows.length <= 1) return;
+  var el = document.getElementById(id);
+  if(el){el.remove(); reNum(); calcTotal();}
+}
+function reNum(){
+  document.querySelectorAll('#items-body tr').forEach(function(tr,i){
+    var c = tr.querySelector('.no-cell');
+    if(c) c.textContent = i+1;
+    var b = tr.querySelector('.item-del');
+    if(b) b.disabled = (i === 0);
+  });
+}
+function calcRow(el){
+  var row = el.closest('tr');
+  var qty = parseFloat(row.querySelector('.qty').value) || 0;
+  var prc = parseFloat(row.querySelector('.price').value) || 0;
+  row.querySelector('.row-amt').textContent = fmt(qty * prc);
+  calcTotal();
+}
+function calcTotal(){
+  var t = 0;
+  document.querySelectorAll('#items-body .row-amt').forEach(function(c){
+    t += parseFloat(c.textContent.replace(/,/g,'')) || 0;
+  });
+  document.getElementById('grand-total').textContent = fmt(t);
+  document.getElementById('total-vat').textContent = fmt(Math.round(t * 1.1)) + ' 원';
+}
+
+function validateFile(f){
+  var ext = (f.name.split('.').pop() || '').toLowerCase();
+  if(ALLOWED_EXTS.indexOf(ext) < 0) return '허용되지 않는 파일 형식';
+  if(f.size > MAX_FILE_SIZE) return '파일이 25MB를 초과합니다';
+  return null;
+}
+function handleFiles(files){
+  var list = document.getElementById('attach-list');
+  Array.from(files).forEach(function(f){
+    var err = validateFile(f);
+    var sz = f.size < 1024 ? f.size + ' B' :
+             f.size < 1048576 ? Math.round(f.size/1024) + ' KB' :
+             Math.round(f.size/1048576*10)/10 + ' MB';
+    var d = document.createElement('div');
+    d.className = 'attach-item' + (err ? ' err' : '');
+    var idx;
+    if(err){
+      d.innerHTML = '<span>'+escHtml(f.name)+' <span style="font-size:10px;color:#c0392b">('+err+')</span></span>'+
+        '<button class="del-btn" onclick="this.parentElement.remove()">×</button>';
+    } else {
+      attachedFiles.push(f);
+      idx = attachedFiles.length - 1;
+      d.innerHTML = '<span>'+escHtml(f.name)+' <span style="font-size:10px;color:#aaa">('+sz+')</span></span>'+
+        '<button class="del-btn" onclick="removeFile('+idx+',this)">×</button>';
+    }
+    list.appendChild(d);
+  });
+  document.getElementById('file-in').value = '';
+}
+function removeFile(idx, btn){
+  attachedFiles[idx] = null;
+  btn.parentElement.remove();
+}
+
+function readFileAsBase64(file){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var result = e.target.result;
+      var comma = result.indexOf(',');
+      resolve({
+        name: file.name,
+        type: file.type || 'application/octet-stream',
+        size: file.size,
+        data: comma >= 0 ? result.substring(comma+1) : result,
+      });
+    };
+    reader.onerror = function(){reject(new Error('파일 읽기 실패: ' + file.name));};
+    reader.readAsDataURL(file);
+  });
+}
+function showProgress(pct, txt){
+  document.getElementById('progress-wrap').style.display = 'block';
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = txt;
+}
+function hideProgress(){
+  document.getElementById('progress-wrap').style.display = 'none';
+}
+
+function collectData(){
+  var items = [];
+  document.querySelectorAll('#items-body tr').forEach(function(tr){
+    var name = tr.querySelector('.item-name') ? tr.querySelector('.item-name').value : '';
+    if(!name) return;
+    items.push({
+      name: name,
+      spec: tr.querySelector('.item-spec') ? tr.querySelector('.item-spec').value : '',
+      qty: tr.querySelector('.qty') ? tr.querySelector('.qty').value : 0,
+      price: tr.querySelector('.price') ? tr.querySelector('.price').value : 0
+    });
+  });
+  return {
+    docNo: document.getElementById('docNo').value,
+    issueDate: document.getElementById('issueDate').value,
+    drafter: document.getElementById('drafter').value,
+    dept: document.getElementById('dept').value,
+    subject: document.getElementById('subject').value,
+    purpose: document.getElementById('purpose').value,
+    vendorName: document.getElementById('vendorName').value,
+    vendorBiz: document.getElementById('vendorBiz').value,
+    vendorContact: document.getElementById('vendorContact').value,
+    vendorPhone: document.getElementById('vendorPhone').value,
+    deliveryDate: document.getElementById('deliveryDate').value,
+    deliveryAddr: document.getElementById('deliveryAddr').value,
+    remarks: document.getElementById('remarks').value,
+    items: items,
+    approvers: cachedApprovers
+  };
+}
+
+function doResubmit(){
+  if(typeof google === 'undefined'){
+    showStatus('error','Google Apps Script 환경에서만 실행 가능합니다.');
+    return;
+  }
+  if(!cachedApprovers || cachedApprovers.length === 0){
+    showStatus('error','결재자 정보를 불러오지 못했습니다. 페이지를 새로고침 해주세요.');
+    return;
+  }
+
+  var btnR = document.getElementById('resubmit-btn');
+  var btnD = document.getElementById('discard-btn');
+  btnR.disabled = true;
+  btnD.disabled = true;
+
+  var validFiles = attachedFiles.filter(function(f){return f;});
+  showStatus('loading','파일 준비 중...');
+  if(validFiles.length > 0) showProgress(0, '파일 0 / ' + validFiles.length + ' 변환 중...');
+
+  var readPromises = [];
+  for(var i = 0; i < validFiles.length; i++){
+    (function(idx, file){
+      readPromises.push(
+        readFileAsBase64(file).then(function(res){
+          showProgress(
+            Math.round((idx+1) / validFiles.length * 60),
+            '파일 ' + (idx+1) + ' / ' + validFiles.length + ' 변환 완료'
+          );
+          return res;
+        })
+      );
+    })(i, validFiles[i]);
+  }
+
+  Promise.all(readPromises).then(function(fileData){
+    showProgress(70, '서버로 업로드 중...');
+    showStatus('loading','재상신 처리 중입니다...');
+
+    var data = collectData();
+    data.attachments = fileData;
+    var payload = {action: 'resubmit', token: TOKEN, data: data};
+
+    google.script.run
+      .withSuccessHandler(function(res){
+        hideProgress();
+        if(res && res.ok){
+          showStatus('success','재상신 완료. ' + (res.uploaded || 0) + '개 파일이 업로드되었고 결재자 1에게 이메일이 발송되었습니다.');
+        } else {
+          showStatus('error','오류: ' + (res && res.message || '알 수 없는 오류'));
+          btnR.disabled = false;
+          btnD.disabled = false;
+        }
+      })
+      .withFailureHandler(function(err){
+        hideProgress();
+        showStatus('error','네트워크 오류: ' + (err && err.message ? err.message : err));
+        btnR.disabled = false;
+        btnD.disabled = false;
+      })
+      .resubmitRequisitionForClient(payload);
+  }).catch(function(err){
+    hideProgress();
+    showStatus('error','파일 처리 오류: ' + err.message);
+    btnR.disabled = false;
+    btnD.disabled = false;
+  });
+}
+
+function showDiscardConfirm(){document.getElementById('confirm-overlay').classList.add('show');}
+function hideConfirm(){document.getElementById('confirm-overlay').classList.remove('show');}
+function doDiscard(){
+  hideConfirm();
+  if(typeof google === 'undefined'){
+    showStatus('error','Google Apps Script 환경에서만 실행 가능합니다.');
+    return;
+  }
+  document.getElementById('resubmit-btn').disabled = true;
+  document.getElementById('discard-btn').disabled = true;
+  showStatus('loading','폐기 처리 중입니다...');
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res && res.ok){
+        showStatus('success','기안이 폐기 처리되었습니다. (Drive 폴더도 휴지통으로 이동)');
+      } else {
+        showStatus('error','오류: ' + (res && res.message || '알 수 없는 오류'));
+        document.getElementById('discard-btn').disabled = false;
+      }
+    })
+    .withFailureHandler(function(err){
+      showStatus('error','네트워크 오류: ' + (err && err.message ? err.message : err));
+      document.getElementById('discard-btn').disabled = false;
+    })
+    .discardRequisitionForClient({token: TOKEN, reason: '기안자 폐기 (반려 후)'});
+}
+
+function fmt(n){return Math.round(n).toLocaleString('ko-KR');}
+function esc(s){return (s || '').toString().replace(/"/g, '&quot;');}
+function escHtml(s){return (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');}
+function showStatus(type, msg){
+  var b = document.getElementById('status-msg');
+  b.className = 'status-msg ' + type;
+  b.textContent = msg;
+  b.style.display = 'block';
+  b.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+loadData();
+</script>
+</body>
+</html>

@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>구매품의서 확인</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5f5f5;padding:20px;}
+.toolbar{max-width:794px;margin:0 auto 12px;display:flex;align-items:center;justify-content:space-between;}
+.toolbar .badge{font-size:12px;font-weight:700;padding:5px 14px;border-radius:20px;background:#E6F1FB;color:#185FA5;}
+.toolbar .back-btn{font-size:12px;color:#666;background:none;border:none;cursor:pointer;text-decoration:underline;font-family:inherit;}
+.a4-wrap{width:794px;min-height:1123px;margin:0 auto;padding:32px 36px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.10);}
+.doc-title{text-align:center;font-size:22px;font-weight:700;letter-spacing:6px;color:#111;margin-bottom:14px;}
+.top-meta{display:flex;justify-content:space-between;margin-bottom:10px;font-size:12px;color:#666;}
+.top-meta b{color:#111;font-weight:600;}
+.stat-badge{display:inline-block;padding:3px 12px;border-radius:12px;font-size:11px;font-weight:700;margin-left:8px;}
+.stat-badge.검토중,.stat-badge.재상신,.stat-badge.결재중{background:#fff8e1;color:#F57F17;}
+.stat-badge.최종승인{background:#e8f5e9;color:#2e7d32;}
+.stat-badge.반려{background:#fdecea;color:#c62828;}
+.stat-badge.폐기{background:#eeeeee;color:#757575;}
+.section{border:1px solid #ccc;border-radius:6px;margin-bottom:10px;overflow:hidden;}
+.sec-header{background:#f0f0f0;padding:5px 12px;font-size:11px;font-weight:700;color:#444;letter-spacing:1px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;}
+.sec-body{padding:10px 12px;}
+.row{display:grid;gap:10px;margin-bottom:8px;}
+.row:last-child{margin-bottom:0;}
+.row.c2{grid-template-columns:repeat(2,minmax(0,1fr));}
+.row.c3{grid-template-columns:repeat(3,minmax(0,1fr));}
+.row.c4{grid-template-columns:repeat(4,minmax(0,1fr));}
+.field{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.field label{font-size:10px;color:#777;font-weight:600;}
+.field .val{font-size:12px;color:#111;padding:4px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;min-height:26px;}
+.tbl-wrap{overflow-x:auto;}
+table.items{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
+table.items th{background:#f0f0f0;color:#444;font-weight:700;padding:5px 4px;border:1px solid #ccc;text-align:center;font-size:10px;}
+table.items td{border:1px solid #ccc;padding:5px 6px;color:#111;font-size:11px;}
+table.items td.num{text-align:center;}
+table.items td.amt{background:#f7f7f7;text-align:right;padding-right:8px;font-weight:600;}
+table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding:5px 8px;}
+.total-bar{display:flex;justify-content:flex-end;align-items:center;gap:16px;padding-top:6px;}
+.total-bar .lbl{font-size:11px;color:#666;}
+.total-bar .val-total{font-size:15px;font-weight:700;color:#111;}
+.attach-item{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #eee;font-size:11px;}
+.attach-item:last-child{border-bottom:none;}
+.attach-icon{width:28px;height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;}
+.attach-icon.pdf{background:#FDECEA;color:#C62828;}
+.attach-icon.xls{background:#E8F5E9;color:#2E7D32;}
+.attach-icon.doc{background:#E3F2FD;color:#1565C0;}
+.attach-icon.ppt{background:#FFF3E0;color:#E65100;}
+.attach-icon.img{background:#F3E5F5;color:#6A1B9A;}
+.attach-icon.zip{background:#ECEFF1;color:#455A64;}
+.attach-icon.etc{background:#F3E5F5;color:#6A1B9A;}
+.attach-name{flex:1;color:#111;}
+.attach-size{font-size:10px;color:#888;margin-left:4px;}
+.attach-btns{display:flex;gap:6px;}
+.attach-btn{font-size:10px;padding:3px 10px;border-radius:4px;border:1px solid #1a6fc4;background:#fff;color:#1a6fc4;cursor:pointer;text-decoration:none;display:inline-block;white-space:nowrap;}
+.attach-btn:hover{background:#e3f2fd;}
+.attach-btn.primary{background:#1a6fc4;color:#fff;}
+.attach-btn.primary:hover{background:#155da0;color:#fff;}
+.no-attach{font-size:11px;color:#aaa;padding:6px 0;text-align:center;}
+.appr-table{width:100%;border-collapse:collapse;}
+.appr-table th{background:#f0f0f0;font-size:10px;font-weight:700;color:#444;padding:5px 8px;border:1px solid #ccc;text-align:center;}
+.appr-table td{border:1px solid #ccc;padding:5px 8px;font-size:11px;text-align:center;color:#111;}
+.appr-table td.st-done{background:#E8F5E9;color:#2E7D32;font-weight:600;}
+.appr-table td.st-reject{background:#FDECEA;color:#C62828;font-weight:600;}
+.appr-table td.st-current{background:#fff8e1;color:#F57F17;font-weight:600;}
+.appr-table td.st-wait{color:#aaa;}
+.hist-box{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;padding:10px 14px;margin-bottom:10px;max-width:794px;margin-left:auto;margin-right:auto;}
+.hist-title{font-size:11px;font-weight:700;color:#F57F17;margin-bottom:6px;}
+.hist-entry{font-size:10px;color:#555;line-height:1.8;border-bottom:1px solid #ffe082;padding-bottom:3px;margin-bottom:3px;}
+.hist-entry:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
+.action-bar{max-width:794px;margin:14px auto 0;display:flex;justify-content:center;gap:12px;}
+.btn{padding:10px 32px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.btn-reject{background:#d64541;color:#ffffff;border:2px solid #d64541;}
+.btn-reject:hover{background:#b03a37;}
+.btn-approve{background:#27ae60;color:#fff;border:2px solid #27ae60;}
+.btn-approve:hover{background:#219a52;}
+.btn-close{background:#f0f0f0;color:#444;border:1px solid #ccc;}
+.btn:disabled{background:#aaa!important;border-color:#aaa!important;cursor:not-allowed;}
+.status-banner{display:none;text-align:center;padding:12px;border-radius:6px;margin-top:12px;font-size:13px;font-weight:600;max-width:794px;margin-left:auto;margin-right:auto;}
+.status-banner.success{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;}
+.status-banner.error{background:#fdecea;color:#c62828;border:1px solid #ef9a9a;}
+.status-banner.loading{background:#fff8e1;color:#f57f17;border:1px solid #ffe082;}
+.info-notice{max-width:794px;margin:14px auto 0;padding:12px 16px;border-radius:6px;text-align:center;font-size:13px;font-weight:600;}
+.info-notice.ok{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;}
+.info-notice.warn{background:#fff8e1;color:#F57F17;border:1px solid #ffe082;}
+.info-notice.gray{background:#f5f5f5;color:#666;border:1px solid #ddd;}
+.readonly-badge{display:inline-block;font-size:10px;background:#f0f0f0;color:#888;padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;}
+.loading-wrap{text-align:center;padding:60px;color:#888;font-size:14px;}
+.folder-link{font-size:10px;color:#1a6fc4;text-decoration:none;font-weight:400;}
+.folder-link:hover{text-decoration:underline;}
+@media print{
+  body{background:#fff;padding:0;}
+  .toolbar,.action-bar,.status-banner,.info-notice{display:none!important;}
+  .attach-btns{display:none!important;}
+  .a4-wrap{box-shadow:none;padding:16px 20px;min-height:auto;}
+  @page{size:A4 portrait;margin:10mm;}
+}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <span class="badge">읽기 전용</span>
+  <button class="back-btn" onclick="window.history.back()">← 이전으로</button>
+</div>
+
+<div class="a4-wrap" id="doc-wrap">
+  <div class="loading-wrap" id="loading">품의서를 불러오는 중입니다...</div>
+</div>
+
+<div id="hist-wrap"></div>
+
+<div class="action-bar" id="action-bar" style="display:none;">
+  <button class="btn btn-close" onclick="window.print()">인쇄</button>
+  <button class="btn btn-reject" id="reject-btn" style="display:none;" onclick="decide('reject')">반 려</button>
+  <button class="btn btn-approve" id="approve-btn" style="display:none;" onclick="decide('approve')">승 인</button>
+</div>
+
+<div id="info-notice" class="info-notice" style="display:none;"></div>
+<div class="status-banner" id="status-banner"></div>
+
+<script>
+  var TOKEN    = '<?= token ?>';
+  var DECISION = '<?= decision ?>';
+  var IDX      = parseInt('<?= approverIndex ?>'); if(isNaN(IDX)) IDX = -1;  // URL 힌트, 서버 응답으로 갱신됨
+  var WEBAPP   = '<?= webappUrl ?>';
+
+  function fmt(n){return Math.round(parseFloat(n)||0).toLocaleString('ko-KR');}
+  function escHtml(s){return(s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function fmtSize(bytes){
+    if(!bytes) return '';
+    if(bytes < 1024) return bytes + ' B';
+    if(bytes < 1048576) return Math.round(bytes/1024) + ' KB';
+    return Math.round(bytes/1048576*10)/10 + ' MB';
+  }
+
+  function getFileIconClass(name){
+    var ext = (name || '').split('.').pop().toLowerCase();
+    if(ext === 'pdf') return 'pdf';
+    if(['xls','xlsx'].indexOf(ext) >= 0) return 'xls';
+    if(['doc','docx','hwp'].indexOf(ext) >= 0) return 'doc';
+    if(['ppt','pptx'].indexOf(ext) >= 0) return 'ppt';
+    if(['jpg','jpeg','png','gif','bmp','webp'].indexOf(ext) >= 0) return 'img';
+    if(['zip','rar','7z','tar','gz'].indexOf(ext) >= 0) return 'zip';
+    return 'etc';
+  }
+  function getFileIconText(name){
+    var ext = (name || '').split('.').pop().toUpperCase();
+    return ext.substring(0, 4);
+  }
+
+  function renderDoc(d){
+    // 서버가 판정한 myApproverIdx로 IDX 갱신 (b안: URL idx 의존 제거)
+    if(typeof d.myApproverIdx === 'number' && d.myApproverIdx >= 0) IDX = d.myApproverIdx;
+
+    var items = d.items || [];
+    var _cur = (items[0] && items[0].currency) ? String(items[0].currency) : 'KRW';
+    var _sym = (_cur === 'KRW') ? '원' : _cur;
+    var _isKrw = (_cur === 'KRW');
+    var totalAmt = items.reduce(function(s,it){return s + (parseFloat(it.qty)||0) * (parseFloat(it.price)||0);}, 0);
+    var _vat = _isKrw ? Math.round(totalAmt * 0.1) : 0;   // 원화만 부가세 10%, 외화는 0 (B안)
+    var totalVat = totalAmt + _vat;
+
+    // 결재 현황 — 현재 결재 순번에 current 클래스 부여
+    var apprRows = (d.approvers || []).map(function(ap, i){
+      var stClass;
+      if(ap.status === '승인') stClass = 'st-done';
+      else if(ap.status === '반려') stClass = 'st-reject';
+      else if(ap.status === '대기' && i === IDX && (d.status === '검토중' || (d.status||'').indexOf('결재중') === 0 || d.status === '재상신')) stClass = 'st-current';
+      else stClass = 'st-wait';
+      return '<tr>'
+        +'<td>'+escHtml(ap.label)+'</td>'
+        +'<td>'+escHtml(ap.name)+'</td>'
+        +'<td class="'+stClass+'">'+escHtml(ap.status || '대기')+'</td>'
+        +'<td>'+escHtml(ap.processedAt || '—')+'</td>'
+        +'<td style="text-align:left;">'+escHtml(ap.comment || '—')+'</td>'
+        +'</tr>';
+    }).join('');
+
+    // PRC 문서인 경우: 부모 REQ 결재 내역 (1차) 테이블
+    var parentApprSection = '';
+    var isPrc = (d.docType === 'PRC');
+    if(isPrc && d.parentApprovers && d.parentApprovers.length > 0){
+      var parentRows = d.parentApprovers.map(function(ap){
+        var stClass;
+        if(ap.status === '승인') stClass = 'st-done';
+        else if(ap.status === '반려') stClass = 'st-reject';
+        else stClass = 'st-wait';
+        return '<tr>'
+          +'<td>'+escHtml(ap.label)+'</td>'
+          +'<td>'+escHtml(ap.name)+'</td>'
+          +'<td class="'+stClass+'">'+escHtml(ap.status || '대기')+'</td>'
+          +'<td>'+escHtml(ap.processedAt || '—')+'</td>'
+          +'<td style="text-align:left;">'+escHtml(ap.comment || '—')+'</td>'
+          +'</tr>';
+      }).join('');
+      var parentDocNoHtml = d.parentDocNo ? ' <span style="font-weight:400;color:#888;font-size:11px;margin-left:6px;">('+escHtml(d.parentDocNo)+')</span>' : '';
+      parentApprSection = ''
+        +'<div class="section"><div class="sec-header"><span>원본 REQ 결재 내역'+parentDocNoHtml+' <span class="readonly-badge">1차 결재 · 읽기 전용</span></span></div><div class="sec-body">'
+        +'<table class="appr-table">'
+        +'<thead><tr><th style="width:80px;">구분</th><th style="width:90px;">성명</th><th style="width:70px;">상태</th><th style="width:120px;">처리일시</th><th>의견</th></tr></thead>'
+        +'<tbody>'+parentRows+'</tbody>'
+        +'</table></div></div>';
+    }
+    var apprSectionLabel = isPrc ? '구매팀 결재 현황 <span style="font-weight:400;color:#888;font-size:11px;margin-left:6px;">2차 결재</span>' : '결재 현황';
+
+    var itemRows = items.map(function(it, i){
+      return '<tr>'
+        +'<td class="num">'+(i+1)+'</td>'
+        +'<td>'+escHtml(it.name)+'</td>'
+        +'<td class="num">'+escHtml(it.spec)+'</td>'
+        +'<td class="num">'+escHtml(it.qty)+'</td>'
+        +'<td style="text-align:right;padding-right:6px;">'+fmt(it.price)+'</td>'
+        +'<td class="amt">'+fmt((parseFloat(it.qty)||0) * (parseFloat(it.price)||0))+'</td>'
+        +'</tr>';
+    }).join('');
+
+    // 첨부파일: 파일별 미리보기/다운로드 버튼
+    var attachments = d.attachments || [];
+    var attachRows;
+    if(attachments.length === 0){
+      attachRows = '<div class="no-attach">첨부파일 없음</div>';
+    } else {
+      attachRows = attachments.map(function(f){
+        var ic = getFileIconClass(f.name);
+        var it = getFileIconText(f.name);
+        var viewUrl = f.viewUrl || '';
+        var dlUrl = f.downloadUrl || '';
+        return '<div class="attach-item">'
+          +'<div class="attach-icon '+ic+'">'+escHtml(it)+'</div>'
+          +'<span class="attach-name">'+escHtml(f.name)+(f.size ? '<span class="attach-size">('+fmtSize(f.size)+')</span>' : '')+'</span>'
+          +'<div class="attach-btns">'
+          + (viewUrl ? '<a class="attach-btn" href="'+viewUrl+'" target="_blank" rel="noopener">미리보기</a>' : '')
+          + (dlUrl ? '<a class="attach-btn primary" href="'+dlUrl+'" target="_blank" rel="noopener">다운로드</a>' : '')
+          +'</div></div>';
+      }).join('');
+    }
+
+    var folderLinkHtml = '';
+    if(d.driveFolderUrl){
+      folderLinkHtml = '<a class="folder-link" href="'+d.driveFolderUrl+'" target="_blank" rel="noopener">📁 Drive 폴더 열기 →</a>';
+    }
+
+    var statusHtml = '';
+    if(d.status){
+      var baseStat = d.status.split(' ')[0].replace(/[()]/g,'');
+      statusHtml = '<span class="stat-badge '+baseStat+'">'+escHtml(d.status)+'</span>';
+    }
+
+    var html = ''
+      +'<div class="doc-title">구 매 품 의 서</div>'
+      +'<div class="top-meta">'
+      +'<span>품의번호: <b>'+escHtml(d.docNo)+'</b>'+statusHtml+'</span>'
+      +'<span>작성일: <b>'+escHtml(d.issueDate)+'</b></span>'
+      +'</div>'
+
+      +'<div class="section"><div class="sec-header"><span>기본 정보 <span class="readonly-badge">읽기 전용</span></span></div><div class="sec-body">'
+      +'<div class="row c4">'
+      +'<div class="field"><label>품의번호</label><div class="val">'+escHtml(d.docNo)+'</div></div>'
+      +'<div class="field"><label>발행 일자</label><div class="val">'+escHtml(d.issueDate)+'</div></div>'
+      +'<div class="field"><label>기안자</label><div class="val">'+escHtml(d.drafter)+'</div></div>'
+      +'<div class="field"><label>소속 부서</label><div class="val">'+escHtml(d.dept)+'</div></div>'
+      +'</div>'
+      +'<div class="row c2">'
+      +'<div class="field"><label>품의 제목</label><div class="val">'+escHtml(d.subject)+'</div></div>'
+      +'<div class="field"><label>용도 / 공사내역</label><div class="val">'+escHtml(d.purpose)+'</div></div>'
+      +'</div></div></div>'
+
+      +'<div class="section"><div class="sec-header"><span>공급업체 정보</span></div><div class="sec-body">'
+      +'<div class="row c3">'
+      +'<div class="field"><label>업체명</label><div class="val">'+escHtml(d.vendorName)+'</div></div>'
+      +'<div class="field"><label>담당자</label><div class="val">'+escHtml(d.vendorContact)+'</div></div>'
+      +'<div class="field"><label>담당자 이메일</label><div class="val">'+escHtml(d.vendorEmail)+'</div></div>'
+      +'</div>'
+      +'<div class="row c3">'
+      +'<div class="field"><label>연락처</label><div class="val">'+escHtml(d.vendorPhone)+'</div></div>'
+      +'<div class="field"><label>납기일</label><div class="val">'+escHtml(d.deliveryDate)+'</div></div>'
+      +'<div class="field"><label>납품장소 / 배송지</label><div class="val">'+escHtml(d.deliveryAddr)+'</div></div>'
+      +'</div></div></div>'
+
+      +'<div class="section"><div class="sec-header"><span>품목 내역</span></div><div class="sec-body">'
+      +'<div class="tbl-wrap"><table class="items">'
+      +'<colgroup><col style="width:32px"><col style="width:28%"><col style="width:12%"><col style="width:9%"><col style="width:14%"><col style="width:15%"></colgroup>'
+      +'<thead><tr><th>No.</th><th>품목명</th><th>규격/단위</th><th>수량</th><th>단가 ('+escHtml(_cur)+')</th><th>금액 ('+escHtml(_cur)+')</th></tr></thead>'
+      +'<tbody>'+itemRows+'</tbody>'
+      +'<tfoot>'
+      +'<tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">공급가액</td><td class="amt">'+fmt(totalAmt)+'</td></tr>'
+      +'<tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">'+(_isKrw?'부가세 (10%)':'부가세 (해당없음)')+'</td><td class="amt">'+(_isKrw?fmt(_vat):'-')+'</td></tr>'
+      +'<tr class="foot"><td colspan="5" style="text-align:right;color:#111;padding-right:10px;font-weight:700;">합계 금액</td><td class="amt" style="font-weight:700;">'+fmt(totalVat)+'</td></tr>'
+      +'</tfoot>'
+      +'</table></div>'
+      +'<div class="total-bar"><span class="lbl">'+(_isKrw?'합계 (부가세 포함)':'합계 (부가세 없음)')+'</span><span class="val-total">'+fmt(totalVat)+' '+escHtml(_sym)+'</span></div>'
+      +'</div></div>'
+
+      +'<div class="section"><div class="sec-header"><span>첨부자료</span>'+folderLinkHtml+'</div><div class="sec-body">'+attachRows+'</div></div>'
+
+      +'<div class="section"><div class="sec-header"><span>비고 / 특이사항</span></div><div class="sec-body">'
+      +'<div class="field"><div class="val" style="min-height:40px;white-space:pre-wrap;">'+escHtml(d.remarks || '—')+'</div></div>'
+      +'</div></div>'
+
+      + parentApprSection
+
+      +'<div class="section"><div class="sec-header"><span>'+apprSectionLabel+'</span></div><div class="sec-body">'
+      +'<table class="appr-table">'
+      +'<thead><tr><th style="width:80px;">구분</th><th style="width:90px;">성명</th><th style="width:70px;">상태</th><th style="width:120px;">처리일시</th><th>의견</th></tr></thead>'
+      +'<tbody>'+apprRows+'</tbody>'
+      +'</table></div></div>';
+
+    document.getElementById('doc-wrap').innerHTML = html;
+
+    // 반려 이력 박스
+    if(d.rejectHistory && d.rejectHistory.trim()){
+      var entries = d.rejectHistory.trim().split('\n');
+      var histHtml = '<div class="hist-box"><div class="hist-title">반려/폐기 이력</div>'
+        + entries.map(function(e){return '<div class="hist-entry">'+escHtml(e)+'</div>';}).join('')
+        + '</div>';
+      document.getElementById('hist-wrap').innerHTML = histHtml;
+    }
+
+    document.getElementById('action-bar').style.display = 'flex';
+
+    // 결재 버튼 표시 로직
+    judgeDecisionButtons(d);
+  }
+
+  function judgeDecisionButtons(d){
+    var approvers = d.approvers || [];
+    var me = approvers[IDX];
+    var rejBtn = document.getElementById('reject-btn');
+    var appBtn = document.getElementById('approve-btn');
+    var info = document.getElementById('info-notice');
+
+    function hideButtons(){
+      rejBtn.style.display = 'none';
+      appBtn.style.display = 'none';
+    }
+
+    if(d.status === '폐기'){
+      hideButtons();
+      info.style.display = 'block';
+      info.className = 'info-notice gray';
+      info.textContent = '이 품의서는 폐기되었습니다.';
+      return;
+    }
+    if(d.status === '최종승인'){
+      hideButtons();
+      info.style.display = 'block';
+      info.className = 'info-notice ok';
+      info.textContent = '✓ 최종 승인 완료된 품의서입니다.';
+      return;
+    }
+    if(d.status === '반려'){
+      hideButtons();
+      info.style.display = 'block';
+      info.className = 'info-notice warn';
+      info.textContent = '이 품의서는 반려 상태입니다. 기안자의 재상신을 기다리고 있습니다.';
+      return;
+    }
+    if(!TOKEN || !me){
+      hideButtons();
+      return;
+    }
+    if(me.status !== '대기'){
+      hideButtons();
+      info.style.display = 'block';
+      info.className = 'info-notice gray';
+      info.textContent = '이미 ' + me.status + ' 처리된 결재입니다.';
+      return;
+    }
+
+    // 내 차례인지 서버 판정과 동일하게 체크: 현재 결재 순번이 나여야 함
+    // d.status가 '검토중' 또는 '결재중 (...)' 또는 '재상신'일 때만 결재 가능
+    var processable = (d.status === '검토중' || (d.status||'').indexOf('결재중') === 0 || d.status === '재상신');
+    if(!processable){
+      hideButtons();
+      return;
+    }
+
+    // 현재 결재 순번 판정: 이전 결재자가 모두 승인 상태여야 함
+    var myTurn = true;
+    for(var i = 0; i < IDX; i++){
+      if(approvers[i] && approvers[i].status !== '승인'){
+        myTurn = false;
+        break;
+      }
+    }
+    if(!myTurn){
+      hideButtons();
+      info.style.display = 'block';
+      info.className = 'info-notice gray';
+      info.textContent = '이전 결재자의 처리를 기다리고 있습니다.';
+      return;
+    }
+
+    // 결재 버튼 표시
+    rejBtn.style.display = 'inline-block';
+    appBtn.style.display = 'inline-block';
+
+    // 이메일에서 decision 파라미터를 들고 왔다면 해당 버튼만 강조
+    if(DECISION === 'approve'){
+      rejBtn.style.opacity = '0.6';
+    } else if(DECISION === 'reject'){
+      appBtn.style.opacity = '0.6';
+    }
+  }
+
+  function loadDoc(){
+    if(typeof google === 'undefined'){
+      document.getElementById('doc-wrap').innerHTML = '<div class="loading-wrap">Google Apps Script 환경에서만 조회 가능합니다.</div>';
+      return;
+    }
+    
+    console.log('=== Viewer 로딩 시작 ===');
+    console.log('TOKEN:', TOKEN);
+    console.log('IDX:', IDX);
+    
+    google.script.run
+      .withSuccessHandler(function(res){
+        console.log('=== withSuccessHandler 호출됨 ===');
+        console.log('res 타입:', typeof res);
+        console.log('res 내용:', res);
+        console.log('res JSON:', JSON.stringify(res));
+        
+        if(!res || !res.ok){
+          console.error('응답이 비정상: res가 null/undefined이거나 ok:false');
+          document.getElementById('doc-wrap').innerHTML = 
+            '<div class="loading-wrap">품의서를 불러올 수 없습니다: ' + 
+            (res ? escHtml(res.message) : 'res가 undefined — 서버 함수가 값을 반환하지 않음') + 
+            '</div>';
+          return;
+        }
+        renderDoc(res.data);
+      })
+      .withFailureHandler(function(err){
+        console.error('=== withFailureHandler 호출됨 ===');
+        console.error('err 전체:', err);
+        console.error('err.message:', err && err.message);
+        console.error('err.stack:', err && err.stack);
+        console.error('err JSON:', JSON.stringify(err));
+        
+        document.getElementById('doc-wrap').innerHTML = 
+          '<div class="loading-wrap">오류 발생:<br>' + 
+          '메시지: ' + escHtml(err && err.message ? err.message : '메시지 없음') + '<br>' +
+          '전체: ' + escHtml(JSON.stringify(err)) + 
+          '</div>';
+      })
+      .getRequisitionForViewer(TOKEN, IDX);
+  }
+
+  function decide(decision){
+    if(decision === 'reject'){
+      var reason = prompt('반려 사유를 입력해 주세요. (필수)');
+      if(!reason || !reason.trim()){alert('반려 사유를 입력해야 합니다.'); return;}
+      processDecision(decision, reason.trim());
+    } else {
+      if(!confirm('승인 처리하시겠습니까?')) return;
+      processDecision(decision, '');
+    }
+  }
+
+  function processDecision(decision, comment){
+    document.getElementById('approve-btn').disabled = true;
+    document.getElementById('reject-btn').disabled = true;
+    showBanner('loading','처리 중입니다...');
+
+    if(typeof google === 'undefined'){
+      showBanner('error','Google Apps Script 환경에서만 실행 가능합니다.');
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler(function(res){
+        if(res && res.ok){
+          showBanner('success', decision === 'approve' ? '승인 완료되었습니다.' : '반려 처리되었습니다.');
+          document.getElementById('approve-btn').style.display = 'none';
+          document.getElementById('reject-btn').style.display = 'none';
+        } else {
+          showBanner('error','오류: ' + (res ? res.message : '알 수 없는 오류'));
+          document.getElementById('approve-btn').disabled = false;
+          document.getElementById('reject-btn').disabled = false;
+        }
+      })
+      .withFailureHandler(function(err){
+        showBanner('error','오류: ' + (err && err.message ? err.message : err));
+        document.getElementById('approve-btn').disabled = false;
+        document.getElementById('reject-btn').disabled = false;
+      })
+      .processDecisionFromClient({
+        action:   'decide',
+        token:    TOKEN,
+        decision: decision,
+        comment:  comment,
+        idx:      IDX,
+      });
+  }
+
+  function showBanner(type, msg){
+    var b = document.getElementById('status-banner');
+    b.className = 'status-banner ' + type;
+    b.textContent = msg;
+    b.style.display = 'block';
+    b.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+
+  loadDoc();
+</script>
+</body>
+</html>
