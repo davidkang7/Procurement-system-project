@@ -43,6 +43,7 @@ var CONFIG = {
     'davidkang@inlct.com',
   ],
   AUDIT_SHEET_NAME: '시스템로그',
+  INSP_SHEET_NAME:  '검수보고서목록',   // [INSP Step 1] 검수보고서 시트 탭명
 };
 
 // ================================================================
@@ -433,6 +434,13 @@ var AUDIT_EVENT = {
 
   // 권한 거부 (보안 기록)
   ADMIN_ACCESS_DENIED:        'ADMIN_ACCESS_DENIED',
+
+  // 검수보고서(INSP) 라이프사이클 — [INSP Step 1]
+  INSP_SUBMIT:    'INSP_SUBMIT',     // 검수보고서 제출
+  INSP_APPROVE:   'INSP_APPROVE',    // 검수 결재 승인 (단계별)
+  INSP_REJECT:    'INSP_REJECT',     // 검수 결재 반려
+  INSP_RESUBMIT:  'INSP_RESUBMIT',   // 반려 후 수정 재상신
+  INSP_FINALIZED: 'INSP_FINALIZED',  // 최종 검수 승인 → 품의 종결
 
   // 추후 확장 자리 (Step 3 이후 추가):
   // DOC_SUBMIT, DOC_APPROVE, DOC_REJECT, DOC_DISCARD,
