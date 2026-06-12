@@ -2523,6 +2523,7 @@ function getHomeDataForClient() {
         user: { email: actor, isProcurement: isProcurementUser(actor), isAdmin: isAdminUser(actor) },
         myDrafts: [], myPending: [], myDocs: [],
         approvedInbox: [], myPrc: [],
+        completedDocs: [],   // [INSP Step 2]
       };
     }
 
@@ -2532,6 +2533,8 @@ function getHomeDataForClient() {
     var myDocs = [];         // 내가 작성한 문서
     var approvedInbox = [];  // 1차 승인된 REQ (구매팀용 인박스)
     var myPrc = [];          // 내가 점유 중인 REQ / 내가 만든 PRC
+    var prcFinals = [];      // [INSP Step 2] 최종승인(PRC) 행 (결재 완료 메뉴 소스)
+    var reqMap = {};         // [INSP Step 2] REQ token → 메타 (PRC와 조인용)
 
     var isProc = isProcurementUser(actor);
 
@@ -2562,6 +2565,22 @@ function getHomeDataForClient() {
       var drafterEmail = String(r[COL.APPR_START + 2] || '');
       var apprCount = parseInt(r[COL.APPR_COUNT]) || 0;
       var curIdx    = parseInt(r[COL.APPR_IDX]) || 0;
+
+      // [INSP Step 2] 결재 완료 메뉴용 수집
+      // - REQ는 PRC 조인용 메타로 적재 (기안자 매칭은 COL.DRAFTER 기준 — 위치 오프셋 금지)
+      // - PRC 최종승인 건은 prcFinals에 적재
+      if (docType === 'REQ') {
+        reqMap[meta.token] = {
+          docNo:       meta.docNo,
+          drafter:     meta.drafter,
+          drafterName: String(r[COL.APPR_START + 1] || ''),
+          dept:        meta.dept,
+          issueDate:   meta.issueDate,
+        };
+      }
+      if (docType === 'PRC' && status === '최종승인(PRC)') {
+        prcFinals.push(meta);
+      }
 
       // 1) 내가 작성한 문서
       if (drafterEmail === actor) {
@@ -2605,6 +2624,49 @@ function getHomeDataForClient() {
       return (b.submitAt || '').localeCompare(a.submitAt || '');
     });
 
+    // [INSP Step 2] 결재 완료 목록 조립
+    // - 가시성: 구매팀은 전체, 일반 사용자는 원본 REQ 기안자 본인 건만 (Q-INSP-05)
+    // - 검수보고서 그룹은 INSP.gs의 _getInspGroupsByPrc()가 1회 read로 제공
+    //   (INSP 파일 미배포 환경에서도 홈이 죽지 않도록 typeof 가드)
+    var completedDocs = [];
+    if (prcFinals.length > 0) {
+      var inspGroups = (typeof _getInspGroupsByPrc === 'function')
+        ? _getInspGroupsByPrc(ss)
+        : {};
+      for (var c = 0; c < prcFinals.length; c++) {
+        var pf  = prcFinals[c];
+        var req = reqMap[pf.parentToken] || null;
+        var reqDrafter = req ? req.drafter : '';
+        if (!isProc && reqDrafter !== actor) continue;
+
+        var insps = inspGroups[pf.token] || [];
+        var inspClosed = false;   // 최종 검수 회차가 승인 완료되면 품의 종결 (Q-INSP-09)
+        for (var ic = 0; ic < insps.length; ic++) {
+          if (insps[ic].isFinal && insps[ic].status === '최종승인(INSP)') { inspClosed = true; break; }
+        }
+
+        completedDocs.push({
+          reqNo:       req ? req.docNo : '',
+          reqToken:    pf.parentToken,
+          poNo:        pf.docNo,
+          prcToken:    pf.token,
+          subject:     pf.subject,
+          vendorName:  pf.vendorName,
+          drafter:     reqDrafter,
+          drafterName: req ? req.drafterName : '',
+          dept:        req ? req.dept : pf.dept,
+          issueDate:   req ? req.issueDate : pf.issueDate,
+          prcFinalAt:  pf.submitAt,
+          insps:       insps,
+          inspClosed:  inspClosed,
+        });
+      }
+      // 최신 PRC 순
+      completedDocs.sort(function(a, b) {
+        return (b.prcFinalAt || '').localeCompare(a.prcFinalAt || '');
+      });
+    }
+
     return {
       ok: true,
       user: {
@@ -2617,6 +2679,7 @@ function getHomeDataForClient() {
       myDocs:        myDocs,
       approvedInbox: approvedInbox,
       myPrc:         myPrc,
+      completedDocs: completedDocs,   // [INSP Step 2]
     };
   } catch(err) {
     return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };

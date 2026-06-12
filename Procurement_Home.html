@@ -175,6 +175,24 @@
 
   .role-empty-state { padding: 60px 24px; text-align: center; color: var(--ink-mute); }
   .role-empty-state h3 { font-size: 16px; color: var(--ink); margin-bottom: 6px; font-weight: 700; }
+  /* ─── [INSP Step 2] 결재 완료 / 검수보고서 아코디언 ─── */
+  .status.insp-none { background: #f0f2f5; color: #4a5260; }
+  .status.insp-closed { background: #0e7d72; color: #fff; }
+  tr.po-row { cursor: pointer; }
+  tr.po-row:hover td { background: #fafbfc; }
+  .chev { display: inline-block; transition: transform .15s; color: var(--ink-mute); font-size: 10px; margin-right: 6px; }
+  tr.po-row.open .chev { transform: rotate(90deg); }
+  tr.insp-sub td { background: #e4f4f2; border-bottom: 1px solid #d4e9e6; padding: 0; }
+  .insp-sub-box { padding: 10px 16px 12px 36px; }
+  .insp-sub-table { width: 100%; border-collapse: collapse; }
+  .insp-sub-table th { background: transparent; border-bottom: 1px solid #c8e2de; color: #0e7d72; font-size: 10.5px; padding: 5px 10px; text-align: left; }
+  .insp-sub-table td { background: transparent; border-bottom: 1px solid #d9ece9; padding: 7px 10px; font-size: 12px; }
+  .insp-sub-table tr:last-child td { border-bottom: none; }
+  .docno.ir { color: #0e7d72; }
+  .final-flag { color: #0e7d72; font-weight: 700; font-size: 11px; }
+  .btn-insp { background: #0e7d72; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .btn-insp:hover { filter: brightness(1.08); }
+  .btn-insp.pending-feature { background: #aab4be; }
 </style>
 </head>
 <body>
@@ -227,7 +245,11 @@ var STATE = {
   currentMenu: 'mydocs',
   myDocsTab: 'all',
   loading: false,
+  openCompleted: {},   // [INSP Step 2] 결재 완료 아코디언 열림 상태 (prcToken → bool)
 };
+
+// [INSP Step 2] 검수보고서 작성 화면 활성 여부 — Step 3 배포 시 true로 변경
+var INSP_FORM_ENABLED = false;
 
 // ─── 부팅 ─────────────────────────────
 function boot(){
@@ -311,6 +333,7 @@ function renderSidebar(){
   var common = [
     { key: 'mydocs',  label: '내 기안 문서', count: (d.myDocs || []).length },
     { key: 'pending', label: '내 결재 대기', count: (d.myPending || []).length, urgent: (d.myPending || []).length > 0 },
+    { key: 'completed', label: '결재 완료', count: (d.completedDocs || []).length },   // [INSP Step 2]
   ];
   var proc = u.isProcurement ? [
     { key: 'inbox',  label: 'APPROVED_1ST 인박스', count: (d.approvedInbox || []).length, urgent: (d.approvedInbox || []).length > 0 },
@@ -396,6 +419,7 @@ function renderContent(){
   else if(key === 'pending') html = renderPending();
   else if(key === 'inbox')   html = renderInbox();
   else if(key === 'myprc')   html = renderMyPrc();
+  else if(key === 'completed') html = renderCompleted();   // [INSP Step 2]
   else html = '<div class="empty">알 수 없는 메뉴입니다.</div>';
   document.getElementById('content').innerHTML = html;
   attachContentHandlers();
@@ -430,6 +454,28 @@ function attachContentHandlers(){
       ev.stopPropagation();
       var parentToken = el.getAttribute('data-prc-resume');
       window.top.location.href = WEBAPP_URL + '?action=prc&parentId=' + encodeURIComponent(parentToken);
+    });
+  });
+  // [INSP Step 2] 결재 완료 — 행 클릭 시 검수 이력 아코디언 토글
+  Array.from(document.querySelectorAll('[data-toggle-insp]')).forEach(function(el){
+    el.addEventListener('click', function(){
+      var key = el.getAttribute('data-toggle-insp');
+      STATE.openCompleted[key] = !STATE.openCompleted[key];
+      renderContent();
+    });
+  });
+  // [INSP Step 2] 검수보고서 제출/재상신 버튼
+  Array.from(document.querySelectorAll('[data-insp-form]')).forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      if(!INSP_FORM_ENABLED){
+        toast('info', '검수보고서 작성 기능은 다음 업데이트에서 활성화됩니다.');
+        return;
+      }
+      var prcToken = el.getAttribute('data-insp-form');
+      var resub = el.getAttribute('data-insp-resub') || '';
+      window.top.location.href = WEBAPP_URL + '?action=insp_form&token=' + encodeURIComponent(prcToken)
+        + (resub ? '&resub=' + encodeURIComponent(resub) : '');
     });
   });
 }
@@ -496,6 +542,131 @@ function renderMyPrc(){
     + '<div class="panel-head"><div><span class="panel-title">진행 중 작업</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
     + tableOfDocs(rows, 'myprc')
     + '</div>';
+}
+
+// ─── [INSP Step 2] 결재 완료 메뉴 ─────────────────────────────
+// 최종승인(PRC) 문서의 최종 승인 확인 + 검수보고서 회차 관리 (아코디언)
+function renderCompleted(){
+  var d = STATE.data || {};
+  var docs = d.completedDocs || [];
+  var u = STATE.user || {};
+  var isProc = !!u.isProcurement;
+
+  var kNone = 0, kProg = 0, kDone = 0;
+  docs.forEach(function(x){
+    var st = poInspState(x);
+    if(st.key === 'none') kNone++;
+    else if(st.key === 'closed') kDone++;
+    else kProg++;
+  });
+
+  var kpiHtml = '<div class="kpi-grid">'
+    + kpi('결재 완료(PRC)', docs.length, 'highlight')
+    + kpi('검수 미제출', kNone)
+    + kpi('검수 진행 중', kProg)
+    + kpi('검수 종결', kDone)
+    + '</div>';
+
+  var sub = '최종승인(PRC)된 구매 품의의 최종 승인 확인 및 검수보고서 제출 메뉴입니다. '
+    + (isProc ? '구매팀 권한으로 전체 문서가 표시됩니다.' : '본인이 기안한 품의가 표시됩니다.')
+    + ' 행을 클릭하면 회차별 검수 이력이 펼쳐집니다.';
+
+  var body;
+  if(docs.length === 0){
+    body = '<div class="empty"><div class="empty-icon">📭</div>표시할 결재 완료 문서가 없습니다.</div>';
+  } else {
+    body = '<table><thead><tr>'
+      + '<th>품의 번호</th><th>PO 번호</th><th>제목</th><th>거래처</th><th>결재</th><th>검수 상태</th><th class="num">검수</th>'
+      + '</tr></thead><tbody>';
+    docs.forEach(function(x){
+      var open = !!STATE.openCompleted[x.prcToken];
+      var st = poInspState(x);
+      body += '<tr class="po-row' + (open ? ' open' : '') + '" data-toggle-insp="' + escAttr(x.prcToken) + '">'
+        + '<td><span class="chev">▶</span><span class="docno">' + escHtml(x.reqNo) + '</span></td>'
+        + '<td><span class="docno prc">' + escHtml(x.poNo) + '</span></td>'
+        + '<td>' + escHtml(x.subject) + '</td>'
+        + '<td>' + escHtml(x.vendorName) + '</td>'
+        + '<td>' + statusBadge('최종승인(PRC)') + '</td>'
+        + '<td><span class="status ' + st.cls + '">' + escHtml(st.label) + '</span></td>'
+        + '<td class="num">' + (x.insps || []).length + '건</td>'
+        + '</tr>';
+      if(open) body += inspSubRows(x);
+    });
+    body += '</tbody></table>';
+  }
+
+  return pageHead('결재 완료', sub)
+    + kpiHtml
+    + '<div class="panel">'
+    + '<div class="panel-head"><div><span class="panel-title">최종 승인 문서</span><span class="scope-tag' + (isProc ? ' proc' : '') + '">' + docs.length + '건' + (isProc ? ' · 전체' : '') + '</span></div></div>'
+    + body
+    + '</div>';
+}
+
+// PO(품의) 단위 검수 집계 상태 — 저장하지 않고 계산 (설계서 §3)
+function poInspState(x){
+  var insps = x.insps || [];
+  if(insps.length === 0) return { key:'none', label:'검수 미제출', cls:'insp-none' };
+  if(x.inspClosed) return { key:'closed', label:'검수 완료 (종결)', cls:'insp-closed' };
+  var hasRejected = false, approving = 0, done = 0;
+  insps.forEach(function(s){
+    if(s.status === '반려') hasRejected = true;
+    else if(s.status === '검토중' || s.status.indexOf('결재중') >= 0) approving++;
+    else if(s.status === '최종승인(INSP)') done++;
+  });
+  if(hasRejected) return { key:'rejected', label:'검수 반려 있음', cls:'rejected' };
+  if(approving > 0) return { key:'approving', label:'검수 결재중 ' + approving + '건', cls:'in_appr' };
+  return { key:'partial', label:'검수 ' + done + '회 완료 (진행 중)', cls:'final' };
+}
+
+// 아코디언 하위 — 회차별 검수보고서 목록
+function inspSubRows(x){
+  var actor = (STATE.user || {}).email || '';
+  var isDrafter = (x.drafter === actor);
+  var inner;
+
+  if((x.insps || []).length === 0){
+    inner = '<div style="color:var(--ink-soft);font-size:12px;padding:4px 0;">아직 제출된 검수보고서가 없습니다.</div>';
+  } else {
+    inner = '<table class="insp-sub-table"><thead><tr>'
+      + '<th style="width:150px;">검수보고서 번호</th><th style="width:80px;">입고일</th><th>입고 내역</th>'
+      + '<th style="width:70px;">판정</th><th style="width:130px;">상태</th><th style="width:100px;"></th>'
+      + '</tr></thead><tbody>';
+    x.insps.forEach(function(s){
+      var act = '';
+      if(s.status === '반려' && isDrafter){
+        act = '<button class="btn-insp' + (INSP_FORM_ENABLED ? '' : ' pending-feature') + '"'
+            + ' data-insp-form="' + escAttr(x.prcToken) + '" data-insp-resub="' + escAttr(s.token) + '">수정 재상신</button>';
+      }
+      var stTxt = s.status;
+      if((s.status === '검토중' || s.status.indexOf('결재중') >= 0) && s.currentApprName){
+        stTxt = '결재중 (' + s.currentApprName + ')';
+      }
+      inner += '<tr>'
+        + '<td><span class="docno ir">' + escHtml(s.docNo) + '</span>' + (s.isFinal ? ' <span class="final-flag">★최종</span>' : '') + '</td>'
+        + '<td>' + escHtml(s.receivedDate) + '</td>'
+        + '<td>' + escHtml(s.receivedNote) + '</td>'
+        + '<td>' + escHtml(s.verdict || '-') + '</td>'
+        + '<td>' + statusBadge(stTxt) + '</td>'
+        + '<td style="text-align:right;">' + act + '</td>'
+        + '</tr>';
+    });
+    inner += '</tbody></table>';
+  }
+
+  var footer;
+  if(!isDrafter){
+    footer = '<div style="margin-top:9px;font-size:11px;color:var(--ink-mute);">검수보고서 제출은 품의 기안자(' + escHtml(x.drafterName || x.drafter) + ')만 가능합니다.</div>';
+  } else if(x.inspClosed){
+    footer = '<div style="margin-top:9px;font-size:11px;color:#0e7d72;font-weight:700;">★ 최종 검수가 승인되어 종결된 품의입니다. (추가 제출 불가)</div>';
+  } else {
+    var nextSeq = 1;
+    (x.insps || []).forEach(function(s){ if(s.seq >= nextSeq) nextSeq = s.seq + 1; });
+    footer = '<button class="btn-insp' + (INSP_FORM_ENABLED ? '' : ' pending-feature') + '" style="margin-top:9px;"'
+      + ' data-insp-form="' + escAttr(x.prcToken) + '">+ 검수보고서 제출 (' + (nextSeq < 10 ? '0' + nextSeq : nextSeq) + '회차)</button>';
+  }
+
+  return '<tr class="insp-sub"><td colspan="7"><div class="insp-sub-box">' + inner + footer + '</div></td></tr>';
 }
 
 // ─── 표 렌더 ─────────────────────────────
@@ -817,7 +988,7 @@ function statusBadge(status){
   var cls = 'unknown';
   if(status === '검토중') cls = 'review';
   else if(status.indexOf('결재중') >= 0) cls = 'in_appr';
-  else if(status === '최종승인' || status === '최종승인(PRC)') cls = 'final';
+  else if(status === '최종승인' || status === '최종승인(PRC)' || status === '최종승인(INSP)') cls = 'final';
   else if(status === '반려') cls = 'rejected';
   else if(status === '재상신') cls = 'resubmit';
   else if(status === 'PRC생성됨') cls = 'prc_made';

@@ -1,5 +1,6 @@
 // ================================================================
-// INSP.gs — 검수보고서(INSP) 모듈 Step 1: 스키마 + 시트 보장
+// INSP.gs — 검수보고서(INSP) 모듈 (누적본: Step 1~2)
+// Step 1: 스키마 + 시트 보장 / Step 2: 홈 "결재 완료" 메뉴용 그룹 조회
 // ================================================================
 // 구매결재시스템 Phase 2 / INSP 구현설계서 v1.0 기준
 //
@@ -173,6 +174,69 @@ function inspApprCol(stageIdx, offset) {
     throw new Error('[INSP] 잘못된 블록 오프셋: ' + offset);
   }
   return INSP_COL.APPR_START + (stageIdx * INSP_COL.APPR_COLS) + offset;
+}
+
+// ================================================================
+// [INSP Step 2] 홈 대시보드용 — 검수보고서 그룹 조회
+// ================================================================
+
+/**
+ * 검수보고서목록을 1회 read하여 PRC token별로 그룹핑해 반환
+ * - getHomeDataForClient에서 호출 (동일 스프레드시트 — openById 재사용, 추가 read 1회)
+ * - 시트가 없거나 데이터가 없으면 빈 객체 반환 (홈 로딩을 중단시키지 않음)
+ * - Date 필드는 전부 문자열 변환 (google.script.run 직렬화 시 Date → null 방지)
+ * @param {Spreadsheet} ss 이미 열린 스프레드시트 객체
+ * @returns {Object} { prcToken: [inspObj, ...] } — 각 그룹은 회차(seq) 오름차순
+ */
+function _getInspGroupsByPrc(ss) {
+  var groups = {};
+  try {
+    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return groups;
+
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      var prcToken = String(r[INSP_COL.PRC_TOKEN] || '');
+      if (!prcToken) continue;
+
+      var status = String(r[INSP_COL.STATUS] || '');
+      var curIdx = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+
+      // 결재 진행 중일 때 현재 결재자명 (블록 접근은 inspApprCol 헬퍼만 사용)
+      var currentApprName = '';
+      if ((status === '검토중' || status.indexOf('결재중') >= 0) &&
+          curIdx >= 0 && curIdx < INSP_COL.MAX_APPROVERS) {
+        currentApprName = String(r[inspApprCol(curIdx, 1)] || '');
+      }
+
+      var obj = {
+        docNo:           String(r[INSP_COL.DOC_NO] || ''),
+        seq:             parseInt(r[INSP_COL.SEQ]) || 0,
+        status:          status,
+        receivedDate:    toDateStr(r[INSP_COL.RECEIVED_DATE]),
+        receivedNote:    String(r[INSP_COL.RECEIVED_NOTE] || ''),
+        verdict:         String(r[INSP_COL.VERDICT] || ''),
+        isFinal:         String(r[INSP_COL.IS_FINAL] || '') === 'Y',
+        comment:         String(r[INSP_COL.COMMENT] || ''),
+        token:           String(r[INSP_COL.TOKEN] || ''),
+        submitAt:        toDateTimeStr(r[INSP_COL.SUBMIT_AT]),
+        currentApprName: currentApprName,
+      };
+
+      if (!groups[prcToken]) groups[prcToken] = [];
+      groups[prcToken].push(obj);
+    }
+
+    // 각 그룹 회차 오름차순 정렬
+    for (var key in groups) {
+      groups[key].sort(function (a, b) { return a.seq - b.seq; });
+    }
+  } catch (e) {
+    // fail-safe: 그룹 조회 실패가 홈 로딩 전체를 중단시키지 않음
+    console.error('[INSP] _getInspGroupsByPrc 실패: ' + e.toString());
+  }
+  return groups;
 }
 
 // ================================================================
