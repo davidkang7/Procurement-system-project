@@ -1,6 +1,7 @@
 // ================================================================
-// INSP.gs — 검수보고서(INSP) 모듈 (누적본: Step 1~2)
-// Step 1: 스키마 + 시트 보장 / Step 2: 홈 "결재 완료" 메뉴용 그룹 조회
+// INSP.gs — 검수보고서(INSP) 모듈 (누적본: Step 1~3)
+// Step 1: 스키마 + 시트 보장 / Step 2: 홈 "결재 완료" 그룹 조회
+// Step 3: 작성 폼 데이터 조회 + 제출(submitInspForClient) + 사진 임시 저장
 // ================================================================
 // 구매결재시스템 Phase 2 / INSP 구현설계서 v1.0 기준
 //
@@ -238,6 +239,454 @@ function _getInspGroupsByPrc(ss) {
   }
   return groups;
 }
+
+// ================================================================
+// [INSP Step 3] 작성 폼 데이터 조회
+// ================================================================
+
+/**
+ * 검수보고서 작성 폼 초기 데이터
+ * - PRC token으로 품의(PRC)+원본(REQ) 스냅샷 필드를 모아 폼에 자동 채움
+ * - 권한: 원본 REQ 기안자 본인만 (이메일 소문자 정규화 비교)
+ * - 종결 차단: 동일 PRC에 최종 검수(IS_FINAL=Y)가 최종승인(INSP)이면 추가 작성 불가
+ * - 재상신: resubToken이 있으면 기존 반려 건의 값을 불러와 prefill
+ * @param {string} prcToken 대상 PRC token
+ * @param {string=} resubToken 재상신할 기존 INSP token (선택)
+ * @returns {Object} ok / form(스냅샷) / nextSeq / resub(기존값) / approverList
+ */
+function getInspFormDataForClient(prcToken, resubToken) {
+  try {
+    var actor = (getActiveUserEmail() || '').toLowerCase();
+    if (!prcToken) return { ok: false, message: 'PRC 토큰이 필요합니다.' };
+
+    var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+    var rows   = sheet.getDataRange().getValues();
+
+    // 대상 PRC 찾기
+    var prc = null, reqByToken = {};
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      var docType = String(r[COL.DOC_TYPE] || 'REQ');
+      var token   = String(r[COL.TOKEN] || '');
+      if (docType === 'REQ') {
+        reqByToken[token] = {
+          docNo:       String(r[COL.DOC_NO] || ''),
+          drafterEmail:String(r[COL.APPR_START + 2] || ''),
+          drafterName: String(r[COL.DRAFTER] || ''),
+          dept:        String(r[COL.DEPT] || ''),
+          issueDate:   toDateStr(r[COL.ISSUE_DATE]),
+        };
+      }
+      if (docType === 'PRC' && token === prcToken) {
+        prc = {
+          token:       token,
+          docNo:       String(r[COL.DOC_NO] || ''),
+          subject:     String(r[COL.SUBJECT] || ''),
+          vendorName:  String(r[COL.VENDOR_NAME] || ''),
+          parentToken: String(r[COL.PARENT_DOC_ID] || ''),
+          status:      String(r[COL.STATUS] || ''),
+        };
+      }
+    }
+
+    if (!prc) return { ok: false, message: '대상 구매품의서(PRC)를 찾을 수 없습니다.' };
+    if (prc.status !== '최종승인(PRC)') {
+      return { ok: false, message: '최종승인(PRC) 상태의 품의에만 검수보고서를 제출할 수 있습니다.' };
+    }
+
+    var req = reqByToken[prc.parentToken] || null;
+    var drafterEmail = req ? String(req.drafterEmail || '') : '';
+
+    // 권한: 원본 REQ 기안자 본인만
+    if (!drafterEmail || drafterEmail.toLowerCase() !== actor) {
+      return { ok: false, message: '검수보고서는 원본 품의 기안자 본인만 제출할 수 있습니다.' };
+    }
+
+    // 기존 검수보고서 그룹 (회차 채번 + 종결 차단 + 재상신 prefill)
+    var groups = _getInspGroupsByPrc(ss);
+    var existing = groups[prcToken] || [];
+
+    var closed = existing.some(function(x) { return x.isFinal && x.status === '최종승인(INSP)'; });
+    if (closed && !resubToken) {
+      return { ok: false, message: '이미 최종 검수가 승인되어 종결된 품의입니다. 추가 제출이 불가합니다.' };
+    }
+
+    var maxSeq = 0;
+    existing.forEach(function(x) { if (x.seq > maxSeq) maxSeq = x.seq; });
+    var nextSeq = maxSeq + 1;
+    if (nextSeq > 99) return { ok: false, message: '검수보고서 회차가 한도(99)를 초과했습니다.' };
+
+    // 재상신 prefill (반려 건만)
+    var resub = null;
+    if (resubToken) {
+      var rinfo = _readInspRowByToken(ss, resubToken);
+      if (!rinfo) return { ok: false, message: '재상신할 검수보고서를 찾을 수 없습니다.' };
+      if (rinfo.row[INSP_COL.STATUS] !== '반려') {
+        return { ok: false, message: '반려 상태의 검수보고서만 재상신할 수 있습니다.' };
+      }
+      var rr = rinfo.row;
+      resub = {
+        token:        resubToken,
+        seq:          parseInt(rr[INSP_COL.SEQ]) || nextSeq,
+        receivedDate: toDateStr(rr[INSP_COL.RECEIVED_DATE]),
+        receivedNote: String(rr[INSP_COL.RECEIVED_NOTE] || ''),
+        verdict:      String(rr[INSP_COL.VERDICT] || ''),
+        isFinal:      String(rr[INSP_COL.IS_FINAL] || '') === 'Y',
+        comment:      String(rr[INSP_COL.COMMENT] || ''),
+        rejectLog:    String(rr[INSP_COL.REJECT_LOG] || ''),
+      };
+    }
+
+    // 현재 로그인 사용자 (담당자 표시용)
+    var cur = getCurrentUserForClient();
+    var apprList = getApproverListForClient();
+
+    return {
+      ok: true,
+      form: {
+        prcToken:    prc.token,
+        reqToken:    prc.parentToken,
+        poNo:        prc.docNo,
+        reqNo:       req ? req.docNo : '',
+        subject:     prc.subject,
+        vendorName:  prc.vendorName,
+        drafterEmail:drafterEmail,
+        drafterName: req ? req.drafterName : (cur.user ? cur.user.name : ''),
+        dept:        req ? req.dept : (cur.user ? cur.user.dept : ''),
+        issueDate:   req ? req.issueDate : '',
+        nextSeq:     resub ? resub.seq : nextSeq,
+        docNo:       (req ? req.docNo : prc.docNo) + '-' + _pad2(resub ? resub.seq : nextSeq),
+      },
+      resub:        resub,
+      currentUser:  cur.user || null,
+      approverList: apprList.approvers || [],
+    };
+  } catch (err) {
+    return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
+  }
+}
+
+// ================================================================
+// [INSP Step 3] 검수보고서 제출 / 재상신
+// ================================================================
+
+/**
+ * 검수보고서 제출 (신규 또는 재상신)
+ * - 권한·종결·중복회차 검증은 락 안에서 (동시 제출 경합 방지 — 회차 채번 포함)
+ * - 사진 업로드는 락 밖에서 (기존 첨부 처리 원칙과 동일)
+ * - 사진은 INSP STAGING 폴더에 임시 저장, PDF 생성(Step 6) 후 삭제 예정
+ * @param {Object} data 폼 페이로드
+ * @returns {Object} ok / docNo / token
+ */
+function submitInspForClient(data) {
+  return _submitInspCore(data);
+}
+
+function _submitInspCore(data) {
+  try {
+    var actor = (getActiveUserEmail() || '').toLowerCase();
+    if (!actor) return { ok: false, message: '로그인 사용자를 확인할 수 없습니다.' };
+
+    // 판정/입고내역 필수
+    if (data.verdict !== '합격' && data.verdict !== '불합격') {
+      return { ok: false, message: '검수 판정(합격/불합격)을 선택해 주세요.' };
+    }
+    if (!data.receivedNote || !String(data.receivedNote).trim()) {
+      return { ok: false, message: '입고 내역을 입력해 주세요.' };
+    }
+    var approvers = data.approvers || [];
+    if (approvers.length < 1) return { ok: false, message: '결재자를 1명 이상 지정해 주세요.' };
+    if (approvers.length > INSP_COL.MAX_APPROVERS) {
+      return { ok: false, message: '결재자는 최대 ' + INSP_COL.MAX_APPROVERS + '인까지 지정 가능합니다.' };
+    }
+
+    // 사진 사전 검증 (락 밖)
+    var photos = data.photos || [];
+    if (photos.length > 6) return { ok: false, message: '검수 사진은 최대 6장까지 첨부 가능합니다.' };
+    for (var p = 0; p < photos.length; p++) {
+      if (photos[p].size && photos[p].size > 5 * 1024 * 1024) {
+        return { ok: false, message: '검수 사진은 장당 5MB를 초과할 수 없습니다: ' + (photos[p].name || '') };
+      }
+    }
+
+    // ── 락 안: 검증 + 행 기록 (회차 채번 경합 방지) ──
+    var lockResult = withLock(function() {
+      try {
+        var ss        = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+        var docSheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+        var inspSheet = ensureInspSheet();
+
+        // 대상 PRC + 원본 REQ 재검증 (폼 데이터 신뢰 금지)
+        var prc = _findRowByTokenInDoc(docSheet, data.prcToken);
+        if (!prc) return { ok: false, message: '대상 PRC를 찾을 수 없습니다.' };
+        if (String(prc.row[COL.STATUS] || '') !== '최종승인(PRC)') {
+          return { ok: false, message: '최종승인(PRC) 상태가 아닙니다.' };
+        }
+        var parentToken = String(prc.row[COL.PARENT_DOC_ID] || '');
+        var reqInfo = _findRowByTokenInDoc(docSheet, parentToken);
+        var drafterEmail = reqInfo ? String(reqInfo.row[COL.APPR_START + 2] || '') : '';
+        if (!drafterEmail || drafterEmail.toLowerCase() !== actor) {
+          return { ok: false, message: '원본 품의 기안자 본인만 제출할 수 있습니다.' };
+        }
+
+        // 기존 INSP 그룹 (회차 + 종결)
+        var groups = _getInspGroupsByPrc(ss);
+        var existing = groups[data.prcToken] || [];
+        var closed = existing.some(function(x) { return x.isFinal && x.status === '최종승인(INSP)'; });
+
+        // 재상신 분기
+        var isResub = !!data.resubToken;
+        var resubRow = null;
+        if (isResub) {
+          resubRow = _readInspRowByToken(ss, data.resubToken);
+          if (!resubRow) return { ok: false, message: '재상신 대상을 찾을 수 없습니다.' };
+          if (resubRow.row[INSP_COL.STATUS] !== '반려') {
+            return { ok: false, message: '반려 상태만 재상신할 수 있습니다.' };
+          }
+        } else {
+          if (closed) return { ok: false, message: '이미 종결된 품의입니다. 추가 제출이 불가합니다.' };
+        }
+
+        // 스냅샷 (제출 시점 고정 — 원본 변경과 비동기화)
+        var poNo       = String(prc.row[COL.DOC_NO] || '');
+        var reqNo      = reqInfo ? String(reqInfo.row[COL.DOC_NO] || '') : '';
+        var subject    = String(prc.row[COL.SUBJECT] || '');
+        var vendorName = String(prc.row[COL.VENDOR_NAME] || '');
+        var drafterName= reqInfo ? String(reqInfo.row[COL.DRAFTER] || '') : '';
+        var dept       = reqInfo ? String(reqInfo.row[COL.DEPT] || '') : '';
+        var issueDate  = reqInfo ? toDateStr(reqInfo.row[COL.ISSUE_DATE]) : '';
+
+        var seq, token, docNo, targetRowNum, resubCount = 0;
+
+        if (isResub) {
+          seq        = parseInt(resubRow.row[INSP_COL.SEQ]) || 1;
+          token      = String(resubRow.row[INSP_COL.TOKEN] || Utilities.getUuid());
+          docNo      = reqNo + '-' + _pad2(seq);
+          resubCount = (parseInt(resubRow.row[INSP_COL.RESUB_COUNT]) || 0) + 1;
+          targetRowNum = resubRow.rowNum;
+        } else {
+          var maxSeq = 0;
+          existing.forEach(function(x) { if (x.seq > maxSeq) maxSeq = x.seq; });
+          seq   = maxSeq + 1;
+          if (seq > 99) return { ok: false, message: '회차 한도(99) 초과.' };
+          token = Utilities.getUuid();
+          docNo = reqNo + '-' + _pad2(seq);
+        }
+
+        // INSP STAGING 폴더 (사진 임시 보관) — 사진 저장은 락 밖에서
+        var folder = getOrCreateFolder('INSP_' + docNo, issueDate, 'staging');
+        var folderId = folder.getId();
+
+        // 행 구성 (45컬럼)
+        var firstApprName = approvers[0].name || '';
+        var rowArr = new Array(INSP_TOTAL_COLS);
+        rowArr[INSP_COL.SUBMIT_AT]     = new Date();
+        rowArr[INSP_COL.DOC_NO]        = docNo;
+        rowArr[INSP_COL.SEQ]           = seq;
+        rowArr[INSP_COL.PRC_TOKEN]     = data.prcToken;
+        rowArr[INSP_COL.REQ_TOKEN]     = parentToken;
+        rowArr[INSP_COL.PO_NO]         = poNo;
+        rowArr[INSP_COL.REQ_NO]        = reqNo;
+        rowArr[INSP_COL.SUBJECT]       = subject;
+        rowArr[INSP_COL.VENDOR_NAME]   = vendorName;
+        rowArr[INSP_COL.DRAFTER]       = drafterEmail;   // 이메일
+        rowArr[INSP_COL.DRAFTER_NAME]  = drafterName;    // 성명
+        rowArr[INSP_COL.DEPT]          = dept;
+        rowArr[INSP_COL.ISSUE_DATE]    = issueDate;
+        rowArr[INSP_COL.RECEIVED_DATE] = data.receivedDate || '';
+        rowArr[INSP_COL.RECEIVED_NOTE] = String(data.receivedNote || '');
+        rowArr[INSP_COL.VERDICT]       = data.verdict;
+        rowArr[INSP_COL.IS_FINAL]      = data.isFinal ? 'Y' : '';
+        rowArr[INSP_COL.COMMENT]       = String(data.comment || '');
+        rowArr[INSP_COL.STATUS]        = '검토중';
+        rowArr[INSP_COL.TOKEN]         = token;
+        rowArr[INSP_COL.DRIVE_ID]      = folderId;
+        rowArr[INSP_COL.APPR_COUNT]    = approvers.length;
+        rowArr[INSP_COL.APPR_IDX]      = 0;
+        rowArr[INSP_COL.RESUB_COUNT]   = resubCount;
+        rowArr[INSP_COL.REJECT_LOG]    = isResub ? String(resubRow.row[INSP_COL.REJECT_LOG] || '') : '';
+        rowArr[INSP_COL.PHOTO_LIST]    = '[]';   // 락 밖에서 채움
+        rowArr[INSP_COL.MOVE_STATUS]   = 'STAGING';
+
+        // 결재자 블록 (label/name/email/status/processedAt/comment)
+        for (var a = 0; a < INSP_COL.MAX_APPROVERS; a++) {
+          var ap = approvers[a];
+          rowArr[inspApprCol(a, 0)] = ap ? (ap.label || ('결재자 ' + (a + 1))) : '';
+          rowArr[inspApprCol(a, 1)] = ap ? (ap.name || '') : '';
+          rowArr[inspApprCol(a, 2)] = ap ? (ap.email || '') : '';
+          rowArr[inspApprCol(a, 3)] = ap ? '대기' : '';
+          rowArr[inspApprCol(a, 4)] = '';
+          rowArr[inspApprCol(a, 5)] = '';
+        }
+        for (var z = 0; z < rowArr.length; z++) { if (rowArr[z] === undefined) rowArr[z] = ''; }
+
+        if (isResub) {
+          inspSheet.getRange(targetRowNum, 1, 1, INSP_TOTAL_COLS).setValues([rowArr]);
+        } else {
+          inspSheet.appendRow(rowArr);
+          targetRowNum = inspSheet.getLastRow();
+        }
+
+        return { ok: true, rowNum: targetRowNum, token: token, docNo: docNo,
+                 folderId: folderId, seq: seq, isResub: isResub,
+                 firstApprover: approvers[0], snapshot: {
+                   reqNo: reqNo, poNo: poNo, subject: subject, vendorName: vendorName,
+                   drafterName: drafterName, dept: dept,
+                 } };
+      } catch (e) {
+        return { ok: false, message: '제출 처리 실패: ' + e.toString() };
+      }
+    });
+
+    if (!lockResult.ok) return lockResult;
+
+    // ── 락 밖: 사진 임시 저장 ──
+    var savedPhotos = [];
+    try {
+      var folder = DriveApp.getFolderById(lockResult.folderId);
+      savedPhotos = _saveInspPhotos(folder, photos);
+      var ss2    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet2 = ss2.getSheetByName(CONFIG.INSP_SHEET_NAME);
+      sheet2.getRange(lockResult.rowNum, INSP_COL.PHOTO_LIST + 1)
+        .setValue(JSON.stringify(savedPhotos));
+    } catch (e) {
+      // 사진 실패는 제출 자체를 막지 않음 (행은 이미 기록됨) — 관리자 알림
+      try { notifyAdminError('[INSP] 사진 임시 저장 실패: ' + lockResult.docNo + ' / ' + e.toString()); } catch (_) {}
+    }
+
+    // ── 락 밖: 1차 결재자 메일 ──
+    try {
+      var s = lockResult.snapshot;
+      var mailData = {
+        docNo:      lockResult.docNo,
+        subject:    '[검수] ' + s.subject,
+        drafter:    lockResult.snapshot.drafterName,
+        vendorName: s.vendorName,
+        dept:       s.dept,
+      };
+      if (lockResult.firstApprover && lockResult.firstApprover.email) {
+        _sendInspApprovalEmail(lockResult.firstApprover, mailData, lockResult.token, lockResult.rowNum, 0);
+      }
+    } catch (e) {
+      try { notifyAdminError('[INSP] 결재 요청 메일 실패: ' + lockResult.docNo + ' / ' + e.toString()); } catch (_) {}
+    }
+
+    // 감사 로그
+    try {
+      writeAuditLog({
+        eventType: lockResult.isResub ? AUDIT_EVENT.INSP_RESUBMIT : AUDIT_EVENT.INSP_SUBMIT,
+        docNo: lockResult.docNo, docToken: lockResult.token, docType: 'INSP',
+        actor: actor, reason: '검수보고서 ' + (lockResult.isResub ? '재상신' : '제출') + ' (' + lockResult.seq + '회차)',
+      });
+    } catch (_) {}
+
+    return {
+      ok: true,
+      message: '검수보고서 ' + lockResult.docNo + ' 제출 완료. 1차 결재자에게 메일이 발송됩니다.',
+      docNo: lockResult.docNo, token: lockResult.token, photos: savedPhotos.length,
+    };
+  } catch (err) {
+    return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
+  }
+}
+
+// ================================================================
+// [INSP Step 3] 내부 헬퍼
+// ================================================================
+
+function _pad2(n) { n = parseInt(n) || 0; return n < 10 ? '0' + n : String(n); }
+
+/** 품의서목록에서 token으로 행 1건 조회 → {rowNum, row} | null */
+function _findRowByTokenInDoc(docSheet, token) {
+  if (!token) return null;
+  var rows = docSheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][COL.TOKEN] || '') === token) {
+      return { rowNum: i + 1, row: rows[i] };
+    }
+  }
+  return null;
+}
+
+/** 검수보고서목록에서 token으로 행 1건 조회 → {rowNum, row} | null */
+function _readInspRowByToken(ss, token) {
+  if (!token) return null;
+  var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][INSP_COL.TOKEN] || '') === token) {
+      return { rowNum: i + 1, row: rows[i] };
+    }
+  }
+  return null;
+}
+
+/**
+ * 검수 사진 임시 저장 (이미지 전용 — ALLOWED_EXTS 검증 우회)
+ * 클라이언트에서 canvas 압축(긴 변 1600px, JPEG 0.8) 후 base64 전송 전제
+ * @returns {Array} [{id, name, size}]
+ */
+function _saveInspPhotos(folder, photos) {
+  var saved = [];
+  (photos || []).forEach(function (ph, idx) {
+    if (!ph || !ph.data) return;
+    var bytes = Utilities.base64Decode(ph.data);
+    var name  = ph.name || ('insp_photo_' + (idx + 1) + '.jpg');
+    var blob  = Utilities.newBlob(bytes, ph.type || 'image/jpeg', name);
+    var file  = folder.createFile(blob);
+    saved.push({ id: file.getId(), name: name, size: ph.size || bytes.length });
+  });
+  return saved;
+}
+
+/**
+ * 검수보고서 결재 요청 메일 — 기존 sendApprovalEmailWithRetry 재사용 시도,
+ * 시그니처/링크가 INSP와 달라 별도 래퍼로 분리(approve 링크에 docKind=INSP 부여).
+ * Step 4(결재 처리)에서 본 함수의 링크를 받는 라우팅을 추가한다.
+ */
+function _sendInspApprovalEmail(approver, data, token, rowNum, idx) {
+  var url = CONFIG.WEBAPP_URL + '?action=approve&docKind=INSP'
+          + '&token=' + encodeURIComponent(token)
+          + '&idx='   + idx;
+  var subject = '[검수보고서 결재요청] ' + data.docNo + ' - ' + data.subject;
+  var html =
+    '<div style="font-family:sans-serif;max-width:600px;">'
+    + '<h2 style="color:#0e7d72;">검수보고서 결재 요청</h2>'
+    + '<p><b>' + escapeHtml(approver.name || '') + '</b> 님, 아래 검수보고서의 결재를 요청드립니다.</p>'
+    + '<table style="border-collapse:collapse;font-size:14px;">'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">문서번호</td><td>' + escapeHtml(data.docNo) + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">품명</td><td>' + escapeHtml(data.subject) + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">업체명</td><td>' + escapeHtml(data.vendorName || '') + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">기안자</td><td>' + escapeHtml(data.drafter || '') + '</td></tr>'
+    + '</table>'
+    + '<p style="margin-top:16px;"><a href="' + url + '" style="background:#0e7d72;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">결재하러 가기</a></p>'
+    + '</div>';
+  var plain = '검수보고서 결재 요청\n문서번호: ' + data.docNo + '\n품명: ' + data.subject + '\n결재: ' + url;
+  // 일반 결재 알림 경로(sendEmailWithRetry, GmailApp 기반)로 발송
+  sendEmailWithRetry(approver.email, subject, plain, html);
+}
+
+// ================================================================
+// [INSP Step 3] 테스트
+// ================================================================
+
+/**
+ * Step 3 드라이런 — 실제 제출 없이 폼 데이터 조회만 점검
+ * 사용법: 운영의 최종승인(PRC) 토큰을 인자로 넣어 실행
+ *   testInspStep3('PRC토큰')  → 폼 자동채움 값/회차/권한 결과 로그
+ */
+function testInspStep3(prcToken) {
+  if (!prcToken) {
+    console.log('사용법: testInspStep3("최종승인PRC의_token")');
+    console.log('힌트: debugInspStep2() 로그의 PARENT_DOC_ID가 아니라 PRC 행의 token이 필요합니다.');
+    return;
+  }
+  var res = getInspFormDataForClient(prcToken, null);
+  console.log(JSON.stringify(res, null, 2));
+}
+
 
 // ================================================================
 // Step 1 테스트 — 편집기에서 직접 실행

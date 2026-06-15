@@ -249,7 +249,7 @@ var STATE = {
 };
 
 // [INSP Step 2] 검수보고서 작성 화면 활성 여부 — Step 3 배포 시 true로 변경
-var INSP_FORM_ENABLED = false;
+var INSP_FORM_ENABLED = true;   // [INSP Step 3] 작성 화면 활성화
 
 // ─── 부팅 ─────────────────────────────
 function boot(){
@@ -622,7 +622,7 @@ function poInspState(x){
 // 아코디언 하위 — 회차별 검수보고서 목록
 function inspSubRows(x){
   var actor = (STATE.user || {}).email || '';
-  var isDrafter = (x.drafter === actor);
+  var isDrafter = String(x.drafter || '').toLowerCase() === String(actor || '').toLowerCase();
   var inner;
 
   if((x.insps || []).length === 0){

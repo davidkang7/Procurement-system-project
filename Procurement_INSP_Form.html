@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>검수보고서 작성</title>
+<style>
+  :root {
+    --bg:#f4f5f7; --panel:#fff; --ink:#1a1d23; --ink-soft:#4a5260; --ink-mute:#8b94a3;
+    --line:#e3e6eb; --line-soft:#eef0f3;
+    --insp:#0e7d72; --insp-soft:#e4f4f2; --insp-dark:#0a5e56;
+    --accent:#1a6fc4; --ok:#27ae60; --ok-soft:#e8f6ee;
+    --danger:#d64541; --danger-soft:#fdecec; --neutral-soft:#f0f2f5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Malgun Gothic',-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:13px;line-height:1.55;padding:0 0 60px;}
+  .topbar{background:var(--insp);color:#fff;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;}
+  .topbar .t{font-weight:700;font-size:15px;}
+  .topbar .s{font-size:11.5px;opacity:.85;}
+  .wrap{max-width:880px;margin:22px auto;padding:0 18px;}
+  .sec{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:16px;overflow:hidden;}
+  .sec-h{padding:11px 16px;border-bottom:1px solid var(--line-soft);font-weight:700;font-size:12.5px;background:#fbfbfc;display:flex;align-items:center;gap:8px;}
+  .sec-h .dot{width:8px;height:8px;border-radius:50%;background:var(--insp);}
+  .grid{display:grid;grid-template-columns:130px 1fr 130px 1fr;}
+  .lbl{background:#fbfbfc;border-bottom:1px solid var(--line-soft);border-right:1px solid var(--line-soft);padding:10px 12px;font-size:11.5px;font-weight:700;color:var(--ink-soft);display:flex;align-items:center;}
+  .val{border-bottom:1px solid var(--line-soft);padding:8px 12px;display:flex;align-items:center;}
+  .val.ro{color:var(--ink-soft);background:#fcfcfd;}
+  .val.span3{grid-column:span 3;}
+  .val input,.val select{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12.5px;font-family:inherit;}
+  .auto{font-size:10px;font-weight:700;color:var(--insp);background:var(--insp-soft);border-radius:8px;padding:1px 6px;margin-left:7px;white-space:nowrap;}
+
+  .body{padding:14px 16px;}
+  textarea{width:100%;border:1px solid var(--line);border-radius:7px;padding:9px 11px;font-size:12.5px;font-family:inherit;min-height:70px;resize:vertical;}
+  .verdict-row{display:flex;gap:10px;margin-bottom:12px;}
+  .verdict{flex:1;border:1.5px solid var(--line);border-radius:8px;padding:11px;text-align:center;font-weight:700;cursor:pointer;color:var(--ink-soft);user-select:none;}
+  .verdict.pass.sel{border-color:var(--ok);background:var(--ok-soft);color:var(--ok);}
+  .verdict.fail.sel{border-color:var(--danger);background:var(--danger-soft);color:var(--danger);}
+
+  .pz{border:1.5px dashed var(--line);border-radius:9px;padding:18px;text-align:center;color:var(--ink-mute);cursor:pointer;margin-top:12px;}
+  .pz:hover{border-color:var(--insp);color:var(--insp);background:var(--insp-soft);}
+  .pg{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:12px;}
+  .pi{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fafafa;}
+  .pi img{width:100%;height:104px;object-fit:cover;display:block;}
+  .pi .m{font-size:10.5px;color:var(--ink-mute);padding:4px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pi .d{position:absolute;top:5px;right:5px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;font-size:11px;line-height:1;}
+  .notice{margin-top:10px;font-size:11.5px;color:var(--ink-soft);background:#fef3e2;border:1px solid #f3dcb8;border-radius:7px;padding:8px 11px;}
+  .fc{display:flex;align-items:flex-start;gap:9px;background:var(--insp-soft);border:1px solid #c8e2de;border-radius:8px;padding:11px 13px;margin-top:13px;cursor:pointer;}
+  .fc input{margin-top:3px;}
+  .fc b{color:var(--insp);}
+  .fc .ds{font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
+
+  /* 결재란 — 기존 Form 패턴 */
+  .appr-wrap{padding:12px 16px 10px;overflow-x:auto;}
+  .appr-table{border-collapse:collapse;}
+  .appr-table th{background:#f0f0f0;font-size:10px;font-weight:700;color:#444;padding:4px 6px;border:1px solid #ccc;text-align:center;min-width:110px;}
+  .appr-table td{border:1px solid #ccc;padding:3px 6px;font-size:11px;text-align:center;}
+  .appr-table td.bg{background:#f7f7f7;font-size:10px;color:#666;padding:4px 10px;font-weight:700;}
+  .trig{font-size:11px;color:#aaa;cursor:pointer;padding:4px 6px;display:block;width:100%;}
+  .trig.sel{color:var(--insp);font-weight:600;background:var(--insp-soft);border-radius:4px;}
+  .sub{font-size:10px;color:#666;}
+  .delb{background:none;border:none;cursor:pointer;color:#c0392b;font-size:14px;line-height:1;font-family:inherit;}
+  .delb:disabled{color:#ccc;cursor:not-allowed;}
+  .addb{font-size:11px;color:var(--insp);background:none;border:none;cursor:pointer;padding:2px 0;font-family:inherit;font-weight:600;}
+  .addb:hover{text-decoration:underline;}
+  .dd{position:fixed;z-index:9999;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:260px;max-height:240px;overflow-y:auto;}
+  .dd-s{padding:6px 8px;border-bottom:1px solid #eee;}
+  .dd-s input{width:100%;border:1px solid #ccc;border-radius:4px;padding:4px 8px;font-size:11px;font-family:inherit;outline:none;}
+  .dd-i{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-bottom:1px solid #f5f5f5;}
+  .dd-i:hover{background:#f5f5f5;}
+  .dd-av{width:24px;height:24px;border-radius:50%;background:var(--insp-soft);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--insp);flex-shrink:0;}
+  .dd-n{font-size:12px;font-weight:600;color:#111;}
+  .dd-m{font-size:10px;color:#888;}
+  .dd-e{padding:12px;text-align:center;font-size:11px;color:#aaa;}
+
+  .actions{display:flex;gap:10px;justify-content:flex-end;margin:6px 0 0;}
+  .btn{border:none;border-radius:7px;padding:9px 18px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn.insp{background:var(--insp);color:#fff;}
+  .btn.insp:hover{filter:brightness(1.08);}
+  .btn.gray{background:#fff;color:var(--ink-soft);border:1px solid var(--line);}
+  .btn.primary{background:var(--accent);color:#fff;}
+  .btn:disabled{opacity:.5;cursor:default;}
+
+  .loading{text-align:center;padding:60px 20px;color:var(--ink-mute);}
+  .spinner{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--insp);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .err-box{background:var(--danger-soft);border:1px solid #f3c0c0;border-radius:9px;padding:18px;color:var(--danger);font-size:13px;}
+
+  .overlay{position:fixed;inset:0;background:rgba(20,22,28,.5);display:none;align-items:center;justify-content:center;z-index:100;}
+  .overlay.on{display:flex;}
+  .ov-card{background:#fff;border-radius:12px;padding:28px 32px;text-align:center;max-width:380px;box-shadow:0 12px 40px rgba(0,0,0,.3);}
+  .ov-card .spinner{margin-bottom:16px;}
+  .ov-msg{font-size:13.5px;font-weight:600;color:var(--ink);}
+  .ov-sub{font-size:11.5px;color:var(--ink-mute);margin-top:6px;}
+  .ok-icon{width:48px;height:48px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 14px;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1d23;color:#fff;padding:11px 22px;border-radius:9px;font-size:12.5px;font-weight:600;display:none;z-index:200;}
+  .toast.show{display:block;}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div><div class="t">검수보고서 작성</div><div class="s">InLC Technology · 구매결재시스템</div></div>
+  <button class="btn gray" onclick="goHome()">← 홈으로</button>
+</div>
+
+<div class="wrap" id="wrap">
+  <div class="loading"><div class="spinner"></div>품의 정보를 불러오는 중...</div>
+</div>
+
+<div class="overlay" id="overlay"><div class="ov-card" id="ov-card"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// 서버 주입 변수
+var PRC_TOKEN   = '<?= prcToken ?>';
+var RESUB_TOKEN = '<?= resubToken ?>';
+var WEBAPP_URL  = '<?= webappUrl ?>';
+
+var FORM = null, APPROVERS = [], CURRENT_USER = null, RESUB = null;
+var STATE = { verdict:'', isFinal:false, photos:[], appr:[null,null,null] };
+var DD = { el:null, slot:-1 };
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2800);}
+function goHome(){window.top.location.href=WEBAPP_URL;}
+function pad2(n){n=parseInt(n)||0;return n<10?'0'+n:String(n);}
+
+// ── 부팅 ──
+function boot(){
+  if(typeof google==='undefined'){
+    document.getElementById('wrap').innerHTML='<div class="err-box">Apps Script 환경에서만 실행 가능합니다.</div>';
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res||!res.ok){
+        document.getElementById('wrap').innerHTML='<div class="err-box">'+esc(res?res.message:'데이터를 불러올 수 없습니다.')+'</div>';
+        return;
+      }
+      FORM=res.form; APPROVERS=res.approverList||[]; CURRENT_USER=res.currentUser||null; RESUB=res.resub||null;
+      if(RESUB){
+        STATE.verdict=RESUB.verdict||''; STATE.isFinal=!!RESUB.isFinal;
+      }
+      render();
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('wrap').innerHTML='<div class="err-box">서버 오류: '+esc(err&&err.message?err.message:err)+'</div>';
+    })
+    .getInspFormDataForClient(PRC_TOKEN, RESUB_TOKEN||null);
+}
+
+function render(){
+  var f=FORM, me=CURRENT_USER||{};
+  var html='';
+
+  // 1. 기본 정보
+  html+='<div class="sec"><div class="sec-h"><span class="dot"></span>기본 정보'
+    + (RESUB?' <span style="font-weight:400;color:var(--danger);font-size:11px;">— 반려 후 재상신('+f.nextSeq+'회차)</span>':'')
+    + '</div><div class="grid">'
+    + row('문서 번호', f.docNo, '품의번호+회차 자동')
+    + row('담당자', esc(f.drafterName)+' ('+esc(f.dept)+')', '자동')
+    + row('품의 번호', esc(f.reqNo), '')
+    + row('PO 번호', esc(f.poNo), '')
+    + row('품명', esc(f.subject), '')
+    + row('업체명', esc(f.vendorName), '')
+    + row('기안 일자', esc(f.issueDate), '')
+    + '<div class="lbl">입고 일자 *</div><div class="val"><input type="date" id="f-received" value="'+esc(RESUB?RESUB.receivedDate:today())+'"></div>'
+    + '<div class="lbl">입고 내역 *</div><div class="val span3"><input type="text" id="f-note" maxlength="200" placeholder="이번 회차 입고 품목·수량 (예: 지그 본체 2EA — 2차분)" value="'+esc(RESUB?RESUB.receivedNote:'')+'"></div>'
+    + '</div></div>';
+
+  // 2. 검수 결과
+  html+='<div class="sec"><div class="sec-h"><span class="dot"></span>검수 결과</div><div class="body">'
+    + '<div class="verdict-row">'
+    +   '<div class="verdict pass'+(STATE.verdict==='합격'?' sel':'')+'" onclick="setV(\'합격\')">✓ 합격</div>'
+    +   '<div class="verdict fail'+(STATE.verdict==='불합격'?' sel':'')+'" onclick="setV(\'불합격\')">✕ 불합격</div>'
+    + '</div>'
+    + '<textarea id="f-comment" placeholder="검수 의견 (예: 외관·치수 전수 검수, 이상 없음)">'+esc(RESUB?RESUB.comment:'')+'</textarea>'
+    + '<div class="pz" onclick="document.getElementById(\'f-photos\').click()">📷 검수 사진 추가 — 최대 6장, 장당 5MB (업로드 시 자동 압축)</div>'
+    + '<input type="file" id="f-photos" accept="image/*" multiple style="display:none" onchange="addPhotos(this.files)">'
+    + '<div class="pg" id="pg"></div>'
+    + '<div class="notice">ℹ️ 사진은 결재 완료 시 <b>PDF에 삽입된 후 원본은 보관되지 않습니다.</b></div>'
+    + '<label class="fc"><input type="checkbox" id="f-final"'+(STATE.isFinal?' checked':'')+' onchange="STATE.isFinal=this.checked">'
+    + '<div><b>최종 검수 (이번 입고로 본 품의의 납품 완료)</b>'
+    + '<div class="ds">체크 후 결재가 완료되면 본 품의가 <b>검수 완료(종결)</b> 처리되고 추가 제출이 차단됩니다.</div></div></label>'
+    + '</div></div>';
+
+  // 3. 결재란
+  html+='<div class="sec"><div class="sec-h"><span class="dot"></span>결재란 '
+    + '<span style="font-weight:400;color:#c0392b;font-size:10px;">— 셀 클릭하여 결재자 검색 *</span>'
+    + '<span style="font-weight:400;color:var(--ink-mute);font-size:11px;margin-left:auto;">기안자 자동 고정 · 결재자 최대 3인</span></div>'
+    + '<div class="appr-wrap"><div id="appr-area"></div>'
+    + '<div style="display:flex;justify-content:flex-end;margin-top:8px;"><button class="addb" onclick="addAppr()">+ 결재자 추가</button></div>'
+    + '</div></div>';
+
+  html+='<div class="actions">'
+    + '<button class="btn gray" onclick="goHome()">취소</button>'
+    + '<button class="btn insp" id="submit-btn" onclick="submit()">'+(RESUB?'재상신':'검수보고서 제출')+' →</button>'
+    + '</div>';
+
+  document.getElementById('wrap').innerHTML=html;
+  drawPhotos(); renderApprTable();
+}
+
+function row(label,value,autoTag){
+  return '<div class="lbl">'+esc(label)+'</div><div class="val ro">'+value+(autoTag?'<span class="auto">'+esc(autoTag)+'</span>':'')+'</div>';
+}
+function today(){return new Date().toISOString().slice(0,10);}
+function setV(v){STATE.verdict=v;document.querySelectorAll('.verdict').forEach(function(e){e.classList.remove('sel');});var el=document.querySelector('.verdict.'+(v==='합격'?'pass':'fail'));if(el)el.classList.add('sel');}
+
+// ── 사진 (canvas 압축) ──
+function addPhotos(files){
+  var remain=6-STATE.photos.length;
+  Array.from(files).slice(0,remain).forEach(function(file){
+    if(file.size>5*1024*1024){toast('"'+file.name+'" — 장당 5MB 초과로 제외되었습니다.');return;}
+    compressImage(file,function(dataUrl,blobSize){
+      STATE.photos.push({name:file.name.replace(/\.[^.]+$/,'.jpg'),size:blobSize,dataUrl:dataUrl});
+      drawPhotos();
+    });
+  });
+  if(files.length>remain) toast('사진은 최대 6장까지 첨부 가능합니다.');
+}
+function compressImage(file,cb){
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var img=new Image();
+    img.onload=function(){
+      var max=1600, w=img.width, h=img.height;
+      if(w>max||h>max){ if(w>h){h=Math.round(h*max/w);w=max;}else{w=Math.round(w*max/h);h=max;} }
+      var canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      var dataUrl=canvas.toDataURL('image/jpeg',0.8);
+      var size=Math.round((dataUrl.length-dataUrl.indexOf(',')-1)*3/4);
+      cb(dataUrl,size);
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function drawPhotos(){
+  var g=document.getElementById('pg'); if(!g)return;
+  g.innerHTML=STATE.photos.map(function(p,i){
+    return '<div class="pi"><img src="'+p.dataUrl+'"><button class="d" onclick="STATE.photos.splice('+i+',1);drawPhotos()">✕</button><div class="m">'+esc(p.name)+' · '+(p.size/1024).toFixed(0)+'KB</div></div>';
+  }).join('');
+}
+
+// ── 결재란 (기존 Form 패턴) ──
+function renderApprTable(){
+  var area=document.getElementById('appr-area'); if(!area)return;
+  var me=CURRENT_USER||{name:FORM.drafterName,dept:FORM.dept,email:FORM.drafterEmail};
+  var head='<td class="bg" style="min-width:60px;">구분</td><th>기안자</th>'
+    + STATE.appr.map(function(_,i){return '<th>결재자 '+(i+1)+'</th>';}).join('');
+  var nameRow='<td class="bg">성명</td>'
+    + '<td><span class="trig sel" style="cursor:default;">'+esc(me.name||FORM.drafterName)+'</span></td>'
+    + STATE.appr.map(function(a,i){return '<td style="cursor:pointer;min-width:100px;"><span class="trig'+(a?' sel':'')+'" onclick="openDd('+i+',this)">'+(a?esc(a.name):'클릭하여 검색')+'</span></td>';}).join('');
+  var deptRow='<td class="bg">부서/직급</td>'
+    + '<td><span class="sub">'+esc((me.dept||FORM.dept)+' '+(me.rank||''))+'</span></td>'
+    + STATE.appr.map(function(a){return '<td><span class="sub">'+(a?esc(a.dept+' '+a.rank):'부서/직급')+'</span></td>';}).join('');
+  var emailRow='<td class="bg">이메일</td>'
+    + '<td><span class="sub">'+esc(me.email||FORM.drafterEmail)+'</span></td>'
+    + STATE.appr.map(function(a){return '<td><span class="sub">'+(a?esc(a.email):'이메일')+'</span></td>';}).join('');
+  var delRow='<td class="bg"></td><td><button class="delb" disabled>×</button></td>'
+    + STATE.appr.map(function(_,i){return '<td><button class="delb" onclick="delAppr('+i+')">×</button></td>';}).join('');
+  area.innerHTML='<table class="appr-table"><thead><tr>'+head+'</tr></thead><tbody><tr>'+nameRow+'</tr><tr>'+deptRow+'</tr><tr>'+emailRow+'</tr><tr>'+delRow+'</tr></tbody></table>';
+}
+function addAppr(){if(STATE.appr.length>=3){toast('결재자는 최대 3인까지 가능합니다.');return;}STATE.appr.push(null);renderApprTable();}
+function delAppr(i){if(STATE.appr.length<=1){toast('결재자는 최소 1인이 필요합니다.');return;}STATE.appr.splice(i,1);renderApprTable();}
+
+function openDd(slot,trig){
+  closeDd(); DD.slot=slot;
+  var dd=document.createElement('div'); dd.className='dd';
+  var r=trig.getBoundingClientRect();
+  dd.style.top=(r.bottom+4)+'px'; dd.style.left=r.left+'px';
+  dd.innerHTML='<div class="dd-s"><input type="text" id="dd-in" placeholder="이름 또는 부서 검색..." autocomplete="off"></div><div id="dd-list"></div>';
+  document.body.appendChild(dd); DD.el=dd;
+  var inp=document.getElementById('dd-in');
+  inp.addEventListener('input',function(){ddList(this.value);});
+  ddList('');
+  setTimeout(function(){inp.focus();},50);
+  setTimeout(function(){document.addEventListener('click',function oc(e){if(DD.el&&!DD.el.contains(e.target)&&e.target!==trig){closeDd();document.removeEventListener('click',oc);}});},100);
+}
+function closeDd(){if(DD.el){DD.el.remove();DD.el=null;DD.slot=-1;}}
+function ddList(q){
+  var list=document.getElementById('dd-list'); if(!list)return;
+  q=(q||'').toLowerCase();
+  var picked=STATE.appr.filter(Boolean).map(function(a){return a.email;});
+  var me=(FORM.drafterEmail||'').toLowerCase();
+  var f=APPROVERS.filter(function(p){
+    if(!p.active) return false;
+    if((p.email||'').toLowerCase()===me) return false;
+    if(picked.indexOf(p.email)>=0) return false;
+    return !q||(p.name||'').toLowerCase().indexOf(q)>=0||(p.dept||'').toLowerCase().indexOf(q)>=0;
+  });
+  if(f.length===0){list.innerHTML='<div class="dd-e">검색 결과가 없습니다.</div>';return;}
+  list.innerHTML=f.map(function(p){
+    return '<div class="dd-i" onclick="pickAppr(\''+esc(p.email)+'\')"><div class="dd-av">'+esc((p.name||'?').substring(0,1))+'</div><div><div class="dd-n">'+esc(p.name)+'</div><div class="dd-m">'+esc(p.dept+' · '+p.rank+' · '+p.email)+'</div></div></div>';
+  }).join('');
+}
+function pickAppr(email){
+  var p=APPROVERS.find(function(x){return x.email===email;});
+  if(p&&DD.slot>=0) STATE.appr[DD.slot]={name:p.name,dept:p.dept,rank:p.rank,email:p.email};
+  closeDd(); renderApprTable();
+}
+
+// ── 제출 ──
+function submit(){
+  if(STATE.verdict!=='합격'&&STATE.verdict!=='불합격'){toast('검수 판정(합격/불합격)을 선택해 주세요.');return;}
+  var note=document.getElementById('f-note').value.trim();
+  if(!note){toast('입고 내역을 입력해 주세요.');return;}
+  var sels=STATE.appr.filter(Boolean);
+  if(sels.length===0){toast('결재자를 1명 이상 지정해 주세요.');return;}
+  var lastFilled=-1; STATE.appr.forEach(function(a,i){if(a)lastFilled=i;});
+  for(var k=0;k<lastFilled;k++){ if(!STATE.appr[k]){toast('결재자 '+(k+1)+' 칸이 비어 있습니다. 순서대로 채워 주세요.');return;} }
+  if(STATE.photos.length===0&&!confirm('첨부된 검수 사진이 없습니다. 사진 없이 제출하시겠습니까?'))return;
+
+  var approvers=sels.map(function(a,i){return {label:'결재자 '+(i+1),name:a.name,email:a.email};});
+  var payload={
+    prcToken:PRC_TOKEN, resubToken:RESUB_TOKEN||'',
+    receivedDate:document.getElementById('f-received').value,
+    receivedNote:note,
+    verdict:STATE.verdict,
+    isFinal:STATE.isFinal,
+    comment:document.getElementById('f-comment').value,
+    approvers:approvers,
+    photos:STATE.photos.map(function(p){return {name:p.name,size:p.size,type:'image/jpeg',data:p.dataUrl.split(',')[1]};}),
+  };
+
+  showOverlay('제출 처리 중...', '검수보고서를 기록하고 사진을 업로드하고 있습니다.');
+  document.getElementById('submit-btn').disabled=true;
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res&&res.ok){
+        showSuccess(res);
+        setTimeout(goHome,1800);
+      }else{
+        hideOverlay();
+        document.getElementById('submit-btn').disabled=false;
+        toast('제출 실패: '+(res?res.message:'알 수 없는 오류'));
+      }
+    })
+    .withFailureHandler(function(err){
+      hideOverlay();
+      document.getElementById('submit-btn').disabled=false;
+      toast('네트워크 오류: '+(err&&err.message?err.message:err));
+    })
+    .submitInspForClient(payload);
+}
+
+function showOverlay(msg,sub){
+  document.getElementById('ov-card').innerHTML='<div class="spinner"></div><div class="ov-msg">'+esc(msg)+'</div><div class="ov-sub">'+esc(sub||'')+'</div>';
+  document.getElementById('overlay').classList.add('on');
+}
+function showSuccess(res){
+  document.getElementById('ov-card').innerHTML='<div class="ok-icon">✓</div><div class="ov-msg">제출 완료</div><div class="ov-sub">'+esc(res.docNo)+' · 결재자에게 메일이 발송됩니다.<br>잠시 후 홈으로 이동합니다.</div>';
+}
+function hideOverlay(){document.getElementById('overlay').classList.remove('on');}
+
+boot();
+</script>
+</body>
+</html>

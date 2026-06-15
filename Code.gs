@@ -159,6 +159,15 @@ function doGet(e) {
     }, '구매팀 구매품의서 작성');
   }
 
+  // [INSP Step 3] 검수보고서 작성 화면
+  if (action === 'insp_form') {
+    return _renderTemplate('Procurement_INSP_Form', {
+      prcToken:   e.parameter.token || '',
+      resubToken: e.parameter.resub || '',
+      webappUrl:  CONFIG.WEBAPP_URL,
+    }, '검수보고서 작성');
+  }
+
   // 5-1) 관리자 페이지 진입 (A 그룹 — 강제 폐기/대리 결재/결재자 변경/락 해제/상태 변경)
   if (action === 'admin') {
     var fn = e.parameter.fn || '';
@@ -2567,13 +2576,14 @@ function getHomeDataForClient() {
       var curIdx    = parseInt(r[COL.APPR_IDX]) || 0;
 
       // [INSP Step 2] 결재 완료 메뉴용 수집
-      // - REQ는 PRC 조인용 메타로 적재 (기안자 매칭은 COL.DRAFTER 기준 — 위치 오프셋 금지)
-      // - PRC 최종승인 건은 prcFinals에 적재
+      // - REQ는 PRC 조인용 메타로 적재
+      // - 주의: 이 시스템에서 COL.DRAFTER = 기안자 '성명', 기안자 '이메일' = 기안자 블록(APPR_START+2)
+      //   (가시성 매칭은 반드시 이메일끼리 비교)
       if (docType === 'REQ') {
         reqMap[meta.token] = {
           docNo:       meta.docNo,
-          drafter:     meta.drafter,
-          drafterName: String(r[COL.APPR_START + 1] || ''),
+          drafter:     drafterEmail,   // 기안자 이메일 (기안자 블록)
+          drafterName: meta.drafter,   // 기안자 성명 (COL.DRAFTER)
           dept:        meta.dept,
           issueDate:   meta.issueDate,
         };
@@ -2637,7 +2647,8 @@ function getHomeDataForClient() {
         var pf  = prcFinals[c];
         var req = reqMap[pf.parentToken] || null;
         var reqDrafter = req ? req.drafter : '';
-        if (!isProc && reqDrafter !== actor) continue;
+        if (!isProc &&
+            String(reqDrafter).toLowerCase() !== String(actor || '').toLowerCase()) continue;
 
         var insps = inspGroups[pf.token] || [];
         var inspClosed = false;   // 최종 검수 회차가 승인 완료되면 품의 종결 (Q-INSP-09)
