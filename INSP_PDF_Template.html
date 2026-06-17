@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title><?= docNo ?> 검수보고서</title>
+<style>
+  @page { size: A4; margin: 14mm 16mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', 'NanumGothic', sans-serif; color: #111; font-size: 11px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .pdf-title { text-align: center; font-size: 24px; font-weight: 700; letter-spacing: 12px; padding: 6px 0 8px; border-bottom: 2.5px solid #0e7d72; margin-bottom: 6px; }
+  .pdf-sub { text-align: center; font-size: 9px; color: #777; letter-spacing: 3px; margin-bottom: 16px; }
+
+  table.meta { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  table.meta th { background: #e4f4f2; color: #0a5e56; border: 0.8px solid #b9ddd8; width: 90px; font-size: 10px; padding: 7px 9px; text-align: center; font-weight: 700; }
+  table.meta td { border: 0.8px solid #d6e3e1; padding: 7px 11px; font-size: 11px; }
+
+  .result-head { background: #0e7d72; color: #fff; font-size: 11px; font-weight: 700; padding: 6px 11px; letter-spacing: 1px; margin-bottom: 0; }
+  .result-box { border: 0.8px solid #b9ddd8; border-top: none; padding: 11px; margin-bottom: 14px; }
+  .verdict { display: inline-block; padding: 3px 14px; border-radius: 3px; font-weight: 700; font-size: 12px; margin-bottom: 8px; }
+  .verdict.pass { background: #e8f6ee; color: #1f8b4c; border: 1px solid #9bd5b1; }
+  .verdict.fail { background: #fdecec; color: #c0392b; border: 1px solid #e9a8a8; }
+  .comment { font-size: 11px; color: #333; white-space: pre-wrap; margin-bottom: 10px; }
+  .photos { display: flex; flex-wrap: wrap; gap: 8px; }
+  .photos .ph { width: calc(50% - 4px); border: 0.8px solid #ccc; border-radius: 2px; overflow: hidden; }
+  .photos .ph img { width: 100%; display: block; max-height: 240px; object-fit: contain; background: #fafafa; }
+  .photos .ph .cap { font-size: 8.5px; color: #999; padding: 2px 5px; }
+  .no-photo { font-size: 10px; color: #aaa; }
+
+  .appr-wrap { margin-top: 4px; }
+  .appr-title { font-size: 10px; font-weight: 700; color: #0a5e56; margin-bottom: 5px; letter-spacing: 1px; }
+  table.appr { border-collapse: collapse; }
+  table.appr th { border: 1px solid #0e7d72; background: #e4f4f2; color: #0a5e56; font-size: 9px; padding: 4px 14px; font-weight: 700; }
+  table.appr td { border: 1px solid #0e7d72; width: 90px; height: 48px; text-align: center; font-size: 10px; vertical-align: middle; }
+  table.appr td .nm { font-weight: 700; font-size: 11px; }
+  table.appr td .dt { font-size: 7.5px; color: #888; margin-top: 2px; }
+
+  .footer { margin-top: 18px; text-align: center; font-size: 8.5px; color: #999; border-top: 0.5px solid #ddd; padding-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="pdf-title">검 수 보 고 서</div>
+  <div class="pdf-sub">INLC TECHNOLOGY · INSPECTION REPORT</div>
+
+  <table class="meta">
+    <tr><th>문 서 번 호</th><td><?= docNo ?></td><th>회 차</th><td><?= seq ?>회차<?= isFinalLabel ?></td></tr>
+    <tr><th>담 당 자</th><td><?= drafterName ?> (<?= dept ?>)</td><th>품의번호</th><td><?= reqNo ?></td></tr>
+    <tr><th>PO 번 호</th><td><?= poNo ?></td><th>업 체 명</th><td><?= vendorName ?></td></tr>
+    <tr><th>품 명</th><td colspan="3"><?= subject ?></td></tr>
+    <tr><th>기안일자</th><td><?= issueDate ?></td><th>입고일자</th><td><?= receivedDate ?></td></tr>
+    <tr><th>입고내역</th><td colspan="3"><?= receivedNote ?></td></tr>
+  </table>
+
+  <div class="result-head">검 수 결 과</div>
+  <div class="result-box">
+    <span class="verdict <?= verdictClass ?>"><?= verdict ?></span>
+    <? if (comment) { ?><div class="comment"><?= comment ?></div><? } ?>
+    <? if (photoTags && photoTags.length) { ?>
+      <div class="photos">
+        <? for (var pi = 0; pi < photoTags.length; pi++) { ?>
+          <div class="ph"><img src="<?= photoTags[pi].src ?>"><div class="cap"><?= photoTags[pi].name ?></div></div>
+        <? } ?>
+      </div>
+    <? } else { ?>
+      <div class="no-photo">(첨부된 검수 사진 없음)</div>
+    <? } ?>
+  </div>
+
+  <div class="appr-wrap">
+    <div class="appr-title">검 수 결 재</div>
+    <table class="appr">
+      <tr>
+        <? for (var a = 0; a < approvers.length; a++) { ?><th><?= approvers[a].label ?></th><? } ?>
+      </tr>
+      <tr>
+        <? for (var b = 0; b < approvers.length; b++) { ?>
+          <td>
+            <div class="nm"><?= approvers[b].name ?></div>
+            <? if (approvers[b].status === '승인') { ?><div style="color:#1f8b4c;font-weight:700;">✓ 승인</div><div class="dt"><?= approvers[b].processedAt ?></div><? } ?>
+            <? if (approvers[b].status === '반려') { ?><div style="color:#c0392b;font-weight:700;">✕ 반려</div><div class="dt"><?= approvers[b].processedAt ?></div><? } ?>
+          </td>
+        <? } ?>
+      </tr>
+    </table>
+  </div>
+
+  <div class="footer">본 문서는 구매결재시스템에서 전자결재 완료 후 자동 생성되었습니다. · <?= generatedAt ?></div>
+</body>
+</html>

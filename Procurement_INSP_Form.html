@@ -122,7 +122,14 @@ var DD = { el:null, slot:-1 };
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2800);}
-function goHome(){window.top.location.href=WEBAPP_URL;}
+function goHome(){
+  try { window.top.location.href = WEBAPP_URL; }
+  catch(e) {
+    // 샌드박스에서 top 접근이 막히면 현재 컨텍스트로 이동 시도
+    try { window.open(WEBAPP_URL, '_top'); }
+    catch(e2) { location.href = WEBAPP_URL; }
+  }
+}
 function pad2(n){n=parseInt(n)||0;return n<10?'0'+n:String(n);}
 
 // ── 부팅 ──
@@ -283,12 +290,9 @@ function closeDd(){if(DD.el){DD.el.remove();DD.el=null;DD.slot=-1;}}
 function ddList(q){
   var list=document.getElementById('dd-list'); if(!list)return;
   q=(q||'').toLowerCase();
-  var picked=STATE.appr.filter(Boolean).map(function(a){return a.email;});
-  var me=(FORM.drafterEmail||'').toLowerCase();
+  // REQ/PRC 동일: 본인·중복 제외하지 않음 (기안자=결재자 본인 허용, 위임 케이스 허용)
   var f=APPROVERS.filter(function(p){
     if(!p.active) return false;
-    if((p.email||'').toLowerCase()===me) return false;
-    if(picked.indexOf(p.email)>=0) return false;
     return !q||(p.name||'').toLowerCase().indexOf(q)>=0||(p.dept||'').toLowerCase().indexOf(q)>=0;
   });
   if(f.length===0){list.innerHTML='<div class="dd-e">검색 결과가 없습니다.</div>';return;}
@@ -313,7 +317,17 @@ function submit(){
   for(var k=0;k<lastFilled;k++){ if(!STATE.appr[k]){toast('결재자 '+(k+1)+' 칸이 비어 있습니다. 순서대로 채워 주세요.');return;} }
   if(STATE.photos.length===0&&!confirm('첨부된 검수 사진이 없습니다. 사진 없이 제출하시겠습니까?'))return;
 
-  var approvers=sels.map(function(a,i){return {label:'결재자 '+(i+1),name:a.name,email:a.email};});
+  // approvers[0]=기안자(본인, 자기결재), [1..]=결재자 — REQ/PRC 동일 구조
+  var approvers=[{label:'기안자', name:(CURRENT_USER&&CURRENT_USER.name)||FORM.drafterName, email:FORM.drafterEmail}];
+  sels.forEach(function(a,i){ approvers.push({label:'결재자 '+(i+1), name:a.name, email:a.email}); });
+
+  // 결재자 중복 배정 경고 (REQ/PRC 동일 — 의도된 본인/위임 케이스는 허용, 실수만 잡음)
+  var seen={}, dups=[];
+  approvers.forEach(function(ap){
+    var em=(ap.email||'').toLowerCase(); if(!em)return;
+    if(seen[em]) dups.push(ap.name||em); else seen[em]=true;
+  });
+  if(dups.length>0 && !confirm('동일한 결재자가 여러 단계에 배정되어 있습니다:\n· '+dups.join('\n· ')+'\n\n(기안자 본인을 결재자로 지정한 경우일 수 있습니다)\n이대로 제출하시겠습니까?')) return;
   var payload={
     prcToken:PRC_TOKEN, resubToken:RESUB_TOKEN||'',
     receivedDate:document.getElementById('f-received').value,
@@ -332,7 +346,6 @@ function submit(){
     .withSuccessHandler(function(res){
       if(res&&res.ok){
         showSuccess(res);
-        setTimeout(goHome,1800);
       }else{
         hideOverlay();
         document.getElementById('submit-btn').disabled=false;
@@ -352,7 +365,11 @@ function showOverlay(msg,sub){
   document.getElementById('overlay').classList.add('on');
 }
 function showSuccess(res){
-  document.getElementById('ov-card').innerHTML='<div class="ok-icon">✓</div><div class="ov-msg">제출 완료</div><div class="ov-sub">'+esc(res.docNo)+' · 결재자에게 메일이 발송됩니다.<br>잠시 후 홈으로 이동합니다.</div>';
+  document.getElementById('ov-card').innerHTML=
+    '<div class="ok-icon">✓</div>'
+    + '<div class="ov-msg">제출 완료</div>'
+    + '<div class="ov-sub">'+esc(res.docNo)+' · 1차 결재자에게 메일이 발송되었습니다.</div>'
+    + '<button class="btn insp" style="margin-top:18px;" onclick="goHome()">홈으로 이동</button>';
 }
 function hideOverlay(){document.getElementById('overlay').classList.remove('on');}
 

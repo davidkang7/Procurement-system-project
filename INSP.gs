@@ -1,7 +1,10 @@
 // ================================================================
 // INSP.gs — 검수보고서(INSP) 모듈 (누적본: Step 1~3)
 // Step 1: 스키마 + 시트 보장 / Step 2: 홈 "결재 완료" 그룹 조회
-// Step 3: 작성 폼 데이터 조회 + 제출(submitInspForClient) + 사진 임시 저장
+// Step 3: 작성 폼 + 제출 + 사진 임시 저장
+// Step 4: 결재 승인/반려 + 최종 진행중 차단 + 결재란 기안자 포함(4블록)
+// Step 5: 전용 뷰어 + 내 검수 결재 대기 + 최종 완료(INSP)
+// Step 6: 최종승인 시 PDF 생성 → FINAL/PO폴더 이동 → 사진 삭제 (insp_pdf 큐 job)
 // ================================================================
 // 구매결재시스템 Phase 2 / INSP 구현설계서 v1.0 기준
 //
@@ -66,9 +69,9 @@ var INSP_COL = {
   REJECT_LOG:    24,  // 반려 이력 누적 텍스트
   PHOTO_LIST:    25,  // JSON: [{id, name, size}] — 임시 사진 파일 목록
   MOVE_STATUS:   26,  // 'STAGING' | 'FINAL'
-  APPR_START:    27,  // 결재자 블록 시작 (결재자 1~3, 기안자 미포함)
+  APPR_START:    27,  // 결재 블록 시작 (블록0=기안자, 블록1~3=결재자 1~3 — REQ/PRC 동일 구조)
   APPR_COLS:     6,   // 블록당 컬럼 수: label, name, email, status, processedAt, comment
-  MAX_APPROVERS: 3,   // Q-INSP-03: 결재자 최대 3인
+  MAX_APPROVERS: 4,   // 기안자 1 + 결재자 최대 3 (Q-INSP-03). approvers[0]=기안자
 };
 INSP_COL._VERSION = 'insp-v1.0';
 
@@ -96,15 +99,14 @@ function ensureInspSheet() {
     'apprCount', 'apprIdx', 'resubCount', 'rejectLog',
     'photoList', 'moveStatus',
   ];
-  // 결재자 블록 헤더 (결재자 1~3 × 6컬럼)
-  for (var i = 1; i <= INSP_COL.MAX_APPROVERS; i++) {
+  // 결재 블록 헤더 (블록0=기안자, 블록1~3=결재자 1~3 — REQ/PRC 동일 구조)
+  // approvers[0]=기안자(자기결재), approvers[1..3]=결재자
+  var apprPrefix = ['drafter_appr', 'appr1', 'appr2', 'appr3'];
+  for (var i = 0; i < INSP_COL.MAX_APPROVERS; i++) {
+    var px = apprPrefix[i];
     headers.push(
-      'appr' + i + '_label',
-      'appr' + i + '_name',
-      'appr' + i + '_email',
-      'appr' + i + '_status',
-      'appr' + i + '_processedAt',
-      'appr' + i + '_comment'
+      px + '_label', px + '_name', px + '_email',
+      px + '_status', px + '_processedAt', px + '_comment'
     );
   }
 
@@ -307,9 +309,12 @@ function getInspFormDataForClient(prcToken, resubToken) {
     var groups = _getInspGroupsByPrc(ss);
     var existing = groups[prcToken] || [];
 
-    var closed = existing.some(function(x) { return x.isFinal && x.status === '최종승인(INSP)'; });
-    if (closed && !resubToken) {
-      return { ok: false, message: '이미 최종 검수가 승인되어 종결된 품의입니다. 추가 제출이 불가합니다.' };
+    var locked = _isInspLocked(existing);
+    if (locked && !resubToken) {
+      var finalApproved = existing.some(function(x){ return x.isFinal && x.status === '최종승인(INSP)'; });
+      return { ok: false, message: finalApproved
+        ? '이미 최종 검수가 승인되어 종결된 품의입니다. 추가 제출이 불가합니다.'
+        : '최종 검수 보고서가 이미 제출되어 결재 진행 중입니다. 추가 제출이 불가합니다. (해당 건이 반려되면 재상신할 수 있습니다)' };
     }
 
     var maxSeq = 0;
@@ -395,10 +400,17 @@ function _submitInspCore(data) {
     if (!data.receivedNote || !String(data.receivedNote).trim()) {
       return { ok: false, message: '입고 내역을 입력해 주세요.' };
     }
+    // approvers[0]=기안자(본인), [1..]=결재자 (REQ/PRC 동일 구조)
     var approvers = data.approvers || [];
-    if (approvers.length < 1) return { ok: false, message: '결재자를 1명 이상 지정해 주세요.' };
+    if (approvers.length < 2) return { ok: false, message: '결재자를 1명 이상 지정해 주세요. (기안자 외)' };
     if (approvers.length > INSP_COL.MAX_APPROVERS) {
-      return { ok: false, message: '결재자는 최대 ' + INSP_COL.MAX_APPROVERS + '인까지 지정 가능합니다.' };
+      return { ok: false, message: '결재자는 최대 ' + (INSP_COL.MAX_APPROVERS - 1) + '인까지 지정 가능합니다.' };
+    }
+    // 기안자(0번) 본인 검증
+    var drafterAppr = (approvers[0] && approvers[0].email ? approvers[0].email : '').toLowerCase();
+    if (!drafterAppr) return { ok: false, message: '기안자(본인) 정보가 비어 있습니다. 새로고침 후 다시 시도해 주세요.' };
+    if (drafterAppr !== actor) {
+      return { ok: false, message: '기안자는 본인만 지정할 수 있습니다. (로그인: ' + actor + ' / 기안자: ' + drafterAppr + ')' };
     }
 
     // 사진 사전 검증 (락 밖)
@@ -433,7 +445,7 @@ function _submitInspCore(data) {
         // 기존 INSP 그룹 (회차 + 종결)
         var groups = _getInspGroupsByPrc(ss);
         var existing = groups[data.prcToken] || [];
-        var closed = existing.some(function(x) { return x.isFinal && x.status === '최종승인(INSP)'; });
+        var locked = _isInspLocked(existing);
 
         // 재상신 분기
         var isResub = !!data.resubToken;
@@ -445,7 +457,12 @@ function _submitInspCore(data) {
             return { ok: false, message: '반려 상태만 재상신할 수 있습니다.' };
           }
         } else {
-          if (closed) return { ok: false, message: '이미 종결된 품의입니다. 추가 제출이 불가합니다.' };
+          if (locked) {
+            var fa = existing.some(function(x){ return x.isFinal && x.status === '최종승인(INSP)'; });
+            return { ok: false, message: fa
+              ? '이미 최종 검수가 승인되어 종결된 품의입니다.'
+              : '최종 검수 보고서가 결재 진행 중입니다. 추가 제출이 불가합니다.' };
+          }
         }
 
         // 스냅샷 (제출 시점 고정 — 원본 변경과 비동기화)
@@ -512,7 +529,7 @@ function _submitInspCore(data) {
         // 결재자 블록 (label/name/email/status/processedAt/comment)
         for (var a = 0; a < INSP_COL.MAX_APPROVERS; a++) {
           var ap = approvers[a];
-          rowArr[inspApprCol(a, 0)] = ap ? (ap.label || ('결재자 ' + (a + 1))) : '';
+          rowArr[inspApprCol(a, 0)] = ap ? (ap.label || (a === 0 ? '기안자' : ('결재자 ' + a))) : '';
           rowArr[inspApprCol(a, 1)] = ap ? (ap.name || '') : '';
           rowArr[inspApprCol(a, 2)] = ap ? (ap.email || '') : '';
           rowArr[inspApprCol(a, 3)] = ap ? '대기' : '';
@@ -597,6 +614,44 @@ function _submitInspCore(data) {
 
 function _pad2(n) { n = parseInt(n) || 0; return n < 10 ? '0' + n : String(n); }
 
+/**
+ * 본인의 결재 단계(idx) 판정 — 동일인이 여러 단계에 배정된 경우 대응
+ * - 현재 차례(curIdx)의 결재자가 본인이면 그 단계를 우선 반환 (이미 승인한 앞 단계가 아니라 '지금 처리할' 단계)
+ * - 아니면 본인이 배정된 첫 단계 반환 (열람/대기 판정용)
+ * @param {Array} row INSP 행 배열
+ * @param {number} apprCount 결재자 수
+ * @param {number} curIdx 현재 결재 차례
+ * @param {string} actor 로그인 이메일(소문자)
+ * @returns {number} 본인 결재 단계 idx, 없으면 -1
+ */
+function _findMyInspIdx(row, apprCount, curIdx, actor) {
+  actor = String(actor || '').toLowerCase();
+  // 1) 현재 차례가 본인이면 그 단계 우선 (동일인 다단계 핵심)
+  if (curIdx >= 0 && curIdx < apprCount &&
+      String(row[inspApprCol(curIdx, 2)] || '').toLowerCase() === actor) {
+    return curIdx;
+  }
+  // 2) 본인이 배정된 첫 단계
+  for (var a = 0; a < apprCount; a++) {
+    if (String(row[inspApprCol(a, 2)] || '').toLowerCase() === actor) return a;
+  }
+  return -1;
+}
+
+/**
+ * 품의 종결(추가 제출 차단) 여부 판정
+ * - 최종 검수(isFinal) 회차가 '반려'가 아닌 상태로 존재하면 차단
+ *   (= 결재 대기/진행중 '검토중'·'결재중', 또는 이미 '최종승인(INSP)')
+ * - 반려된 최종 회차는 재상신 대상이므로 차단에서 제외
+ * @param {Array} inspList _getInspGroupsByPrc 그룹의 항목 배열
+ * @returns {boolean} true면 신규 제출 차단
+ */
+function _isInspLocked(inspList) {
+  return (inspList || []).some(function (x) {
+    return x.isFinal && x.status !== '반려';
+  });
+}
+
 /** 품의서목록에서 token으로 행 1건 조회 → {rowNum, row} | null */
 function _findRowByTokenInDoc(docSheet, token) {
   if (!token) return null;
@@ -647,25 +702,74 @@ function _saveInspPhotos(folder, photos) {
  * Step 4(결재 처리)에서 본 함수의 링크를 받는 라우팅을 추가한다.
  */
 function _sendInspApprovalEmail(approver, data, token, rowNum, idx) {
-  var url = CONFIG.WEBAPP_URL + '?action=approve&docKind=INSP'
-          + '&token=' + encodeURIComponent(token)
-          + '&idx='   + idx;
-  var subject = '[검수보고서 결재요청] ' + data.docNo + ' - ' + data.subject;
-  var html =
-    '<div style="font-family:sans-serif;max-width:600px;">'
-    + '<h2 style="color:#0e7d72;">검수보고서 결재 요청</h2>'
-    + '<p><b>' + escapeHtml(approver.name || '') + '</b> 님, 아래 검수보고서의 결재를 요청드립니다.</p>'
-    + '<table style="border-collapse:collapse;font-size:14px;">'
-    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">문서번호</td><td>' + escapeHtml(data.docNo) + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">품명</td><td>' + escapeHtml(data.subject) + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">업체명</td><td>' + escapeHtml(data.vendorName || '') + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">기안자</td><td>' + escapeHtml(data.drafter || '') + '</td></tr>'
-    + '</table>'
-    + '<p style="margin-top:16px;"><a href="' + url + '" style="background:#0e7d72;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">결재하러 가기</a></p>'
-    + '</div>';
-  var plain = '검수보고서 결재 요청\n문서번호: ' + data.docNo + '\n품명: ' + data.subject + '\n결재: ' + url;
-  // 일반 결재 알림 경로(sendEmailWithRetry, GmailApp 기반)로 발송
-  sendEmailWithRetry(approver.email, subject, plain, html);
+  // 구매품의서 결재요청 메일과 동일 구성 (확인 + 반려 + 승인 3버튼)
+  // 7번 해결책: 모든 버튼이 전용 뷰어(insp_view)로 가고, 뷰어가 서버 myApproverIdx로 본인 단계 재판정
+  var approverName = escapeHtml(approver.name || '');
+  var approverLabel = escapeHtml(approver.label || '');
+  var docNo    = escapeHtml(data.docNo || '-');
+  var docTitle = escapeHtml(data.subject || '검수보고서');
+  var vendor   = escapeHtml(data.vendorName || '-');
+  var drafter  = escapeHtml(data.drafter || '-');
+
+  // 확인 = 전용 뷰어(본문·사진), 승인/반려 = 경량 결재 화면(Procurement_Approval, docKind=INSP)
+  //  — 구매품의서와 동일한 분기. 경량 화면은 본문 없이 의견+버튼만 (가벼운 결재)
+  var viewBase = CONFIG.WEBAPP_URL +
+    '?action=insp_view&token=' + encodeURIComponent(token) + '&idx=' + encodeURIComponent(idx);
+  var apprBase = CONFIG.WEBAPP_URL +
+    '?action=approve&docKind=INSP&token=' + encodeURIComponent(token) +
+    '&docNo=' + encodeURIComponent(data.docNo || '') + '&idx=' + encodeURIComponent(idx);
+
+  var viewUrl    = viewBase;
+  var approveUrl = apprBase + '&decision=approve';
+  var rejectUrl  = apprBase + '&decision=reject';
+
+  var subject = '[검수보고서 결재요청] ' + (data.docNo || '-') + ' — ' + (data.subject || '검수보고서');
+
+  var htmlBody =
+    '<div style="font-family:\'Malgun Gothic\',Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;">'
+    + '<div style="background:#0e7d72;padding:24px 32px;">'
+    + '<div style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:2px;">구매품의 시스템</div>'
+    + '</div>'
+    + '<div style="padding:28px 32px;">'
+    + '<p style="font-size:15px;color:#111111;margin:0 0 8px;"><b>' + approverName + ' ' + approverLabel + '</b> 님,</p>'
+    + '<p style="font-size:14px;color:#444444;margin:0 0 24px;line-height:1.7;">'
+    + '아래 검수보고서에 대한 결재를 요청합니다.<br>내용을 확인하신 후 승인 또는 반려해 주세요.</p>'
+    + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">'
+    + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
+    + '<tr><td style="color:#888;padding:4px 0;width:80px;">문서번호</td><td style="color:#111;font-weight:600;">' + docNo + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 0;">품명</td><td style="color:#111;font-weight:600;">' + docTitle + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 0;">업체명</td><td style="color:#111;">' + vendor + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 0;">기안자</td><td style="color:#111;">' + drafter + '</td></tr>'
+    + '</table></div>'
+    + '<table role="presentation" align="center" style="margin:0 auto 20px auto;border-collapse:collapse;">'
+    + '<tr><td align="center" bgcolor="#0e7d72" style="border-radius:6px;">'
+    + '<a href="' + viewUrl + '" style="display:inline-block;background:#0e7d72;color:#fff;font-size:14px;font-weight:700;padding:12px 36px;border-radius:6px;text-decoration:none;letter-spacing:1px;">검수보고서 확인</a>'
+    + '</td></tr></table>'
+    + '<div style="border-top:1px solid #e0e0e0;margin:20px 0;"></div>'
+    + '<p style="font-size:12px;color:#888;text-align:center;margin:0 0 14px;">검수보고서 확인 후 아래에서 결재해 주세요.</p>'
+    + '<table role="presentation" align="center" style="margin:0 auto;border-collapse:collapse;"><tr>'
+    + '<td align="center" style="padding-right:10px;"><a href="' + rejectUrl + '" style="display:inline-block;background:#d64541;color:#fff;font-size:14px;font-weight:700;padding:11px 32px;border-radius:6px;text-decoration:none;border:2px solid #d64541;">반 려</a></td>'
+    + '<td align="center" style="padding-left:10px;"><a href="' + approveUrl + '" style="display:inline-block;background:#27ae60;color:#fff;font-size:14px;font-weight:700;padding:11px 32px;border-radius:6px;text-decoration:none;border:2px solid #27ae60;">승 인</a></td>'
+    + '</tr></table>'
+    + '</div>'
+    + '<div style="background:#f0f0f0;padding:16px 32px;text-align:center;">'
+    + '<p style="font-size:11px;color:#888;margin:0;">— ' + escapeHtml(CONFIG.FROM_NAME || '') + ' · 이 메일은 자동 발송되었습니다.</p>'
+    + '</div></div>';
+
+  var plainBody = [
+    approver.name + ' ' + (approver.label || '') + ' 님,', '',
+    '아래 검수보고서에 대한 결재를 요청합니다.', '',
+    '■ 문서번호: ' + (data.docNo || '-'),
+    '■ 품명:     ' + (data.subject || '-'),
+    '■ 업체명:   ' + (data.vendorName || '-'),
+    '■ 기안자:   ' + (data.drafter || '-'), '',
+    '▶ 검수보고서 확인: ' + viewUrl,
+    '▶ 승인하기: ' + approveUrl,
+    '▶ 반려하기: ' + rejectUrl, '',
+    '— ' + (CONFIG.FROM_NAME || ''),
+  ].join('\n');
+
+  return sendEmailWithRetry(approver.email, subject, plainBody, htmlBody);
 }
 
 // ================================================================
@@ -685,6 +789,587 @@ function testInspStep3(prcToken) {
   }
   var res = getInspFormDataForClient(prcToken, null);
   console.log(JSON.stringify(res, null, 2));
+}
+
+
+// ================================================================
+// [INSP Step 4] 검수보고서 결재 승인/반려 처리
+// ================================================================
+
+/**
+ * 검수보고서 결재 화면용 데이터 (Approval/Viewer 공용 경량 메타)
+ * - 토큰으로 INSP 행을 찾아 결재 진행 정보 반환
+ * - 현재 결재 단계(curIdx)와 본인 결재 여부를 서버가 판정 (idx 파라미터 신뢰 금지)
+ */
+function getInspDecisionMetaForClient(token) {
+  try {
+    var actor = (getActiveUserEmail() || '').toLowerCase();
+    var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return { ok: false, message: '검수보고서를 찾을 수 없습니다.' };
+    var r = info.row;
+    var status = String(r[INSP_COL.STATUS] || '');
+    var curIdx = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+    var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
+
+    // 본인이 현재 결재 단계의 결재자인지 자동 판정
+    var myIdx = _findMyInspIdx(r, apprCount, curIdx, actor);
+    // 현재 결재 차례의 라벨 (기안자/결재자 N) — Approval 경량화면 결재순서 표시용
+    var curLabel = (curIdx >= 0 && curIdx < apprCount)
+      ? String(r[inspApprCol(curIdx, 0)] || ('결재자 ' + curIdx))
+      : '';
+    var myLabel = (myIdx >= 0 && myIdx < apprCount)
+      ? String(r[inspApprCol(myIdx, 0)] || (myIdx === 0 ? '기안자' : ('결재자 ' + myIdx)))
+      : '';
+
+    return {
+      ok: true,
+      docNo:       String(r[INSP_COL.DOC_NO] || ''),
+      curLabel:    curLabel,
+      myLabel:     myLabel,
+      subject:     String(r[INSP_COL.SUBJECT] || ''),
+      vendorName:  String(r[INSP_COL.VENDOR_NAME] || ''),
+      drafterName: String(r[INSP_COL.DRAFTER_NAME] || ''),
+      receivedDate:toDateStr(r[INSP_COL.RECEIVED_DATE]),
+      verdict:     String(r[INSP_COL.VERDICT] || ''),
+      status:      status,
+      curIdx:      curIdx,
+      apprCount:   apprCount,
+      myIdx:       myIdx,
+      isMyTurn:    (myIdx === curIdx && status !== '반려' && status !== '최종승인(INSP)'),
+      alreadyDone: (status === '최종승인(INSP)' || status === '반려'),
+    };
+  } catch (err) {
+    return { ok: false, message: err.toString() };
+  }
+}
+
+/**
+ * 검수보고서 결재 처리 (승인/반려) — _decisionCore의 INSP 버전
+ * payload: { token, decision('approve'|'reject'), comment, idx? }
+ * - idx는 신뢰하지 않고 서버가 actor로 본인 단계 재판정
+ * - 최종 승인 시: 상태 '최종승인(INSP)'. IS_FINAL='Y'면 품의 종결(추가 제출 차단은 제출단에서 검증)
+ *   ※ PDF 변환·FINAL 이동·사진 삭제는 Step 6에서 insp_pdf 큐로 처리
+ */
+function processInspDecisionFromClient(payload) {
+  var lockResult = withLock(function () {
+    try {
+      var actor    = (getActiveUserEmail() || '').toLowerCase();
+      var token    = payload.token;
+      var decision = payload.decision;
+      var comment  = payload.comment || '';
+
+      var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+      if (!sheet) return { ok: false, message: '검수보고서 시트가 없습니다.' };
+
+      var info = _readInspRowByToken(ss, token);
+      if (!info) return { ok: false, message: '유효하지 않은 토큰입니다.' };
+      var rowNum = info.rowNum, r = info.row;
+
+      var status = String(r[INSP_COL.STATUS] || '');
+      if (status === '반려')          return { ok: false, message: '이미 반려된 검수보고서입니다.' };
+      if (status === '최종승인(INSP)') return { ok: false, message: '이미 최종 승인된 검수보고서입니다.' };
+
+      var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
+      var curIdx    = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+
+      // 본인 단계 자동 판정 (idx 파라미터 의존 금지 — 기존 학습)
+      // 동일인 다단계 대응: 현재 차례(curIdx)가 본인이면 그 단계를 처리 단계로 삼음
+      var myIdx = _findMyInspIdx(r, apprCount, curIdx, actor);
+      if (myIdx < 0)        return { ok: false, message: '결재 권한이 없습니다. (지정된 결재자가 아닙니다)' };
+      if (myIdx !== curIdx) return { ok: false, message: '결재 순서가 아닙니다. 앞 단계 결재 완료 후 처리됩니다.' };
+
+      var now = new Date();
+      var docNo       = String(r[INSP_COL.DOC_NO] || '');
+      var subject     = String(r[INSP_COL.SUBJECT] || '');
+      var drafterEmail= String(r[INSP_COL.DRAFTER] || '');
+      var drafterName = String(r[INSP_COL.DRAFTER_NAME] || '');
+      var isFinal     = String(r[INSP_COL.IS_FINAL] || '') === 'Y';
+      var apprName    = String(r[inspApprCol(curIdx, 1)] || '-');
+
+      // 현재 결재자 블록 status/processedAt/comment 기록
+      sheet.getRange(rowNum, inspApprCol(curIdx, 3) + 1, 1, 3).setValues([[
+        decision === 'approve' ? '승인' : '반려', now, comment,
+      ]]);
+
+      if (decision === 'reject') {
+        sheet.getRange(rowNum, INSP_COL.STATUS + 1).setValue('반려');
+        var existLog = String(r[INSP_COL.REJECT_LOG] || '');
+        var resubCount = parseInt(r[INSP_COL.RESUB_COUNT]) || 0;
+        var entry = '[' + (resubCount + 1) + '차 반려] ' + apprName + ' / ' + toDateTimeStr(now) + ' / ' + (comment || '사유 없음');
+        sheet.getRange(rowNum, INSP_COL.REJECT_LOG + 1).setValue(existLog ? existLog + '\n' + entry : entry);
+        return { ok: true, decision: 'reject', message: '반려 처리되었습니다.',
+          notify: { type: 'reject', toEmail: drafterEmail, drafter: drafterName,
+                    docNo: docNo, subject: subject, approverName: apprName, comment: comment } };
+      }
+
+      // 승인
+      var nextIdx = curIdx + 1;
+      sheet.getRange(rowNum, INSP_COL.APPR_IDX + 1).setValue(nextIdx);
+
+      if (nextIdx < apprCount) {
+        var nextName  = String(r[inspApprCol(nextIdx, 1)] || '');
+        var nextEmail = String(r[inspApprCol(nextIdx, 2)] || '');
+        var nextLabel = String(r[inspApprCol(nextIdx, 0)] || ('결재자 ' + (nextIdx + 1)));
+        sheet.getRange(rowNum, INSP_COL.STATUS + 1).setValue('결재중 (' + nextName + ')');
+        return { ok: true, decision: 'approve', message: '승인 처리되었습니다.',
+          notify: { type: 'next', approver: { label: nextLabel, name: nextName, email: nextEmail },
+                    docNo: docNo, subject: subject, drafter: drafterName, token: token, idx: nextIdx, rowNum: rowNum } };
+      }
+
+      // 최종 승인 → 종결 처리 (PDF/이동/삭제는 Step 6)
+      sheet.getRange(rowNum, INSP_COL.STATUS + 1).setValue('최종승인(INSP)');
+      return { ok: true, decision: 'approve', message: '최종 승인 처리되었습니다.', finalized: true,
+        notify: { type: 'completion', toEmail: drafterEmail, drafter: drafterName,
+                  docNo: docNo, subject: subject, token: token, isFinal: isFinal } };
+    } catch (err) {
+      return { ok: false, message: err.toString() };
+    }
+  });
+
+  if (!lockResult.ok || !lockResult.notify) return lockResult;
+
+  // 락 밖: 메일 + 감사 로그
+  var n = lockResult.notify;
+  try {
+    if (n.type === 'reject' && n.toEmail) {
+      _sendInspRejectEmail(n.toEmail, n.drafter, n.docNo, n.subject, n.approverName, n.comment, n.token);
+    } else if (n.type === 'next' && n.approver.email) {
+      _sendInspApprovalEmail(n.approver, { docNo: n.docNo, subject: n.subject, drafter: n.drafter, vendorName: '' }, n.token, n.rowNum, n.idx);
+    } else if (n.type === 'completion' && n.toEmail) {
+      _sendInspCompletionEmail(n.toEmail, n.drafter, n.docNo, n.subject, n.token, n.isFinal);
+    }
+  } catch (e) {
+    try { notifyAdminError('[INSP] 결재 후 메일 실패: ' + n.docNo + ' / ' + e.toString()); } catch (_) {}
+  }
+
+  try {
+    var ev = (lockResult.decision === 'reject') ? AUDIT_EVENT.INSP_REJECT
+           : (lockResult.finalized ? AUDIT_EVENT.INSP_FINALIZED : AUDIT_EVENT.INSP_APPROVE);
+    writeAuditLog({ eventType: ev, docNo: n.docNo, docToken: n.token, docType: 'INSP',
+      reason: lockResult.message + (n.isFinal && lockResult.finalized ? ' (최종 검수 — 품의 종결)' : '') });
+  } catch (_) {}
+
+  // [INSP Step 6] 최종 승인 완료 → PDF 생성·FINAL 이동·사진 삭제 작업을 큐에 등록
+  //  (enqueueJob은 메일/감사로그와 무관하게 항상 실행 — 기존 학습: 완료메일 조건 밖 배치)
+  if (lockResult.finalized) {
+    try {
+      enqueueJob({ type: 'insp_pdf', token: n.token, docNo: n.docNo, docType: 'INSP' });
+    } catch (e) {
+      try { notifyAdminError('[INSP] PDF 큐 등록 실패: ' + n.docNo + ' / ' + e.toString()); } catch (_) {}
+    }
+  }
+  return { ok: true, message: lockResult.message, finalized: !!lockResult.finalized };
+}
+
+/** INSP 반려 알림 메일 */
+function _sendInspRejectEmail(toEmail, drafter, docNo, subject, approverName, comment, token) {
+  var url = CONFIG.WEBAPP_URL + '?action=insp_form&resub=' + encodeURIComponent(token);
+  var subj = '[검수보고서 반려] ' + docNo + ' - ' + subject;
+  var html = '<div style="font-family:sans-serif;max-width:600px;">'
+    + '<h2 style="color:#d64541;">검수보고서가 반려되었습니다</h2>'
+    + '<p><b>' + escapeHtml(drafter || '') + '</b> 님, 제출하신 검수보고서가 반려되었습니다.</p>'
+    + '<table style="border-collapse:collapse;font-size:14px;">'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">문서번호</td><td>' + escapeHtml(docNo) + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">반려자</td><td>' + escapeHtml(approverName || '') + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">사유</td><td>' + escapeHtml(comment || '사유 없음') + '</td></tr>'
+    + '</table>'
+    + '<p style="margin-top:16px;"><a href="' + url + '" style="background:#0e7d72;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">수정 후 재상신</a></p></div>';
+  var plain = '검수보고서 반려\n문서번호: ' + docNo + '\n반려자: ' + approverName + '\n사유: ' + (comment || '사유 없음') + '\n재상신: ' + url;
+  sendEmailWithRetry(toEmail, subj, plain, html);
+}
+
+/** INSP 완료 알림 메일 */
+function _sendInspCompletionEmail(toEmail, drafter, docNo, subject, token, isFinal) {
+  var subj = '[검수보고서 최종승인] ' + docNo + ' - ' + subject;
+  var html = '<div style="font-family:sans-serif;max-width:600px;">'
+    + '<h2 style="color:#0e7d72;">검수보고서가 최종 승인되었습니다</h2>'
+    + '<p><b>' + escapeHtml(drafter || '') + '</b> 님, 검수보고서 결재가 모두 완료되었습니다.</p>'
+    + '<table style="border-collapse:collapse;font-size:14px;">'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">문서번호</td><td>' + escapeHtml(docNo) + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">품명</td><td>' + escapeHtml(subject) + '</td></tr>'
+    + (isFinal ? '<tr><td style="color:#888;padding:4px 12px 4px 0;">비고</td><td><b style="color:#0e7d72;">최종 검수 — 본 품의의 검수가 종결되었습니다.</b></td></tr>' : '')
+    + '</table>'
+    + '<p style="font-size:12px;color:#888;margin-top:14px;">검수보고서 PDF가 곧 PO 폴더에 자동 보관됩니다.</p></div>';
+  var plain = '검수보고서 최종 승인\n문서번호: ' + docNo + '\n품명: ' + subject + (isFinal ? '\n(최종 검수 — 품의 종결)' : '');
+  sendEmailWithRetry(toEmail, subj, plain, html);
+}
+
+/**
+ * Step 4 테스트 — 결재 메타 조회 점검
+ *   testInspStep4('INSP토큰')
+ */
+function testInspStep4(token) {
+  if (!token) { console.log('사용법: testInspStep4("검수보고서_token")'); return; }
+  console.log(JSON.stringify(getInspDecisionMetaForClient(token), null, 2));
+}
+
+
+// ================================================================
+// [INSP Step 5] 홈 메뉴용 — 내 검수 결재 대기 / 최종 완료(INSP)
+// ================================================================
+
+/**
+ * 검수보고서 목록을 1회 read하여 두 가지 목록 생성
+ *  - myPending: 내가 현재 결재할 차례인 검수보고서 (status가 진행중 + 내 단계 + 대기)
+ *  - finalDocs: 최종 선택(IS_FINAL=Y)되어 최종승인(INSP)된 검수보고서
+ * 가시성: isProc(구매팀)면 finalDocs 전체, 일반은 본인 관련(기안자 또는 결재 참여자)
+ * @param {Spreadsheet} ss 열린 스프레드시트
+ * @param {string} actor 로그인 이메일(소문자)
+ * @param {boolean} isProc 구매팀 여부
+ * @returns {Object} { myInspPending: [], inspFinals: [] }
+ */
+function _getInspMenusForClient(ss, actor, isProc) {
+  var out = { myInspPending: [], inspFinals: [] };
+  try {
+    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return out;
+    actor = String(actor || '').toLowerCase();
+
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      var token = String(r[INSP_COL.TOKEN] || '');
+      if (!token) continue;
+      var status    = String(r[INSP_COL.STATUS] || '');
+      var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
+      var curIdx    = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+      var isFinal   = String(r[INSP_COL.IS_FINAL] || '') === 'Y';
+
+      var meta = {
+        docNo:       String(r[INSP_COL.DOC_NO] || ''),
+        token:       token,
+        seq:         parseInt(r[INSP_COL.SEQ]) || 0,
+        poNo:        String(r[INSP_COL.PO_NO] || ''),
+        reqNo:       String(r[INSP_COL.REQ_NO] || ''),
+        subject:     String(r[INSP_COL.SUBJECT] || ''),
+        vendorName:  String(r[INSP_COL.VENDOR_NAME] || ''),
+        drafter:     String(r[INSP_COL.DRAFTER] || ''),
+        drafterName: String(r[INSP_COL.DRAFTER_NAME] || ''),
+        verdict:     String(r[INSP_COL.VERDICT] || ''),
+        isFinal:     isFinal,
+        status:      status,
+        receivedDate:toDateStr(r[INSP_COL.RECEIVED_DATE]),
+        submitAt:    toDateTimeStr(r[INSP_COL.SUBMIT_AT]),
+        docType:     'INSP',
+      };
+
+      // 내가 결재 참여자인지 + 내 단계인지 판정 (curIdx 우선 — 동일인 다단계 대응)
+      var myIdx = _findMyInspIdx(r, apprCount, curIdx, actor);
+      // 가시성용: 본인이 어느 단계든 배정돼 있는지 (최종완료 노출 판정)
+      var amParticipant = false;
+      for (var pa = 0; pa < apprCount; pa++) {
+        if (String(r[inspApprCol(pa, 2)] || '').toLowerCase() === actor) { amParticipant = true; break; }
+      }
+
+      // 내 검수 결재 대기: 진행중 + 내가 현재 차례 + 현재 차례 블록 status가 '대기'
+      if (myIdx >= 0 && myIdx === curIdx &&
+          (status === '검토중' || status.indexOf('결재중') >= 0)) {
+        var myStatus = String(r[inspApprCol(myIdx, 3)] || '');
+        if (myStatus === '대기') out.myInspPending.push(meta);
+      }
+
+      // 최종 완료(INSP): IS_FINAL=Y && 최종승인(INSP)
+      if (isFinal && status === '최종승인(INSP)') {
+        if (isProc || amParticipant || meta.drafter.toLowerCase() === actor) {
+          out.inspFinals.push(meta);
+        }
+      }
+    }
+
+    out.myInspPending.sort(function (a, b) { return (a.submitAt || '').localeCompare(b.submitAt || ''); });
+    out.inspFinals.sort(function (a, b) { return (b.submitAt || '').localeCompare(a.submitAt || ''); });
+  } catch (e) {
+    console.error('[INSP] _getInspMenusForClient 실패: ' + e.toString());
+  }
+  return out;
+}
+
+// ================================================================
+// [INSP Step 5] 전용 뷰어 데이터
+// ================================================================
+
+/**
+ * 검수보고서 뷰어/결재 화면용 전체 데이터
+ *  - 본문(스냅샷·판정·검수의견) + 결재 진행 + 사진 썸네일 URL + myApproverIdx(7번 해결책)
+ *  - 사진은 결재 진행중일 때만 thumbnail URL 제공(STAGING에 존재)
+ * @param {string} token INSP token
+ * @param {string|number=} hintIdx URL idx 힌트(선택) — 서버 판정 우선
+ */
+function getInspViewerDataForClient(token, hintIdx) {
+  try {
+    var actor = (getActiveUserEmail() || '').toLowerCase();
+    var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return { ok: false, message: '검수보고서를 찾을 수 없습니다.' };
+    var r = info.row;
+
+    var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
+    var curIdx    = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+    var status    = String(r[INSP_COL.STATUS] || '');
+
+    // 결재자 블록
+    var approvers = [];
+    for (var a = 0; a < apprCount; a++) {
+      approvers.push({
+        label:       String(r[inspApprCol(a, 0)] || ''),
+        name:        String(r[inspApprCol(a, 1)] || ''),
+        email:       String(r[inspApprCol(a, 2)] || ''),
+        status:      String(r[inspApprCol(a, 3)] || '대기'),
+        processedAt: toDateTimeStr(r[inspApprCol(a, 4)]),
+        comment:     String(r[inspApprCol(a, 5)] || ''),
+      });
+    }
+
+    // myApproverIdx 판정 (7번 해결책 + 동일인 다단계 대응)
+    // 우선순위: ①현재 차례가 본인이면 curIdx ②URL 힌트(검증) ③본인 첫 단계
+    var myApproverIdx = -1;
+    if (curIdx >= 0 && curIdx < apprCount && String(approvers[curIdx].email || '').toLowerCase() === actor) {
+      myApproverIdx = curIdx;
+    }
+    if (myApproverIdx === -1) {
+      var h = (hintIdx !== undefined && hintIdx !== '' && !isNaN(hintIdx)) ? parseInt(hintIdx) : -1;
+      if (h >= 0 && h < apprCount && String(approvers[h].email || '').toLowerCase() === actor) {
+        myApproverIdx = h;
+      }
+    }
+    if (myApproverIdx === -1) {
+      for (var k = 0; k < apprCount; k++) {
+        if (String(approvers[k].email || '').toLowerCase() === actor) { myApproverIdx = k; break; }
+      }
+    }
+
+    // 사진 썸네일 (진행중일 때만 — 최종승인 후엔 삭제 예정이라 PDF로 확인)
+    var photos = [];
+    try {
+      var photoList = JSON.parse(String(r[INSP_COL.PHOTO_LIST] || '[]'));
+      photoList.forEach(function (p) {
+        if (p && p.id) {
+          photos.push({
+            name: p.name || '',
+            thumbUrl: 'https://drive.google.com/thumbnail?id=' + p.id + '&sz=w1000',
+            viewUrl:  'https://drive.google.com/file/d/' + p.id + '/view',
+          });
+        }
+      });
+    } catch (_) {}
+
+    return {
+      ok: true,
+      doc: {
+        docNo:        String(r[INSP_COL.DOC_NO] || ''),
+        seq:          parseInt(r[INSP_COL.SEQ]) || 0,
+        poNo:         String(r[INSP_COL.PO_NO] || ''),
+        reqNo:        String(r[INSP_COL.REQ_NO] || ''),
+        subject:      String(r[INSP_COL.SUBJECT] || ''),
+        vendorName:   String(r[INSP_COL.VENDOR_NAME] || ''),
+        drafterName:  String(r[INSP_COL.DRAFTER_NAME] || ''),
+        dept:         String(r[INSP_COL.DEPT] || ''),
+        issueDate:    toDateStr(r[INSP_COL.ISSUE_DATE]),
+        receivedDate: toDateStr(r[INSP_COL.RECEIVED_DATE]),
+        receivedNote: String(r[INSP_COL.RECEIVED_NOTE] || ''),
+        verdict:      String(r[INSP_COL.VERDICT] || ''),
+        isFinal:      String(r[INSP_COL.IS_FINAL] || '') === 'Y',
+        comment:      String(r[INSP_COL.COMMENT] || ''),
+        status:       status,
+        rejectLog:    String(r[INSP_COL.REJECT_LOG] || ''),
+      },
+      approvers:     approvers,
+      curIdx:        curIdx,
+      myApproverIdx: myApproverIdx,
+      photos:        photos,
+    };
+  } catch (err) {
+    return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
+  }
+}
+
+
+// ================================================================
+// [INSP Step 6] PDF 생성 → FINAL/PO폴더 이동 → 사진 삭제
+// ================================================================
+
+/**
+ * insp_pdf 큐 job 처리 진입점 (Code.gs의 processQueueTrigger에서 호출)
+ *  1) 검수보고서 PDF 생성 (사진 base64 삽입)
+ *  2) FINAL/{PO번호} 폴더에 저장 (REQ/PRC와 동일 PO폴더)
+ *  3) 성공 시: 사진 원본 + INSP STAGING 임시폴더 삭제, 시트 갱신(MOVE_STATUS=FINAL)
+ *  실패 시: 사진 보존 (재시도 — 큐가 자동 처리). 모두 실패해도 사진은 남겨 수동 복구 가능
+ * @param {Object} job { token, docNo, ... }
+ * @returns {Object} { ok, message, ... }
+ */
+function _processInspPdfJob(job) {
+  try {
+    var token = job.token;
+    if (!token) return { ok: false, message: 'token 없음' };
+
+    var ss   = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return { ok: false, message: '검수보고서 행을 찾을 수 없음' };
+    var r = info.row, rowNum = info.rowNum;
+
+    var status = String(r[INSP_COL.STATUS] || '');
+    if (status !== '최종승인(INSP)') {
+      return { ok: false, message: '최종승인(INSP) 상태가 아님: ' + status };
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return { ok: true, message: '이미 FINAL 처리됨 (멱등)', skipped: true };
+    }
+
+    // 1) PDF 생성 (FINAL 폴더에 직접 저장)
+    var pdfResult = generateInspPdf(token);
+    if (!pdfResult.ok) return { ok: false, message: 'PDF 생성 실패: ' + pdfResult.message };
+
+    // 2) 사진 원본 + STAGING 임시폴더 삭제 (PDF 성공 후에만)
+    var photoDeleteMsg = _cleanupInspPhotos(r);
+
+    // 3) 시트 갱신: DRIVE_ID=FINAL폴더, MOVE_STATUS=FINAL, PHOTO_LIST 비움
+    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+    sheet.getRange(rowNum, INSP_COL.DRIVE_ID + 1).setValue(pdfResult.folderId);
+    sheet.getRange(rowNum, INSP_COL.MOVE_STATUS + 1).setValue('FINAL');
+    sheet.getRange(rowNum, INSP_COL.PHOTO_LIST + 1).setValue('[]');
+
+    return { ok: true, message: 'PDF 생성·FINAL 이동·사진 삭제 완료. ' + photoDeleteMsg,
+             fileId: pdfResult.fileId, folderId: pdfResult.folderId };
+  } catch (err) {
+    return { ok: false, message: '_processInspPdfJob 예외: ' + err.toString() };
+  }
+}
+
+/**
+ * 검수보고서 PDF 생성 → FINAL/{PO번호} 폴더에 저장
+ *  - 사진은 Drive(STAGING)에서 읽어 base64로 템플릿에 삽입
+ *  - FINAL 폴더는 getOrCreateFolder(PO번호, ..., 'final') — PRC가 이미 만든 PO폴더와 동일
+ * @param {string} token INSP token
+ * @returns {Object} { ok, fileId, folderId, fileName }
+ */
+function generateInspPdf(token) {
+  try {
+    var ss   = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return { ok: false, message: '행 없음' };
+    var r = info.row;
+
+    var docNo      = String(r[INSP_COL.DOC_NO] || '');
+    var poNo       = String(r[INSP_COL.PO_NO] || '');
+    var issueDate  = toDateStr(r[INSP_COL.ISSUE_DATE]);
+    var verdict    = String(r[INSP_COL.VERDICT] || '');
+    var isFinal    = String(r[INSP_COL.IS_FINAL] || '') === 'Y';
+    var apprCount  = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
+
+    // 사진 → base64 (STAGING Drive에서 읽음)
+    var photoTags = [];
+    try {
+      var photoList = JSON.parse(String(r[INSP_COL.PHOTO_LIST] || '[]'));
+      photoList.forEach(function (p) {
+        if (!p || !p.id) return;
+        try {
+          var f = DriveApp.getFileById(p.id);
+          var blob = f.getBlob();
+          var b64  = Utilities.base64Encode(blob.getBytes());
+          var mime = blob.getContentType() || 'image/jpeg';
+          photoTags.push({ src: 'data:' + mime + ';base64,' + b64, name: p.name || '' });
+        } catch (e) { /* 개별 사진 실패는 건너뜀 */ }
+      });
+    } catch (_) {}
+
+    // 결재자 블록
+    var approvers = [];
+    for (var a = 0; a < apprCount; a++) {
+      approvers.push({
+        label:       String(r[inspApprCol(a, 0)] || ''),
+        name:        String(r[inspApprCol(a, 1)] || ''),
+        status:      String(r[inspApprCol(a, 3)] || ''),
+        processedAt: toDateTimeStr(r[inspApprCol(a, 4)]),
+      });
+    }
+
+    // 템플릿 렌더
+    var tmpl = HtmlService.createTemplateFromFile('INSP_PDF_Template');
+    tmpl.docNo        = docNo;
+    tmpl.seq          = parseInt(r[INSP_COL.SEQ]) || 0;
+    tmpl.isFinalLabel = isFinal ? ' · ★최종 검수' : '';
+    tmpl.reqNo        = String(r[INSP_COL.REQ_NO] || '');
+    tmpl.poNo         = poNo;
+    tmpl.subject      = String(r[INSP_COL.SUBJECT] || '');
+    tmpl.vendorName   = String(r[INSP_COL.VENDOR_NAME] || '');
+    tmpl.drafterName  = String(r[INSP_COL.DRAFTER_NAME] || '');
+    tmpl.dept         = String(r[INSP_COL.DEPT] || '');
+    tmpl.issueDate    = issueDate;
+    tmpl.receivedDate = toDateStr(r[INSP_COL.RECEIVED_DATE]);
+    tmpl.receivedNote = String(r[INSP_COL.RECEIVED_NOTE] || '');
+    tmpl.verdict      = verdict || '-';
+    tmpl.verdictClass = (verdict === '합격') ? 'pass' : 'fail';
+    tmpl.comment      = String(r[INSP_COL.COMMENT] || '');
+    tmpl.photoTags    = photoTags;
+    tmpl.approvers    = approvers;
+    tmpl.generatedAt  = toDateTimeStr(new Date());
+
+    var html = tmpl.evaluate().getContent();
+    var blob = Utilities.newBlob(html, 'text/html', docNo + '.html').getAs(MimeType.PDF);
+
+    var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm');
+    var fileName = 'INSP_' + docNo + '_' + ts + '.pdf';
+    blob.setName(fileName);
+
+    // FINAL/{PO번호} 폴더 — PRC가 이미 만든 PO폴더와 동일 위치
+    var folder = getOrCreateFolder(poNo, issueDate, 'final');
+    var folderId = folder.getId();
+
+    // 동일 검수보고서의 이전 PDF 정리 (재생성 시 중복 방지)
+    var pattern = 'INSP_' + docNo + '_';
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var ef = files.next();
+      if (ef.getName().indexOf(pattern) === 0) { try { ef.setTrashed(true); } catch (_) {} }
+    }
+
+    var file = folder.createFile(blob);
+    return { ok: true, fileId: file.getId(), fileName: fileName, folderId: folderId };
+  } catch (err) {
+    return { ok: false, message: 'generateInspPdf 오류: ' + err.toString() };
+  }
+}
+
+/**
+ * 검수 사진 원본 + INSP STAGING 임시폴더 삭제 (PDF 생성 성공 후에만 호출)
+ *  - 설계 원칙(요구사항 9): 사진은 PDF 삽입 후 보관하지 않음
+ * @param {Array} row INSP 행
+ * @returns {string} 처리 결과 메시지
+ */
+function _cleanupInspPhotos(row) {
+  var deleted = 0;
+  try {
+    var photoList = JSON.parse(String(row[INSP_COL.PHOTO_LIST] || '[]'));
+    photoList.forEach(function (p) {
+      if (p && p.id) { try { DriveApp.getFileById(p.id).setTrashed(true); deleted++; } catch (_) {} }
+    });
+  } catch (_) {}
+
+  // STAGING 임시폴더 삭제 (INSP_{docNo} 폴더)
+  try {
+    var folderId = String(row[INSP_COL.DRIVE_ID] || '');
+    if (folderId) {
+      var folder = DriveApp.getFolderById(folderId);
+      // STAGING 폴더만 삭제 (FINAL 폴더와 혼동 방지: 폴더명이 INSP_로 시작하는 임시폴더)
+      if (folder.getName().indexOf('INSP_') === 0) { folder.setTrashed(true); }
+    }
+  } catch (_) {}
+
+  return '사진 ' + deleted + '장 삭제';
+}
+
+/**
+ * Step 6 테스트 — 최종승인된 검수보고서로 PDF 생성만 수동 실행 (사진 삭제는 안 함)
+ *   testInspStep6('INSP토큰')  → PDF가 FINAL/PO폴더에 생성되는지 확인
+ *   ※ 실제 큐 처리는 사진 삭제까지 수행하므로, 이 테스트는 PDF 생성 단계만 점검
+ */
+function testInspStep6(token) {
+  if (!token) { console.log('사용법: testInspStep6("최종승인된_검수보고서_token")'); return; }
+  var res = generateInspPdf(token);
+  console.log(JSON.stringify(res, null, 2));
+  if (res.ok) console.log('→ FINAL 폴더에서 ' + res.fileName + ' 확인하세요. (사진 삭제는 실제 큐 처리 시 수행)');
 }
 
 
@@ -735,16 +1420,16 @@ function testInspStep1() {
     }
     var h = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     if (h[INSP_COL.STATUS] !== 'status') throw new Error('STATUS 헤더 위치 불일치: ' + h[INSP_COL.STATUS]);
-    if (h[INSP_COL.APPR_START] !== 'appr1_label') throw new Error('APPR_START 헤더 위치 불일치: ' + h[INSP_COL.APPR_START]);
+    if (h[INSP_COL.APPR_START] !== 'drafter_appr_label') throw new Error('APPR_START 헤더 위치 불일치: ' + h[INSP_COL.APPR_START]);
     return true;
   });
 
   check('⑤ inspApprCol 헬퍼 — 정상/경계값', function () {
-    if (inspApprCol(0, 0) !== 27) throw new Error('(0,0) → ' + inspApprCol(0, 0));
-    if (inspApprCol(2, 5) !== 44) throw new Error('(2,5) → ' + inspApprCol(2, 5));
+    if (inspApprCol(0, 0) !== 27) throw new Error('(0,0)=기안자 label → ' + inspApprCol(0, 0));
+    if (inspApprCol(3, 5) !== 50) throw new Error('(3,5)=결재자3 comment → ' + inspApprCol(3, 5));
     var threw = false;
-    try { inspApprCol(3, 0); } catch (e) { threw = true; }
-    if (!threw) throw new Error('단계 범위 초과가 차단되지 않음');
+    try { inspApprCol(4, 0); } catch (e) { threw = true; }
+    if (!threw) throw new Error('단계 범위 초과(4)가 차단되지 않음');
     return true;
   });
 

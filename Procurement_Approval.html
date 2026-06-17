@@ -63,17 +63,34 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
   var DECISION   = '<?= decision ?>';
   var DOC_NO     = '<?= docNo ?>';
   var IDX        = parseInt('<?= approverIndex ?>') || 0;
+  var DOC_KIND   = '<?= docKind ?>' || 'REQ';   // [INSP Step 4] 'REQ' | 'INSP'
   var WEBAPP_URL = '<?!= webappUrl ?>';
 
   var docNoEl = document.getElementById('doc-no-display');
   if(docNoEl) docNoEl.textContent = '품의번호: ' + DOC_NO;
 
+  // 결재순서 라벨: 기본은 결재자 N, INSP는 서버 라벨(기안자/결재자 N)로 갱신
+  var orderLabel = '결재자 ' + (IDX + 1);
   var infoHtml = [
-    '<div class="row"><span class="lbl">품의번호</span><span class="val">' + DOC_NO + '</span></div>',
-    '<div class="row"><span class="lbl">결재순서</span><span class="val">결재자 ' + (IDX + 1) + '</span></div>',
+    '<div class="row"><span class="lbl">' + (DOC_KIND === 'INSP' ? '문서번호' : '품의번호') + '</span><span class="val">' + DOC_NO + '</span></div>',
+    '<div class="row"><span class="lbl">결재순서</span><span class="val" id="order-val">' + orderLabel + '</span></div>',
   ].join('');
   var infoEl = document.getElementById('info-box');
   if(infoEl) infoEl.innerHTML = infoHtml;
+
+  // [INSP] 서버에서 실제 결재 단계 라벨을 받아 갱신 (기안자부터 시작되는 순서 반영)
+  if (DOC_KIND === 'INSP' && typeof google !== 'undefined') {
+    google.script.run
+      .withSuccessHandler(function(meta){
+        if (meta && meta.ok) {
+          var lbl = meta.myLabel || meta.curLabel;
+          var el = document.getElementById('order-val');
+          if (lbl && el) el.textContent = lbl;
+        }
+      })
+      .withFailureHandler(function(){ /* 실패 시 기본 라벨 유지 */ })
+      .getInspDecisionMetaForClient(TOKEN);
+  }
 
   if (DECISION === 'approve') {
     var rejectBtn = document.getElementById('reject-btn');
@@ -118,7 +135,7 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
       idx:      IDX,
     };
 
-    google.script.run
+    var runner = google.script.run
       .withSuccessHandler(function(res) {
         if(spinnerEl) spinnerEl.style.display = 'none';
         showResult(decision, res);
@@ -126,8 +143,13 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
       .withFailureHandler(function(err) {
         if(spinnerEl) spinnerEl.style.display = 'none';
         showResult('error', { ok: false, message: err.message || err.toString() });
-      })
-      .processDecisionFromClient(payload);
+      });
+    // [INSP Step 4] 문서 종류에 따라 결재 처리 함수 분기
+    if (DOC_KIND === 'INSP') {
+      runner.processInspDecisionFromClient(payload);
+    } else {
+      runner.processDecisionFromClient(payload);
+    }
   }
 
   function showResult(decision, res) {

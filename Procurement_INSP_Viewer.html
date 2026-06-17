@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>검수보고서</title>
+<style>
+  :root{
+    --bg:#f4f5f7;--panel:#fff;--ink:#1a1d23;--ink-soft:#4a5260;--ink-mute:#8b94a3;
+    --line:#e3e6eb;--line-soft:#eef0f3;
+    --insp:#0e7d72;--insp-soft:#e4f4f2;
+    --ok:#27ae60;--ok-soft:#e8f6ee;--danger:#d64541;--danger-soft:#fdecec;
+    --warn:#d97706;--warn-soft:#fef3e2;--neutral-soft:#f0f2f5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Malgun Gothic',-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:13px;line-height:1.55;padding:0 0 60px;}
+  .topbar{background:var(--insp);color:#fff;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;}
+  .topbar .t{font-weight:700;font-size:15px;}
+  .topbar .s{font-size:11.5px;opacity:.85;}
+  .btn{border:none;border-radius:7px;padding:9px 18px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+  .btn.gray{background:#fff;color:var(--ink-soft);border:1px solid var(--line);}
+  .btn.ok{background:var(--ok);color:#fff;}
+  .btn.danger{background:var(--danger);color:#fff;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .wrap{max-width:760px;margin:22px auto;padding:0 18px;}
+  .loading{text-align:center;padding:60px 20px;color:var(--ink-mute);}
+  .spinner{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--insp);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .err-box{background:var(--danger-soft);border:1px solid #f3c0c0;border-radius:9px;padding:18px;color:var(--danger);}
+
+  .sheet{background:#fff;border:1px solid var(--line);border-radius:10px;padding:30px 34px;}
+  .title{text-align:center;font-size:21px;font-weight:700;letter-spacing:.4em;border-bottom:2.5px solid var(--insp);padding-bottom:12px;margin-bottom:8px;}
+  .seq-tag{text-align:center;font-size:11.5px;color:var(--insp);font-weight:700;margin-bottom:20px;}
+  .seq-tag .final{background:var(--insp);color:#fff;border-radius:8px;padding:1px 8px;margin-left:6px;}
+  table.meta{width:100%;border-collapse:collapse;}
+  table.meta th{background:var(--insp-soft);color:var(--insp);border:1px solid #c5e0dd;width:110px;font-size:11.5px;padding:8px 10px;text-align:center;}
+  table.meta td{border:1px solid #d8e2e0;padding:8px 12px;font-size:12.5px;}
+  .result-cell{vertical-align:top;}
+  .verdict-badge{display:inline-block;padding:3px 12px;border-radius:11px;font-weight:700;font-size:12px;}
+  .verdict-badge.pass{background:var(--ok-soft);color:var(--ok);}
+  .verdict-badge.fail{background:var(--danger-soft);color:var(--danger);}
+  .comment{margin-top:8px;white-space:pre-wrap;font-size:12.5px;color:var(--ink-soft);}
+  .photos{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+  .photos a{display:block;border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+  .photos img{width:100%;display:block;background:#fafafa;min-height:80px;}
+  .no-photo{color:var(--ink-mute);font-size:11.5px;margin-top:8px;}
+
+  .appr-sec{margin-top:22px;}
+  .appr-title{font-size:12px;font-weight:700;color:var(--insp);margin-bottom:8px;}
+  table.appr{width:100%;border-collapse:collapse;}
+  table.appr th{border:1.5px solid var(--insp);background:var(--insp-soft);color:var(--insp);font-size:10.5px;padding:5px 8px;}
+  table.appr td{border:1.5px solid var(--insp);text-align:center;font-size:11px;padding:7px 6px;height:46px;}
+  .ap-wait{color:var(--ink-mute);}
+  .ap-done{color:var(--ok);font-weight:700;}
+  .ap-reject{color:var(--danger);font-weight:700;}
+  .ap-cur{background:var(--warn-soft);}
+
+  .hist{margin-top:18px;background:var(--danger-soft);border:1px solid #f3c0c0;border-radius:8px;padding:12px 14px;}
+  .hist-title{font-size:11.5px;font-weight:700;color:var(--danger);margin-bottom:5px;}
+  .hist pre{font-size:11px;color:var(--ink-soft);white-space:pre-wrap;font-family:inherit;}
+
+  .action-bar{margin-top:20px;display:flex;gap:10px;justify-content:center;}
+  .status-info{margin-top:16px;text-align:center;font-size:12.5px;padding:12px;border-radius:8px;}
+  .status-info.done{background:var(--ok-soft);color:var(--ok);font-weight:600;}
+  .status-info.reject{background:var(--danger-soft);color:var(--danger);font-weight:600;}
+  .status-info.wait{background:var(--neutral-soft);color:var(--ink-soft);}
+  .banner{margin-top:14px;padding:11px 14px;border-radius:8px;font-size:12.5px;font-weight:600;display:none;}
+  .banner.show{display:block;}
+  .banner.loading{background:var(--neutral-soft);color:var(--ink-soft);}
+  .banner.success{background:var(--ok-soft);color:var(--ok);}
+  .banner.error{background:var(--danger-soft);color:var(--danger);}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div><div class="t">검수보고서</div><div class="s">InLC Technology · 구매결재시스템</div></div>
+  <button class="btn gray" onclick="goHome()">← 홈으로</button>
+</div>
+
+<div class="wrap" id="wrap">
+  <div class="loading"><div class="spinner"></div>검수보고서를 불러오는 중...</div>
+</div>
+
+<script>
+var TOKEN     = '<?= token ?>';
+var DECISION  = '<?= decision ?>';
+var IDX_HINT  = '<?= idxHint ?>';
+var WEBAPP_URL= '<?= webappUrl ?>';
+var DATA = null, MY_IDX = -1;
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function goHome(){ try{window.top.location.href=WEBAPP_URL;}catch(e){location.href=WEBAPP_URL;} }
+
+function boot(){
+  if(typeof google==='undefined'){document.getElementById('wrap').innerHTML='<div class="err-box">Apps Script 환경에서만 실행 가능합니다.</div>';return;}
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res||!res.ok){document.getElementById('wrap').innerHTML='<div class="err-box">'+esc(res?res.message:'불러올 수 없습니다.')+'</div>';return;}
+      DATA=res; MY_IDX=(typeof res.myApproverIdx==='number')?res.myApproverIdx:-1;
+      render();
+    })
+    .withFailureHandler(function(err){document.getElementById('wrap').innerHTML='<div class="err-box">서버 오류: '+esc(err&&err.message?err.message:err)+'</div>';})
+    .getInspViewerDataForClient(TOKEN, IDX_HINT||null);
+}
+
+function render(){
+  var d=DATA.doc, aps=DATA.approvers||[], cur=DATA.curIdx;
+  var vClass=d.verdict==='합격'?'pass':'fail';
+
+  var photoHtml;
+  if((DATA.photos||[]).length){
+    photoHtml='<div class="photos">'+DATA.photos.map(function(p){
+      return '<a href="'+esc(p.viewUrl)+'" target="_blank"><img src="'+esc(p.thumbUrl)+'" alt="'+esc(p.name)+'"></a>';
+    }).join('')+'</div>';
+  } else {
+    photoHtml='<div class="no-photo">'+(d.status==='최종승인(INSP)'?'(검수 사진은 PDF 보관 후 원본이 삭제되었습니다)':'(첨부된 검수 사진 없음)')+'</div>';
+  }
+
+  var html='<div class="sheet">'
+    + '<div class="title">검 수 보 고 서</div>'
+    + '<div class="seq-tag">'+d.seq+'회차'+(d.isFinal?'<span class="final">★ 최종 검수</span>':'')+'</div>'
+    + '<table class="meta">'
+    + tr('문 서 번 호', esc(d.docNo))
+    + tr('담 당 자', esc(d.drafterName)+' ('+esc(d.dept)+')')
+    + tr('품 의 번 호', esc(d.reqNo)+' <span style="color:#889;">(PO: '+esc(d.poNo)+')</span>')
+    + tr('품 명', esc(d.subject))
+    + tr('업 체 명', esc(d.vendorName))
+    + tr('기 안 일 자', esc(d.issueDate))
+    + tr('입 고 일 자', esc(d.receivedDate))
+    + tr('입 고 내 역', esc(d.receivedNote))
+    + '<tr><th style="vertical-align:top;padding-top:14px;">검 수 결 과</th><td class="result-cell">'
+    +   '<span class="verdict-badge '+vClass+'">'+(esc(d.verdict)||'(미판정)')+'</span>'
+    +   (d.comment?'<div class="comment">'+esc(d.comment)+'</div>':'')
+    +   photoHtml
+    + '</td></tr>'
+    + '</table>';
+
+  // 결재 진행
+  html+='<div class="appr-sec"><div class="appr-title">검수 결재</div><table class="appr"><tr>';
+  aps.forEach(function(ap,i){ html+='<th>'+esc(ap.label||('결재 '+(i+1)))+'<br><span style="font-weight:400;">'+esc(ap.name)+'</span></th>'; });
+  html+='</tr><tr>';
+  aps.forEach(function(ap,i){
+    var cls='ap-wait',txt='대기';
+    if(ap.status==='승인'){cls='ap-done';txt='✓ 승인';}
+    else if(ap.status==='반려'){cls='ap-reject';txt='✕ 반려';}
+    if(i===cur && ap.status==='대기' && d.status!=='반려' && d.status!=='최종승인(INSP)') cls+=' ap-cur';
+    html+='<td class="'+cls+'">'+txt+(ap.processedAt?'<br><span style="font-size:9px;color:#999;">'+esc(ap.processedAt)+'</span>':'')+'</td>';
+  });
+  html+='</tr></table></div>';
+
+  // 반려 이력
+  if(d.rejectLog){
+    html+='<div class="hist"><div class="hist-title">반려 이력</div><pre>'+esc(d.rejectLog)+'</pre></div>';
+  }
+
+  // 상태/액션
+  if(d.status==='최종승인(INSP)'){
+    html+='<div class="status-info done">✓ 최종 승인 완료된 검수보고서입니다.'+(d.isFinal?' (본 품의 검수 종결)':'')+'</div>';
+  } else if(d.status==='반려'){
+    html+='<div class="status-info reject">이 검수보고서는 반려 상태입니다. 기안자의 재상신을 기다리고 있습니다.</div>';
+  } else if(MY_IDX>=0 && MY_IDX===cur){
+    html+='<div class="action-bar">'
+      + '<button class="btn danger" id="reject-btn" onclick="decide(\'reject\')">반려</button>'
+      + '<button class="btn ok" id="approve-btn" onclick="decide(\'approve\')">승인</button>'
+      + '</div>';
+  } else if(MY_IDX>=0 && MY_IDX>cur){
+    html+='<div class="status-info wait">앞 단계 결재자의 처리를 기다리고 있습니다. (내 차례: '+(MY_IDX+1)+'번째)</div>';
+  } else if(MY_IDX>=0 && MY_IDX<cur){
+    html+='<div class="status-info done">이미 결재를 완료하셨습니다.</div>';
+  } else {
+    html+='<div class="status-info wait">결재 진행 중인 검수보고서입니다. (열람 전용)</div>';
+  }
+
+  html+='<div class="banner" id="banner"></div></div>';
+  document.getElementById('wrap').innerHTML=html;
+
+  // 메일 decision 힌트가 있으면 해당 버튼만 강조 (실제 결재는 사용자가 버튼 클릭)
+  // 승인/반려 직접 처리는 경량 결재 화면(Approval)에서 수행. 뷰어는 '확인 + 선택적 결재' 경로.
+  if(DECISION==='approve' && document.getElementById('approve-btn')){
+    document.getElementById('approve-btn').style.boxShadow='0 0 0 3px rgba(39,174,96,.3)';
+  } else if(DECISION==='reject' && document.getElementById('reject-btn')){
+    document.getElementById('reject-btn').style.boxShadow='0 0 0 3px rgba(214,69,65,.3)';
+  }
+}
+function tr(label,val){return '<tr><th>'+label+'</th><td>'+val+'</td></tr>';}
+
+function showBanner(type,msg){var b=document.getElementById('banner');b.className='banner show '+type;b.textContent=msg;}
+
+function decide(decision){
+  var comment='';
+  if(decision==='reject'){
+    comment=prompt('반려 사유를 입력해 주세요. (필수)');
+    if(!comment||!comment.trim()){alert('반려 사유를 입력해야 합니다.');return;}
+    comment=comment.trim();
+  } else {
+    if(!confirm('승인 처리하시겠습니까?'))return;
+  }
+  var ab=document.getElementById('approve-btn'), rb=document.getElementById('reject-btn');
+  if(ab)ab.disabled=true; if(rb)rb.disabled=true;
+  showBanner('loading','처리 중입니다...');
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res&&res.ok){
+        showBanner('success', decision==='approve'?'승인 완료되었습니다.':'반려 처리되었습니다.');
+        if(ab)ab.style.display='none'; if(rb)rb.style.display='none';
+        setTimeout(function(){ boot(); },900);  // 갱신된 상태 재로드
+      }else{
+        showBanner('error','오류: '+(res?res.message:'알 수 없는 오류'));
+        if(ab)ab.disabled=false; if(rb)rb.disabled=false;
+      }
+    })
+    .withFailureHandler(function(err){
+      showBanner('error','네트워크 오류: '+(err&&err.message?err.message:err));
+      if(ab)ab.disabled=false; if(rb)rb.disabled=false;
+    })
+    .processInspDecisionFromClient({ token:TOKEN, decision:decision, comment:comment });
+}
+
+boot();
+</script>
+</body>
+</html>

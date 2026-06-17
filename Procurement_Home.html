@@ -330,10 +330,17 @@ function renderSidebar(){
   var d = STATE.data || {};
   var u = STATE.user || {};
 
-  var common = [
-    { key: 'mydocs',  label: '내 기안 문서', count: (d.myDocs || []).length },
-    { key: 'pending', label: '내 결재 대기', count: (d.myPending || []).length, urgent: (d.myPending || []).length > 0 },
-    { key: 'completed', label: '결재 완료', count: (d.completedDocs || []).length },   // [INSP Step 2]
+  // [메뉴 재편] 기본 / 결재 / 조회 3그룹
+  var basicMenu = [
+    { key: 'mydocs',    label: '기안 문서', count: (d.myDocs || []).length },
+    { key: 'completed', label: '결재 완료 + 검수보고서 제출', count: (d.completedDocs || []).length },   // [INSP Step 2/5]
+  ];
+  var approvalMenu = [
+    { key: 'pending',      label: '결재 대기', count: (d.myPending || []).length, urgent: (d.myPending || []).length > 0 },
+    { key: 'insp_pending', label: '검수보고서 결재 대기', count: (d.myInspPending || []).length, urgent: (d.myInspPending || []).length > 0 },   // [INSP Step 5]
+  ];
+  var lookupMenu = [
+    { key: 'final', label: '최종 완료 문서 조회', count: (d.finalDocs || []).length },   // [INSP Step 5]
   ];
   var proc = u.isProcurement ? [
     { key: 'inbox',  label: 'APPROVED_1ST 인박스', count: (d.approvedInbox || []).length, urgent: (d.approvedInbox || []).length > 0 },
@@ -341,12 +348,23 @@ function renderSidebar(){
   ] : [];
 
   var html = '';
+  // ── 기본 메뉴 ──
   html += '<div class="nav-section">';
   html += '<div class="nav-section-title">기본 메뉴</div>';
-  common.forEach(function(m){
-    html += renderNavItem(m);
-  });
+  basicMenu.forEach(function(m){ html += renderNavItem(m); });
   html += '<div class="nav-item" data-menu="new" style="background:var(--accent);color:#fff;margin-top:8px;font-weight:600;justify-content:center;">+ 신규 작성</div>';
+  html += '</div>';
+
+  // ── 결재 메뉴 ──
+  html += '<div class="nav-section">';
+  html += '<div class="nav-section-title">결재 메뉴</div>';
+  approvalMenu.forEach(function(m){ html += renderNavItem(m); });
+  html += '</div>';
+
+  // ── 조회 메뉴 ──
+  html += '<div class="nav-section">';
+  html += '<div class="nav-section-title">조회 메뉴</div>';
+  lookupMenu.forEach(function(m){ html += renderNavItem(m); });
   html += '</div>';
 
   if(proc.length > 0){
@@ -420,6 +438,8 @@ function renderContent(){
   else if(key === 'inbox')   html = renderInbox();
   else if(key === 'myprc')   html = renderMyPrc();
   else if(key === 'completed') html = renderCompleted();   // [INSP Step 2]
+  else if(key === 'insp_pending') html = renderInspPending();   // [INSP Step 5]
+  else if(key === 'final') html = renderFinal();                // [INSP Step 5]
   else html = '<div class="empty">알 수 없는 메뉴입니다.</div>';
   document.getElementById('content').innerHTML = html;
   attachContentHandlers();
@@ -440,12 +460,19 @@ function attachContentHandlers(){
       pickupReq(el.getAttribute('data-pickup'));
     });
   });
-  // 행 클릭 → 뷰어
+  // 행 클릭 → 뷰어 (REQ/PRC)
   Array.from(document.querySelectorAll('[data-view-token]')).forEach(function(el){
     el.addEventListener('click', function(){
       var token = el.getAttribute('data-view-token');
       var docNo = el.getAttribute('data-docno') || '';
       window.top.location.href = WEBAPP_URL + '?action=view&token=' + encodeURIComponent(token) + '&docNo=' + encodeURIComponent(docNo);
+    });
+  });
+  // [INSP Step 5] 행 클릭 → 검수보고서 전용 뷰어
+  Array.from(document.querySelectorAll('[data-insp-view]')).forEach(function(el){
+    el.addEventListener('click', function(){
+      var token = el.getAttribute('data-insp-view');
+      window.top.location.href = WEBAPP_URL + '?action=insp_view&token=' + encodeURIComponent(token);
     });
   });
   // PRC 재진입 버튼
@@ -542,6 +569,78 @@ function renderMyPrc(){
     + '<div class="panel-head"><div><span class="panel-title">진행 중 작업</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
     + tableOfDocs(rows, 'myprc')
     + '</div>';
+}
+
+// ─── [INSP Step 5] 내 검수보고서 결재 대기 ─────────────────────────────
+function renderInspPending(){
+  var d = STATE.data || {};
+  var rows = d.myInspPending || [];
+  var body;
+  if(rows.length === 0){
+    body = '<div class="empty"><div class="empty-icon">📭</div>결재할 검수보고서가 없습니다.</div>';
+  } else {
+    body = '<table><thead><tr><th>검수보고서 번호</th><th>PO 번호</th><th>품명</th><th>거래처</th><th>판정</th><th>입고일</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      body += '<tr class="row-clickable" data-insp-view="' + escAttr(r.token) + '">'
+        + '<td><span class="docno ir">' + escHtml(r.docNo) + '</span>' + (r.isFinal ? ' <span class="final-flag">★최종</span>' : '') + '</td>'
+        + '<td><span class="docno prc">' + escHtml(r.poNo) + '</span></td>'
+        + '<td>' + escHtml(r.subject) + '</td>'
+        + '<td>' + escHtml(r.vendorName) + '</td>'
+        + '<td>' + escHtml(r.verdict || '-') + '</td>'
+        + '<td>' + escHtml(r.receivedDate) + '</td>'
+        + '</tr>';
+    });
+    body += '</tbody></table>';
+  }
+  return pageHead('내 검수보고서 결재 대기', '내가 다음에 결재해야 할 검수보고서입니다. 행을 클릭하면 본문·사진을 확인하고 결재할 수 있습니다.')
+    + '<div class="panel"><div class="panel-head"><div><span class="panel-title">검수 결재 대기</span><span class="scope-tag">' + rows.length + '건</span></div></div>'
+    + body + '</div>';
+}
+
+// ─── [INSP Step 5] 최종 완료 (REQ/PRC/검수보고서 통합) ─────────────────────────────
+function renderFinal(){
+  var d = STATE.data || {};
+  var rows = d.finalDocs || [];
+  var isProc = !!(STATE.user || {}).isProcurement;
+
+  var cReq = rows.filter(function(x){return x.docType==='REQ';}).length;
+  var cPrc = rows.filter(function(x){return x.docType==='PRC';}).length;
+  var cInsp = rows.filter(function(x){return x.docType==='INSP';}).length;
+
+  var body;
+  if(rows.length === 0){
+    body = '<div class="empty"><div class="empty-icon">📭</div>최종 완료된 문서가 없습니다.</div>';
+  } else {
+    body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>거래처</th><th>상태</th><th>일자</th></tr></thead><tbody>';
+    rows.forEach(function(r){
+      var typeLabel = r.docType==='INSP' ? '검수' : r.docType;
+      var typeCls   = r.docType==='PRC' ? 'docno prc' : (r.docType==='INSP' ? 'docno ir' : 'docno');
+      var clickAttr = r.docType==='INSP'
+        ? 'data-insp-view="' + escAttr(r.token) + '"'
+        : 'data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '"';
+      body += '<tr class="row-clickable" ' + clickAttr + '>'
+        + '<td><span class="' + typeCls + '">' + escHtml(typeLabel) + '</span></td>'
+        + '<td><span class="' + typeCls + '">' + escHtml(r.docNo) + '</span></td>'
+        + '<td>' + escHtml(r.subject) + '</td>'
+        + '<td>' + escHtml(r.vendorName) + '</td>'
+        + '<td>' + statusBadge(r.status) + '</td>'
+        + '<td>' + escHtml(r.issueDate || r.submitAt || '') + '</td>'
+        + '</tr>';
+    });
+    body += '</tbody></table>';
+  }
+
+  return pageHead('최종 완료', '최종 승인 처리된 REQ·PRC 및 최종 검수 완료된 검수보고서입니다. '
+      + (isProc ? '구매팀 권한으로 전체가 표시됩니다.' : '본인이 기안하거나 결재에 참여한 문서가 표시됩니다.')
+      + ' 행을 클릭하면 처리된 문서를 열람할 수 있습니다.')
+    + '<div class="kpi-grid">'
+    +   kpi('전체', rows.length, 'highlight')
+    +   kpi('REQ', cReq)
+    +   kpi('PRC', cPrc)
+    +   kpi('검수보고서', cInsp)
+    + '</div>'
+    + '<div class="panel"><div class="panel-head"><div><span class="panel-title">최종 완료 문서</span><span class="scope-tag' + (isProc ? ' proc' : '') + '">' + rows.length + '건' + (isProc ? ' · 전체' : '') + '</span></div></div>'
+    + body + '</div>';
 }
 
 // ─── [INSP Step 2] 결재 완료 메뉴 ─────────────────────────────
@@ -659,6 +758,8 @@ function inspSubRows(x){
     footer = '<div style="margin-top:9px;font-size:11px;color:var(--ink-mute);">검수보고서 제출은 품의 기안자(' + escHtml(x.drafterName || x.drafter) + ')만 가능합니다.</div>';
   } else if(x.inspClosed){
     footer = '<div style="margin-top:9px;font-size:11px;color:#0e7d72;font-weight:700;">★ 최종 검수가 승인되어 종결된 품의입니다. (추가 제출 불가)</div>';
+  } else if(x.inspLocked){
+    footer = '<div style="margin-top:9px;font-size:11px;color:#d97706;font-weight:700;">⏳ 최종 검수 보고서가 결재 진행 중입니다. 추가 제출이 불가합니다. (반려 시 재상신 가능)</div>';
   } else {
     var nextSeq = 1;
     (x.insps || []).forEach(function(s){ if(s.seq >= nextSeq) nextSeq = s.seq + 1; });

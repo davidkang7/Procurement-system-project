@@ -117,6 +117,7 @@ function doGet(e) {
       approverIndex: (_rawIdxA !== undefined && _rawIdxA !== '' && !isNaN(_rawIdxA))
                      ? parseInt(_rawIdxA)
                      : '',
+      docKind:       e.parameter.docKind || 'REQ',   // [INSP Step 4] 'REQ' | 'INSP'
       webappUrl:     CONFIG.WEBAPP_URL,
     }, '결재 처리');
   }
@@ -166,6 +167,17 @@ function doGet(e) {
       resubToken: e.parameter.resub || '',
       webappUrl:  CONFIG.WEBAPP_URL,
     }, '검수보고서 작성');
+  }
+
+  // [INSP Step 5] 검수보고서 전용 뷰어 (열람 + 결재)
+  if (action === 'insp_view') {
+    var _rawIdxI = e.parameter.idx;
+    return _renderTemplate('Procurement_INSP_Viewer', {
+      token:    e.parameter.token || '',
+      decision: e.parameter.decision || '',
+      idxHint:  (_rawIdxI !== undefined && _rawIdxI !== '' && !isNaN(_rawIdxI)) ? parseInt(_rawIdxI) : '',
+      webappUrl: CONFIG.WEBAPP_URL,
+    }, '검수보고서');
   }
 
   // 5-1) 관리자 페이지 진입 (A 그룹 — 강제 폐기/대리 결재/결재자 변경/락 해제/상태 변경)
@@ -2533,6 +2545,7 @@ function getHomeDataForClient() {
         myDrafts: [], myPending: [], myDocs: [],
         approvedInbox: [], myPrc: [],
         completedDocs: [],   // [INSP Step 2]
+        myInspPending: [], finalDocs: [],   // [INSP Step 5]
       };
     }
 
@@ -2544,6 +2557,7 @@ function getHomeDataForClient() {
     var myPrc = [];          // 내가 점유 중인 REQ / 내가 만든 PRC
     var prcFinals = [];      // [INSP Step 2] 최종승인(PRC) 행 (결재 완료 메뉴 소스)
     var reqMap = {};         // [INSP Step 2] REQ token → 메타 (PRC와 조인용)
+    var reqPrcFinals = [];   // [INSP Step 5] 최종완료 통합용: 최종승인 REQ + 최종승인(PRC)
 
     var isProc = isProcurementUser(actor);
 
@@ -2613,6 +2627,22 @@ function getHomeDataForClient() {
         approvedInbox.push(meta);
       }
 
+      // [INSP Step 5] 최종 완료(통합) 후보 수집: 최종승인 REQ + 최종승인(PRC)
+      //  가시성: 구매팀 전체 / 일반은 본인 관련(기안자 또는 결재 참여자)
+      if ((docType === 'REQ' && status === '최종승인') ||
+          (docType === 'PRC' && status === '최종승인(PRC)')) {
+        var amParticipant = (drafterEmail === actor);
+        if (!amParticipant) {
+          for (var pa = 0; pa < apprCount; pa++) {
+            if (String(r[COL.APPR_START + pa * COL.APPR_COLS + 2] || '').toLowerCase()
+                === String(actor || '').toLowerCase()) { amParticipant = true; break; }
+          }
+        }
+        if (isProc || amParticipant) {
+          reqPrcFinals.push(Object.assign({}, meta, { drafterEmail: drafterEmail }));
+        }
+      }
+
       // 4) 구매팀: 내가 점유한 REQ 또는 내가 작성한 PRC
       if (isProc) {
         if (docType === 'REQ' && meta.claimedBy === actor) {
@@ -2651,9 +2681,14 @@ function getHomeDataForClient() {
             String(reqDrafter).toLowerCase() !== String(actor || '').toLowerCase()) continue;
 
         var insps = inspGroups[pf.token] || [];
-        var inspClosed = false;   // 최종 검수 회차가 승인 완료되면 품의 종결 (Q-INSP-09)
+        // 종결(최종 승인 완료) / 잠금대기(최종 검수가 반려 외 상태로 진행중) 구분
+        var inspClosed = false;        // 최종 검수 '최종승인(INSP)' → 완전 종결
+        var inspLockedPending = false; // 최종 검수 제출됐으나 결재 진행중 → 추가 제출만 차단
         for (var ic = 0; ic < insps.length; ic++) {
-          if (insps[ic].isFinal && insps[ic].status === '최종승인(INSP)') { inspClosed = true; break; }
+          if (insps[ic].isFinal && insps[ic].status !== '반려') {
+            inspLockedPending = true;
+            if (insps[ic].status === '최종승인(INSP)') inspClosed = true;
+          }
         }
 
         completedDocs.push({
@@ -2670,6 +2705,7 @@ function getHomeDataForClient() {
           prcFinalAt:  pf.submitAt,
           insps:       insps,
           inspClosed:  inspClosed,
+          inspLocked:  inspLockedPending,   // [INSP Step 4 보강] 최종 검수 진행중 추가제출 차단
         });
       }
       // 최신 PRC 순
@@ -2677,6 +2713,30 @@ function getHomeDataForClient() {
         return (b.prcFinalAt || '').localeCompare(a.prcFinalAt || '');
       });
     }
+
+    // [INSP Step 5] 내 검수 결재 대기 + 최종 완료(통합)
+    var inspMenus = (typeof _getInspMenusForClient === 'function')
+      ? _getInspMenusForClient(ss, actor, isProc)
+      : { myInspPending: [], inspFinals: [] };
+
+    // 최종 완료 통합: REQ/PRC 최종 + INSP 최종(IS_FINAL) — 단일 리스트, docType으로 구분
+    var finalDocs = [];
+    reqPrcFinals.forEach(function(m) {
+      finalDocs.push({
+        docNo: m.docNo, token: m.token, subject: m.subject,
+        vendorName: m.vendorName, drafterName: m.drafter, dept: m.dept,
+        status: m.status, docType: m.docType, issueDate: m.issueDate, submitAt: m.submitAt,
+      });
+    });
+    (inspMenus.inspFinals || []).forEach(function(m) {
+      finalDocs.push({
+        docNo: m.docNo, token: m.token, subject: m.subject,
+        vendorName: m.vendorName, drafterName: m.drafterName, dept: '',
+        status: m.status, docType: 'INSP', issueDate: m.receivedDate, submitAt: m.submitAt,
+        poNo: m.poNo, reqNo: m.reqNo, seq: m.seq,
+      });
+    });
+    finalDocs.sort(function(a, b) { return (b.submitAt || '').localeCompare(a.submitAt || ''); });
 
     return {
       ok: true,
@@ -2691,6 +2751,8 @@ function getHomeDataForClient() {
       approvedInbox: approvedInbox,
       myPrc:         myPrc,
       completedDocs: completedDocs,   // [INSP Step 2]
+      myInspPending: inspMenus.myInspPending,   // [INSP Step 5]
+      finalDocs:     finalDocs,                 // [INSP Step 5]
     };
   } catch(err) {
     return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
@@ -3995,6 +4057,11 @@ function processQueueTrigger() {
         result = _processPdfOnlyJob(job);
       } else if (job.type === 'pdf_and_consolidate') {
         result = _processPdfAndConsolidateJob(job);
+      } else if (job.type === 'insp_pdf') {
+        // [INSP Step 6] 검수보고서 PDF 생성 → FINAL/PO폴더 이동 → 사진 삭제
+        result = (typeof _processInspPdfJob === 'function')
+          ? _processInspPdfJob(job)
+          : { ok: false, message: 'INSP 모듈(_processInspPdfJob) 미배포' };
       } else {
         result = { ok: false, message: '알 수 없는 job type: ' + job.type };
       }
