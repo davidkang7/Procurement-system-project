@@ -646,7 +646,7 @@ function updateAttachSummary(){
     '<div style="font-size:10px;color:#666;margin-top:6px;">'
     + '합산 용량: <b style="color:' + (used > MAX_TOTAL_SIZE ? '#c0392b' : '#111') + '">'
     + fmtBytes(used) + '</b> / 최대 ' + fmtBytes(MAX_TOTAL_SIZE)
-    + ' (잔여 ' + fmtBytes(remain) + ', REQ+PRC 합산 기준)'
+    + ' (잔여 ' + fmtBytes(remain) + ', 품의+구매 합산 기준)'
     + '<div style="height:4px;background:#eee;border-radius:2px;margin-top:3px;overflow:hidden;">'
     + '<div style="height:100%;width:' + pct + '%;background:' + (used > MAX_TOTAL_SIZE ? '#c0392b' : '#1a6fc4') + ';"></div>'
     + '</div></div>';

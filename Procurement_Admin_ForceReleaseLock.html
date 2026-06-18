@@ -141,13 +141,13 @@
 <div class="page-head">
   <div>
     <div class="page-title">🔓 강제 락 해제 <span class="url-hint">/ ?action=admin&fn=force_release_lock</span></div>
-    <div class="page-sub">PRC 작성을 위해 점유된 REQ 락을 관리자 권한으로 강제 해제합니다. 해제 시 인박스에 다시 노출되어 다른 구매팀원이 픽업할 수 있습니다.</div>
+    <div class="page-sub">구매 문서 작성을 위해 점유된 품의 락을 관리자 권한으로 강제 해제합니다. 해제 시 인박스에 다시 노출되어 다른 구매팀원이 픽업할 수 있습니다.</div>
   </div>
   <a class="back-link" id="back-link" href="#">← 홈으로</a>
 </div>
 
 <div class="info-banner">
-  💡 <strong>락이란?</strong> 구매팀원이 인박스에서 REQ를 픽업하면 해당 REQ가 점유(잠금)되어 다른 사람이 동시에 PRC를 만들지 못하게 됩니다.
+  💡 <strong>락이란?</strong> 구매팀원이 인박스에서 품의를 픽업하면 해당 품의가 점유(잠금)되어 다른 사람이 동시에 구매 문서를 만들지 못하게 됩니다.
   점유자가 작업을 끝내지 못하거나(외근·휴가·퇴사 등) 24시간(TTL) 자동 만료를 기다릴 수 없을 때, 관리자가 이 화면에서 락을 즉시 해제할 수 있습니다.
 </div>
 
@@ -175,10 +175,10 @@
 <div class="panel">
   <div class="panel-head">
     <div>
-      <span class="panel-title">락 점유 중인 REQ</span>
+      <span class="panel-title">락 점유 중인 품의</span>
       <span class="panel-sub" id="result-count" style="margin-left:8px;"></span>
     </div>
-    <div class="panel-sub">💡 행을 클릭해 선택하세요. 회색 행은 비정상(PRC 락)으로 이 화면에서 해제 불가합니다.</div>
+    <div class="panel-sub">💡 행을 클릭해 선택하세요. 회색 행은 비정상(구매 락)으로 이 화면에서 해제 불가합니다.</div>
   </div>
   <div id="table-container">
     <div class="loading">락 목록을 불러오는 중...</div>
@@ -302,7 +302,7 @@ function renderTable() {
 
   if (locks.length === 0) {
     document.getElementById('table-container').innerHTML =
-      '<div class="empty-state">현재 락이 걸린 REQ가 없습니다.</div>';
+      '<div class="empty-state">현재 락이 걸린 품의가 없습니다.</div>';
     return;
   }
 
@@ -338,7 +338,7 @@ function renderRow(lk) {
 
   return '<tr class="' + cls + '" ' + onclick + '>'
     + '<td class="mono"><span class="docno">' + escHtml(lk.docNo) + '</span>'
-    +   (lk.isAbnormal ? '<span class="badge-abnormal">⚠ PRC 락 (이상)</span>' : '')
+    +   (lk.isAbnormal ? '<span class="badge-abnormal">⚠ 구매 락 (이상)</span>' : '')
     + '</td>'
     + '<td>' + escHtml(lk.drafter) + '</td>'
     + '<td>' + escHtml(lk.vendor) + '</td>'
@@ -424,8 +424,8 @@ function openConfirm() {
   var warnBlock = '<div class="confirm-warn">'
     + '이 작업은 다음 영향을 미칩니다:'
     + '<ul>'
-    +   '<li>점유자 <strong>' + escHtml(sel.claimedBy) + '</strong>님이 PRC 작성 화면에서 입력 중인 내용이 저장되지 않을 수 있습니다.</li>'
-    +   '<li>이 REQ는 즉시 구매팀 인박스에 다시 노출되어 다른 담당자가 픽업할 수 있게 됩니다.</li>'
+    +   '<li>점유자 <strong>' + escHtml(sel.claimedBy) + '</strong>님이 구매 문서 작성 화면에서 입력 중인 내용이 저장되지 않을 수 있습니다.</li>'
+    +   '<li>이 품의는 즉시 구매팀 인박스에 다시 노출되어 다른 담당자가 픽업할 수 있게 됩니다.</li>'
     + '</ul>'
     + '</div>';
 
@@ -436,7 +436,7 @@ function openConfirm() {
     + '</div>';
 
   document.getElementById('confirm-modal-body').innerHTML =
-    '<div style="margin-bottom:12px;">아래 REQ의 PRC 작성 락을 강제 해제하시겠습니까?</div>'
+    '<div style="margin-bottom:12px;">아래 품의의 구매 문서 작성 락을 강제 해제하시겠습니까?</div>'
     + '<div class="confirm-row"><span class="confirm-key">문서번호</span><span class="confirm-val" style="font-family:Consolas,monospace;">' + escHtml(sel.docNo) + '</span></div>'
     + '<div class="confirm-row"><span class="confirm-key">기안자</span><span class="confirm-val">' + escHtml(sel.drafter) + '</span></div>'
     + '<div class="confirm-row"><span class="confirm-key">현재 점유자</span><span class="confirm-val">' + escHtml(sel.claimedBy) + '</span></div>'

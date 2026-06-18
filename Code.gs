@@ -1764,17 +1764,17 @@ function _sendAdminDiscardNotifications(ctx) {
   }
 
   // 기안자 (항상 후보)
-  addNotify(ctx.requesterEmail, '당신이 기안한 ' + ctx.docType + ' 문서가 강제 폐기됨');
+  addNotify(ctx.requesterEmail, '당신이 기안한 ' + (ctx.docType === 'PRC' ? '구매' : '품의') + ' 문서가 강제 폐기됨');
 
   // REQ 락 점유자 (락 점유 중이었을 때)
   if (ctx.claimedBy) {
-    addNotify(ctx.claimedBy, 'PRC 작업을 위해 점유 중이던 REQ가 폐기되어 락이 자동 해제됨');
+    addNotify(ctx.claimedBy, '구매 문서 작업을 위해 점유 중이던 품의가 폐기되어 락이 자동 해제됨');
   }
 
   // PRC 폐기 시 부모 REQ 점유자 (=PRC 작성자와 시스템상 동일)
   if (ctx.docType === 'PRC' && ctx.parentInfo && ctx.parentInfo.claimedBy) {
     addNotify(ctx.parentInfo.claimedBy,
-      '진행 중이던 PRC가 폐기되어 부모 REQ(' + ctx.parentInfo.docNo + ') 락이 자동 해제되고 인박스로 복귀됨');
+      '진행 중이던 구매 문서가 폐기되어 부모 품의(' + ctx.parentInfo.docNo + ') 락이 자동 해제되고 인박스로 복귀됨');
   }
 
   var tsStr = toDateTimeStr(new Date());
@@ -1986,8 +1986,8 @@ function _adminForceReleaseLockCore(payload) {
       if (docType !== 'REQ') {
         return {
           ok: false,
-          message: 'REQ 문서의 락만 해제할 수 있습니다. (현재 문서 유형: ' + docType + ')\n'
-                 + 'PRC 문서에 락이 걸려있다면 시스템 이상일 수 있으니 관리자에게 문의하세요.',
+          message: '품의 문서의 락만 해제할 수 있습니다. (현재 문서 유형: ' + docType + ')\n'
+                 + '구매 문서에 락이 걸려있다면 시스템 이상일 수 있으니 관리자에게 문의하세요.',
         };
       }
 
@@ -2089,18 +2089,18 @@ function _sendForceReleaseLockNotification(ctx) {
   var tsStr = toDateTimeStr(new Date());
 
   try {
-    var subject = '[구매결재] 작업 중이던 ' + ctx.docNo + '의 PRC 작성 락이 해제되었습니다';
+    var subject = '[구매결재] 작업 중이던 ' + ctx.docNo + '의 구매 문서 작성 락이 해제되었습니다';
     var body =
       '안녕하세요.\n\n' +
-      '귀하가 PRC 작성을 위해 점유 중이던 아래 REQ 문서의 락이\n' +
+      '귀하가 구매 문서 작성을 위해 점유 중이던 아래 품의 문서의 락이\n' +
       '관리자에 의해 해제되었음을 알려드립니다.\n\n' +
       '▶ 문서번호: ' + ctx.docNo + '\n' +
       '▶ 처리자: ' + ctx.actor + '\n' +
       '▶ 처리 일시: ' + tsStr + '\n' +
       '▶ 해제 사유: ' + ctx.reason + '\n\n' +
       '⚠️ 주의사항\n' +
-      '  - 현재 작성 중이던 PRC 내용이 있다면 저장되지 않을 수 있습니다.\n' +
-      '  - 이 REQ는 다시 구매팀 인박스에 노출되어 다른 담당자가\n' +
+      '  - 현재 작성 중이던 구매 문서 내용이 있다면 저장되지 않을 수 있습니다.\n' +
+      '  - 이 품의는 다시 구매팀 인박스에 노출되어 다른 담당자가\n' +
       '    픽업할 수 있는 상태가 되었습니다.\n' +
       '  - 계속 작업이 필요하시면 인박스에서 다시 픽업해 주세요.\n\n' +
       '문의사항은 관리자에게 연락 바랍니다.\n\n' +
@@ -2187,14 +2187,14 @@ function _claimRequestCore(payload) {
       var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
       var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
       var rowNum = findRowNumByToken(sheet, parentToken);
-      if (rowNum < 0) return { ok: false, message: '원본 REQ를 찾을 수 없습니다.' };
+      if (rowNum < 0) return { ok: false, message: '원본 품의를 찾을 수 없습니다.' };
 
       var r = readRow(sheet, rowNum);
       if (r[COL.STATUS] !== '최종승인') {
-        return { ok: false, message: '1차 결재가 완료된 REQ만 픽업할 수 있습니다. (현재 상태: ' + r[COL.STATUS] + ')' };
+        return { ok: false, message: '1차 결재가 완료된 품의만 픽업할 수 있습니다. (현재 상태: ' + r[COL.STATUS] + ')' };
       }
       if (String(r[COL.DOC_TYPE] || 'REQ') !== 'REQ') {
-        return { ok: false, message: 'REQ 문서만 픽업할 수 있습니다.' };
+        return { ok: false, message: '품의 문서만 픽업할 수 있습니다.' };
       }
 
       var currentClaim = String(r[COL.CLAIMED_BY] || '').trim();
@@ -2221,7 +2221,7 @@ function _claimRequestCore(payload) {
 
       return {
         ok: true,
-        message: 'REQ를 픽업했습니다.',
+        message: '품의를 픽업했습니다.',
         parentToken: parentToken,
         claimedBy: actor,
         claimedAt: toDateTimeStr(now),
@@ -2248,7 +2248,7 @@ function _releaseClaimCore(payload) {
       var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
       var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
       var rowNum = findRowNumByToken(sheet, parentToken);
-      if (rowNum < 0) return { ok: false, message: '원본 REQ를 찾을 수 없습니다.' };
+      if (rowNum < 0) return { ok: false, message: '원본 품의를 찾을 수 없습니다.' };
 
       var r = readRow(sheet, rowNum);
       var claimedBy = String(r[COL.CLAIMED_BY] || '').trim();
@@ -2281,11 +2281,11 @@ function getPrefillDataForClient(parentToken) {
     var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
     var rowNum = findRowNumByToken(sheet, parentToken);
-    if (rowNum < 0) return { ok: false, message: '원본 REQ를 찾을 수 없습니다.' };
+    if (rowNum < 0) return { ok: false, message: '원본 품의를 찾을 수 없습니다.' };
 
     var r = readRow(sheet, rowNum);
     if (r[COL.STATUS] !== '최종승인') {
-      return { ok: false, message: '1차 결재 완료된 REQ만 PRC 생성이 가능합니다.' };
+      return { ok: false, message: '1차 결재 완료된 품의만 구매 문서 생성이 가능합니다.' };
     }
 
     var actor = getActiveUserEmail();
@@ -2398,7 +2398,7 @@ function _submitPrcCore(data) {
   var lockResult = withLock(function() {
     try {
       var parentToken = data.parentToken;
-      if (!parentToken) return { ok: false, message: '원본 REQ 토큰이 필요합니다.' };
+      if (!parentToken) return { ok: false, message: '원본 품의 토큰이 필요합니다.' };
 
       var actor = getActiveUserEmail();
       if (!isProcurementUser(actor)) return { ok: false, message: '구매팀 권한이 없습니다.' };
@@ -2408,12 +2408,12 @@ function _submitPrcCore(data) {
       ensureHeaders(sheet);
 
       var parentRowNum = findRowNumByToken(sheet, parentToken);
-      if (parentRowNum < 0) return { ok: false, message: '원본 REQ를 찾을 수 없습니다.' };
+      if (parentRowNum < 0) return { ok: false, message: '원본 품의를 찾을 수 없습니다.' };
 
       var parentRow = readRow(sheet, parentRowNum);
       var claimedBy = String(parentRow[COL.CLAIMED_BY] || '').trim();
       if (claimedBy !== actor) {
-        return { ok: false, message: '본인이 점유한 REQ만 PRC를 생성할 수 있습니다. (현재 점유: ' + (claimedBy || '없음') + ')' };
+        return { ok: false, message: '본인이 점유한 품의만 구매 문서를 생성할 수 있습니다. (현재 점유: ' + (claimedBy || '없음') + ')' };
       }
 
       // PO No. 중복 검사 (PRC의 docNo로 사용)
@@ -2490,7 +2490,7 @@ function _submitPrcCore(data) {
     savedFiles = saveAttachmentsToFolder(folder, data.attachments || []);
   } catch(e) {
     rollbackFiles(savedFiles);
-    return { ok: false, message: 'PRC 첨부파일 업로드 실패: ' + e.toString() };
+    return { ok: false, message: '구매 문서 첨부파일 업로드 실패: ' + e.toString() };
   }
 
   // 첨부 메타 + 요약 파일
@@ -2517,7 +2517,7 @@ function _submitPrcCore(data) {
 
   return {
     ok: true,
-    message: 'PRC 제출 완료. 구매팀 결재자에게 이메일이 발송되었습니다.',
+    message: '구매 문서 제출 완료. 구매팀 결재자에게 이메일이 발송되었습니다.',
     uploaded: savedFiles.length,
     rowNum: lockResult.rowNum,
   };
@@ -3269,7 +3269,7 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
     + '<div style="padding:28px 32px;">'
     + '<p style="font-size:14px;color:#444;margin:0 0 20px;line-height:1.7;">'
     + '아래 구매품의서의 1차 결재가 완료되어 구매팀 작업 대기열(APPROVED_1ST 인박스)에 등록되었습니다.<br>'
-    + '구매팀 기안자 누구나 선착순으로 픽업하여 PRC를 생성할 수 있습니다.</p>'
+    + '구매팀 기안자 누구나 선착순으로 픽업하여 구매 문서를 생성할 수 있습니다.</p>'
     + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">'
     + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
     + '<tr><td style="color:#888;padding:4px 0;width:80px;">품의번호</td><td style="color:#111;font-weight:600;">' + docNoEsc + '</td></tr>'
@@ -3277,10 +3277,10 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
     + '<tr><td style="color:#888;padding:4px 0;">기안자</td><td style="color:#111;">' + drafterEsc + '</td></tr></table></div>'
     + '<table role="presentation" align="center" style="margin:0 auto;border-collapse:collapse;"><tr>'
     + '<td style="padding-right:10px;"><a href="' + homeUrl + '" style="display:inline-block;background:#fff;color:#6a3eb5;font-size:14px;font-weight:700;padding:11px 22px;border-radius:6px;text-decoration:none;border:2px solid #6a3eb5;">대시보드에서 보기</a></td>'
-    + '<td style="padding-left:10px;"><a href="' + prcUrl + '" style="display:inline-block;background:#6a3eb5;color:#fff;font-size:14px;font-weight:700;padding:11px 22px;border-radius:6px;text-decoration:none;">PRC 생성하기</a></td>'
+    + '<td style="padding-left:10px;"><a href="' + prcUrl + '" style="display:inline-block;background:#6a3eb5;color:#fff;font-size:14px;font-weight:700;padding:11px 22px;border-radius:6px;text-decoration:none;">구매 문서 생성하기</a></td>'
     + '</tr></table>'
     + '<div style="border-top:1px solid #e0e0e0;margin:24px 0 12px;"></div>'
-    + '<p style="font-size:11px;color:#888;text-align:center;margin:0;">동일 REQ에 대해 한 명만 PRC 생성이 가능합니다 (선착순).</p>'
+    + '<p style="font-size:11px;color:#888;text-align:center;margin:0;">동일 품의에 대해 한 명만 구매 문서 생성이 가능합니다 (선착순).</p>'
     + '</div>'
     + '<div style="background:#f0f0f0;padding:16px 32px;text-align:center;">'
     + '<p style="font-size:11px;color:#888;margin:0;">— ' + escapeHtml(CONFIG.FROM_NAME) + '</p>'
@@ -3288,13 +3288,13 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
 
   var plainBody = [
     '[구매팀 작업 대기열]', '',
-    '아래 REQ가 1차 결재 완료되어 인박스에 등록되었습니다.', '',
+    '아래 품의가 1차 결재 완료되어 인박스에 등록되었습니다.', '',
     '■ 품의번호: ' + docNo,
     '■ 품의제목: ' + subject,
     '■ 기안자:   ' + drafter, '',
     '▶ 대시보드: ' + homeUrl,
-    '▶ PRC 생성: ' + prcUrl, '',
-    '동일 REQ에 대해 한 명만 PRC 생성이 가능합니다 (선착순).',
+    '▶ 구매 문서 생성: ' + prcUrl, '',
+    '동일 품의에 대해 한 명만 구매 문서 생성이 가능합니다 (선착순).',
     '— ' + CONFIG.FROM_NAME,
   ].join('\n');
 
@@ -3785,7 +3785,7 @@ function buildPdfPayload(row) {
     parentApprovers: [],
     hasParentApprovers: false,
     generatedAt:   toDateTimeStr(new Date()),
-    title:         (docType === 'PRC' ? '구매품의서(PRC)_' : '구매품의서_') + String(row[COL.DOC_NO] || ''),
+    title:         (docType === 'PRC' ? '구매품의서(구매)_' : '구매품의서_') + String(row[COL.DOC_NO] || ''),
 
     // 의도적으로 제외:
     //   remarks, prcMemo, rejectLog, claimedBy, claimedAt, fieldChanges

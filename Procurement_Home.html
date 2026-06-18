@@ -269,7 +269,7 @@
 <div class="pkmodal-backdrop" id="pkmodal-backdrop" aria-hidden="true">
   <div class="pkmodal" role="dialog" aria-modal="true" aria-labelledby="pkmodal-title">
     <div class="pkmodal-header">
-      <div class="pkmodal-title" id="pkmodal-title">PRC 픽업 처리 중</div>
+      <div class="pkmodal-title" id="pkmodal-title">구매 문서 픽업 처리 중</div>
     </div>
     <div class="pkmodal-body" id="pkmodal-body"></div>
     <div class="pkmodal-footer empty" id="pkmodal-footer"></div>
@@ -383,7 +383,7 @@ function renderSidebar(){
   ];
   var proc = u.isProcurement ? [
     { key: 'inbox',  label: 'APPROVED_1ST 인박스', count: (d.approvedInbox || []).length, urgent: (d.approvedInbox || []).length > 0 },
-    { key: 'myprc',  label: '진행 중 PRC', count: (d.myPrc || []).length },
+    { key: 'myprc',  label: '진행 중 구매', count: (d.myPrc || []).length },
   ] : [];
 
   var html = '';
@@ -593,7 +593,7 @@ function renderInbox(){
   var d = STATE.data || {};
   var rows = d.approvedInbox || [];
   return pageHead('APPROVED_1ST 인박스',
-    '1차 결재가 완료된 REQ가 모이는 구매팀 작업 대기열입니다. 선착순으로 픽업하여 PRC를 생성할 수 있습니다.')
+    '1차 결재가 완료된 품의가 모이는 구매팀 작업 대기열입니다. 선착순으로 픽업하여 구매 문서를 생성할 수 있습니다.')
     + '<div class="panel">'
     + '<div class="panel-head"><div><span class="panel-title">픽업 대기 (FIFO 정렬)</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
     + tableOfDocs(rows, 'inbox')
@@ -603,7 +603,7 @@ function renderInbox(){
 function renderMyPrc(){
   var d = STATE.data || {};
   var rows = d.myPrc || [];
-  return pageHead('진행 중 PRC', '내가 점유한 REQ 또는 내가 생성한 PRC 목록입니다.')
+  return pageHead('진행 중 구매', '내가 점유한 품의 또는 내가 생성한 구매 문서 목록입니다.')
     + '<div class="panel">'
     + '<div class="panel-head"><div><span class="panel-title">진행 중 작업</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
     + tableOfDocs(rows, 'myprc')
@@ -652,7 +652,7 @@ function renderFinal(){
   } else {
     body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>거래처</th><th>상태</th><th>일자</th></tr></thead><tbody>';
     rows.forEach(function(r){
-      var typeLabel = r.docType==='INSP' ? '검수' : r.docType;
+      var typeLabel = docTypeText(r.docType);
       var typeCls   = r.docType==='PRC' ? 'docno prc' : (r.docType==='INSP' ? 'docno ir' : 'docno');
       var clickAttr = r.docType==='INSP'
         ? 'data-insp-view="' + escAttr(r.token) + '"'
@@ -669,13 +669,13 @@ function renderFinal(){
     body += '</tbody></table>';
   }
 
-  return pageHead('최종 완료', '최종 승인 처리된 REQ·PRC 및 최종 검수 완료된 검수보고서입니다. '
+  return pageHead('최종 완료', '최종 승인 처리된 품의·구매 및 최종 검수 완료된 검수보고서입니다. '
       + (isProc ? '구매팀 권한으로 전체가 표시됩니다.' : '본인이 기안하거나 결재에 참여한 문서가 표시됩니다.')
       + ' 행을 클릭하면 처리된 문서를 열람할 수 있습니다.')
     + '<div class="kpi-grid">'
     +   kpi('전체', rows.length, 'highlight')
-    +   kpi('REQ', cReq)
-    +   kpi('PRC', cPrc)
+    +   kpi('품의', cReq)
+    +   kpi('구매', cPrc)
     +   kpi('검수보고서', cInsp)
     + '</div>'
     + '<div class="panel"><div class="panel-head"><div><span class="panel-title">최종 완료 문서</span><span class="scope-tag' + (isProc ? ' proc' : '') + '">' + rows.length + '건' + (isProc ? ' · 전체' : '') + '</span></div></div>'
@@ -699,13 +699,13 @@ function renderCompleted(){
   });
 
   var kpiHtml = '<div class="kpi-grid">'
-    + kpi('결재 완료(PRC)', docs.length, 'highlight')
+    + kpi('결재 완료(구매)', docs.length, 'highlight')
     + kpi('검수 미제출', kNone)
     + kpi('검수 진행 중', kProg)
     + kpi('검수 종결', kDone)
     + '</div>';
 
-  var sub = '최종승인(PRC)된 구매 품의의 최종 승인 확인 및 검수보고서 제출 메뉴입니다. '
+  var sub = '최종승인(구매)된 구매 품의의 최종 승인 확인 및 검수보고서 제출 메뉴입니다. '
     + (isProc ? '구매팀 권한으로 전체 문서가 표시됩니다.' : '본인이 기안한 품의가 표시됩니다.')
     + ' 행을 클릭하면 회차별 검수 이력이 펼쳐집니다.';
 
@@ -855,13 +855,13 @@ function inboxRow(r){
     + '<td>' + escHtml(r.submitAt) + '</td>'
     + '<td>' + claimDisplay + '</td>'
     + '<td>' + (canPickup ?
-        '<button class="pickup-btn" data-pickup="' + escAttr(r.token) + '">' + (claimed === actor ? '계속 작업' : 'PRC 생성') + '</button>'
+        '<button class="pickup-btn" data-pickup="' + escAttr(r.token) + '">' + (claimed === actor ? '계속 작업' : '구매 문서 생성') + '</button>'
         : '<button class="pickup-btn" disabled>다른 담당자</button>')
     + '</td></tr>';
 }
 
 function myPrcRow(r){
-  var type = r._type === 'claimed_req' ? 'REQ(점유)' : 'PRC';
+  var type = r._type === 'claimed_req' ? '품의(점유)' : '구매';
   var typeClass = r._type === 'claimed_req' ? 'docno' : 'docno prc';
   var actionBtn = '';
   if(r._type === 'claimed_req'){
@@ -880,7 +880,7 @@ function myPrcRow(r){
 
 function pendingRow(r){
   return '<tr class="row-clickable" data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '">'
-    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docType) + '</span></td>'
+    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(docTypeText(r.docType)) + '</span></td>'
     + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docNo) + '</span></td>'
     + '<td>' + escHtml(r.subject) + '</td>'
     + '<td>' + escHtml(r.drafter) + '</td>'
@@ -892,7 +892,7 @@ function pendingRow(r){
 
 function docRow(r){
   return '<tr class="row-clickable" data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '">'
-    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docType) + '</span></td>'
+    + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(docTypeText(r.docType)) + '</span></td>'
     + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docNo) + '</span></td>'
     + '<td>' + escHtml(r.subject) + '</td>'
     + '<td>' + escHtml(r.vendorName) + '</td>'
@@ -948,13 +948,13 @@ function pkmodalSetFooter(html){
 // 처리 중 화면 (스피너 + 4단계 진행 표시)
 // step: 'lock' | 'verify' | 'commit' | 'navigate'
 function pkmodalRenderProcessing(step){
-  pkmodalSetTitle('PRC 픽업 처리 중');
+  pkmodalSetTitle('구매 문서 픽업 처리 중');
   pkmodalSetFooter('');
   var steps = [
     { key:'lock',     label:'구매팀 락(Lock) 점유 요청' },
-    { key:'verify',   label:'REQ 상태 및 권한 확인' },
+    { key:'verify',   label:'품의 상태 및 권한 확인' },
     { key:'commit',   label:'점유자 정보 기록' },
-    { key:'navigate', label:'PRC 작성 화면으로 이동' }
+    { key:'navigate', label:'구매 문서 작성 화면으로 이동' }
   ];
   var idx = 0;
   for(var i = 0; i < steps.length; i++){ if(steps[i].key === step){ idx = i; break; } }
@@ -985,14 +985,14 @@ function pkmodalRenderSuccess(res){
     + '<div class="pkmodal-info">'
       + '<div class="pkmodal-info-row"><span class="lbl">점유자</span><span class="val">' + escHtml(claimedBy) + '</span></div>'
       + '<div class="pkmodal-info-row"><span class="lbl">점유 시각</span><span class="val">' + escHtml(claimedAt) + '</span></div>'
-      + '<div class="pkmodal-info-row"><span class="lbl">다음 단계</span><span class="val">PRC 작성 화면으로 이동</span></div>'
+      + '<div class="pkmodal-info-row"><span class="lbl">다음 단계</span><span class="val">구매 문서 작성 화면으로 이동</span></div>'
     + '</div>'
     + '<p class="pkmodal-detail pkmodal-detail-row" id="pkmodal-success-status">'
       + '<span class="pkmodal-spinner sm"></span>'
-      + 'PRC 작성 화면을 여는 중...'
+      + '구매 문서 작성 화면을 여는 중...'
     + '</p>';
   // 사용자 클릭 컨텍스트에서 navigation을 보장하기 위한 fallback 버튼 (항상 표시)
-  pkmodalSetFooter('<button type="button" class="pkmodal-btn primary" onclick="pickupGoToPrc()">PRC 작성 화면으로 이동</button>');
+  pkmodalSetFooter('<button type="button" class="pkmodal-btn primary" onclick="pickupGoToPrc()">구매 문서 작성 화면으로 이동</button>');
 }
 
 // PRC 작성 화면으로 이동
@@ -1010,7 +1010,7 @@ function pickupGoToPrc(){
     if(statusEl){
       statusEl.innerHTML =
         '<span style="color:var(--danger);font-weight:600;">⚠ 자동 전환이 차단되었습니다.</span>'
-        + '<br><span style="color:var(--ink-mute);">아래 버튼을 눌러 PRC 작성 화면으로 이동해 주세요.</span>';
+        + '<br><span style="color:var(--ink-mute);">아래 버튼을 눌러 구매 문서 작성 화면으로 이동해 주세요.</span>';
     }
   }
 }
@@ -1055,7 +1055,7 @@ function pickupRetry(){
 }
 
 function pickupReq(parentToken){
-  if(!confirm('이 REQ를 픽업하여 PRC 생성을 시작하시겠습니까?\n(30초간 락이 점유되며, 동안 다른 담당자는 이 REQ를 픽업할 수 없습니다.)')) return;
+  if(!confirm('이 품의를 픽업하여 구매 문서 생성을 시작하시겠습니까?\n(30초간 락이 점유되며, 동안 다른 담당자는 이 품의를 픽업할 수 없습니다.)')) return;
 
   PKMODAL.parentToken = parentToken;
   pkmodalOpen();
@@ -1124,6 +1124,17 @@ function tab(key, label, count){
   return '<div class="tab ' + (STATE.myDocsTab === key ? 'active' : '') + '" data-tab="' + key + '">'
     + escHtml(label) + ' <span style="opacity:0.6;font-weight:500;">(' + count + ')</span></div>';
 }
+// 유형 표시 라벨 — 데이터값(docType)은 그대로 두고 화면 표기만 한글화
+function docTypeText(t){
+  if(t === 'REQ') return '품의';
+  if(t === 'PRC') return '구매';
+  if(t === 'INSP') return '검수';
+  return t;
+}
+// 상태 표기도 화면에서만 한글화 (비교/분류 로직은 원본 status 값을 사용)
+function statusLabel(status){
+  return String(status == null ? '' : status).replace('PRC', '구매').replace('REQ', '품의');
+}
 function statusBadge(status){
   var cls = 'unknown';
   if(status === '검토중') cls = 'review';
@@ -1132,7 +1143,7 @@ function statusBadge(status){
   else if(status === '반려') cls = 'rejected';
   else if(status === '재상신') cls = 'resubmit';
   else if(status === 'PRC생성됨') cls = 'prc_made';
-  return '<span class="status ' + cls + '">' + escHtml(status) + '</span>';
+  return '<span class="status ' + cls + '">' + escHtml(statusLabel(status)) + '</span>';
 }
 function fmtAmt(n){
   if(!n) return '-';

@@ -76,14 +76,14 @@
 <body>
 <div class="pdf-wrap">
 
-  <div class="pdf-title <?= isPrc ? 'prc' : '' ?>"><?= isPrc ? '구 매 품 의 서 ( P R C )' : '구 매 품 의 서' ?></div>
+  <div class="pdf-title <?= isPrc ? 'prc' : '' ?>"><?= isPrc ? '구 매 품 의 서 ( 구 매 )' : '구 매 품 의 서' ?></div>
   <div class="pdf-subtitle <?= isPrc ? 'prc' : '' ?>"><?= isPrc ? 'PURCHASE  TEAM  REQUISITION' : 'PURCHASE  REQUISITION' ?></div>
 
   <!-- 상단 메타: PO/REQ 번호(좌) ↔ 발행일자(우) 대칭 -->
   <div class="top-meta">
     <div>
       <div class="doc-no"><?= docNo ?></div>
-      <div class="meta-label"><?= isPrc ? '구매팀 발번 / PRC' : 'REQ 발번' ?></div>
+      <div class="meta-label"><?= isPrc ? '구매팀 발번 / 구매' : '품의 발번' ?></div>
     </div>
     <div style="text-align:right;">
       <div class="issue-date"><?= issueDate ?></div>
@@ -99,7 +99,7 @@
 
     <? if (isPrc && hasParentApprovers) { ?>
       <div class="approval-block parent">
-        <div class="label">1차 결재 (REQ)</div>
+        <div class="label">1차 결재 (품의)</div>
         <table>
           <thead><tr>
             <? for (var i = 0; i < parentApprovers.length; i++) { ?>
@@ -128,7 +128,7 @@
     <? } ?>
 
     <div class="approval-block <?= isPrc ? 'prc-block' : '' ?>">
-      <div class="label"><?= isPrc ? '2차 결재 (PRC)' : '결재' ?></div>
+      <div class="label"><?= isPrc ? '2차 결재 (구매)' : '결재' ?></div>
       <table>
         <thead><tr>
           <? for (var i = 0; i < approvers.length; i++) { ?>
@@ -159,7 +159,7 @@
 
   <? if (isPrc && parentDocNo) { ?>
     <div class="parent-ref">
-      <b>참조 원본 REQ:</b> <?= parentDocNo ?>
+      <b>참조 원본 품의:</b> <?= parentDocNo ?>
       <? if (parentSubmitAt) { ?> &nbsp;|&nbsp; 1차 제출 <?= parentSubmitAt ?><? } ?>
     </div>
   <? } ?>

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <base target="_top">
-<title>구매팀 구매품의서 (PRC)</title>
+<title>구매팀 구매품의서 (구매)</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f4f5f7;padding:20px;color:#1a1d23;}
@@ -143,20 +143,20 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 <body>
 
 <div class="a4-wrap">
-  <div class="doc-title">구 매 품 의 서 (PRC)</div>
+  <div class="doc-title">구 매 품 의 서 (구매)</div>
   <div class="doc-sub">PURCHASE TEAM REQUISITION</div>
   <div class="top-meta">
-    <div>구매팀 작성 / 부모 REQ: <b id="parent-doc-no">로딩 중...</b></div>
+    <div>구매팀 작성 / 부모 품의: <b id="parent-doc-no">로딩 중...</b></div>
     <div>발행일자: <b id="today-disp">-</b></div>
   </div>
 
   <div class="parent-banner" id="parent-banner">
-    <b>원본 REQ:</b> <span id="parent-summary">로딩 중...</span> &nbsp;|&nbsp;
+    <b>원본 품의:</b> <span id="parent-summary">로딩 중...</span> &nbsp;|&nbsp;
     <a href="#" id="parent-link">원본 보기 ↗</a>
   </div>
 
   <div class="changes-summary" id="changes-summary" style="display:none">
-    <b>⚠ 원본 REQ 대비 변경된 항목</b> (사유 기록 후 제출됩니다)
+    <b>⚠ 원본 품의 대비 변경된 항목</b> (사유 기록 후 제출됩니다)
     <div class="change-list" id="change-list"></div>
   </div>
 
@@ -166,7 +166,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
     <div class="sec-body">
       <div class="row c2">
         <div class="field">
-          <label>PO No. <span class="req">*</span><span class="prc-tag">PRC</span></label>
+          <label>PO No. <span class="req">*</span><span class="prc-tag">구매</span></label>
           <input type="text" id="doc-no" placeholder="예: PO-2026-001" oninput="checkDocNo()">
           <div class="dup-msg" id="dup-msg"></div>
         </div>
@@ -190,7 +190,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 
   <!-- 2. 품의 제목 / 용도 (프리필) -->
   <div class="section">
-    <div class="sec-header">② 품의 제목 / 용도 (원본 REQ에서 복사 — 수정 가능)</div>
+    <div class="sec-header">② 품의 제목 / 용도 (원본 품의에서 복사 — 수정 가능)</div>
     <div class="sec-body">
       <div class="field" style="margin-bottom:8px;">
         <label>품의제목 <span class="req">*</span></label>
@@ -229,17 +229,17 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
       </div>
       <div class="row c2">
         <div class="field">
-          <label>실제 납기일 <span class="prc-tag">PRC</span></label>
+          <label>실제 납기일 <span class="prc-tag">구매</span></label>
           <input type="date" id="delivery-date" data-original="" oninput="trackChange('deliveryDate','납기일')">
         </div>
         <div class="field">
-          <label>납품 장소 / 실제 납품처 <span class="prc-tag">PRC</span></label>
+          <label>납품 장소 / 실제 납품처 <span class="prc-tag">구매</span></label>
           <input type="text" id="delivery-addr" data-original="" oninput="trackChange('deliveryAddr','납품장소')">
         </div>
       </div>
       <div class="row c2">
         <div class="field">
-          <label>구매 방법 <span class="prc-tag">PRC</span></label>
+          <label>구매 방법 <span class="prc-tag">구매</span></label>
           <select id="purchase-method">
             <option value="">선택</option>
             <option value="계좌이체">계좌이체 (선입금)</option>
@@ -250,7 +250,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
           </select>
         </div>
         <div class="field">
-          <label>지급 정보 / 결제 조건 <span class="prc-tag">PRC</span></label>
+          <label>지급 정보 / 결제 조건 <span class="prc-tag">구매</span></label>
           <input type="text" id="payment-info" placeholder="예: 납품 후 30일 내 / 계좌번호 등">
         </div>
       </div>
@@ -301,9 +301,9 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 
   <!-- 5. 첨부파일 (원본 REQ + 신규) -->
   <div class="section">
-    <div class="sec-header">⑤ 첨부파일 (원본 REQ + 추가)</div>
+    <div class="sec-header">⑤ 첨부파일 (원본 품의 + 추가)</div>
     <div class="sec-body">
-      <div style="font-size:11px;color:#6a3eb5;margin-bottom:6px;font-weight:600;">📎 원본 REQ 첨부 (자동 포함)</div>
+      <div style="font-size:11px;color:#6a3eb5;margin-bottom:6px;font-weight:600;">📎 원본 품의 첨부 (자동 포함)</div>
       <div id="parent-attach-list"></div>
 
       <div style="font-size:11px;color:#444;margin:10px 0 4px;font-weight:600;">+ 구매팀이 추가하는 첨부</div>
@@ -322,11 +322,11 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
     <div class="sec-header prc">⑥ 구매팀 메모 / 비고</div>
     <div class="sec-body">
       <div class="field">
-        <label>비고 (원본 REQ에서 복사 — 수정 가능)</label>
+        <label>비고 (원본 품의에서 복사 — 수정 가능)</label>
         <textarea id="remarks" rows="2" data-original="" oninput="trackChange('remarks','비고')"></textarea>
       </div>
       <div class="field" style="margin-top:8px;">
-        <label>구매팀 메모 <span class="prc-tag">PRC</span></label>
+        <label>구매팀 메모 <span class="prc-tag">구매</span></label>
         <textarea id="prc-memo" rows="3" placeholder="가격 협상 내용, 발주 시 유의사항, 대체 업체 검토 결과 등"></textarea>
       </div>
     </div>
@@ -334,7 +334,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 
   <!-- 7. REQ 결재 완료 내역 (읽기 전용) -->
   <div class="section">
-    <div class="sec-header">⑦ 원본 REQ 결재 완료 내역 <span style="font-weight:400;color:#888;font-size:10px;margin-left:8px">읽기 전용 — 1차 결재</span></div>
+    <div class="sec-header">⑦ 원본 품의 결재 완료 내역 <span style="font-weight:400;color:#888;font-size:10px;margin-left:8px">읽기 전용 — 1차 결재</span></div>
     <div class="sec-body">
       <div class="tbl-wrap">
         <table class="appr-completed" id="parent-appr-table">
@@ -354,7 +354,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 
   <!-- 8. PRC 결재선 (이번 PRC) -->
   <div class="section prc-only">
-    <div class="sec-header prc">⑧ 구매팀 결재선 <span style="font-weight:400;color:#999;font-size:10px;margin-left:8px">이번 PRC — 2차 결재</span></div>
+    <div class="sec-header prc">⑧ 구매팀 결재선 <span style="font-weight:400;color:#999;font-size:10px;margin-left:8px">이번 구매 문서 — 2차 결재</span></div>
     <div class="sec-body">
       <div class="tbl-wrap">
         <table class="appr-table" id="appr-table">
@@ -376,7 +376,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
   <div class="btn-row">
     <button class="btn btn-back" onclick="goBack()">← 대시보드로</button>
     <button class="btn btn-cancel" onclick="showReleaseConfirm()">회수 / 폐기</button>
-    <button class="btn btn-submit" id="submit-btn" onclick="submitForm()">PRC 제출</button>
+    <button class="btn btn-submit" id="submit-btn" onclick="submitForm()">구매 문서 제출</button>
   </div>
 
   <div class="status-banner" id="status-banner"></div>
@@ -390,7 +390,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
   <div class="confirm-box">
     <div class="ctitle">회수하시겠습니까?</div>
     <div class="csub">
-      작성 중인 내용은 저장되지 않고, 다른 구매팀 담당자가 이 REQ를 다시 픽업할 수 있게 됩니다.<br>
+      작성 중인 내용은 저장되지 않고, 다른 구매팀 담당자가 이 품의를 다시 픽업할 수 있게 됩니다.<br>
       (입력하신 데이터는 폐기됩니다.)
     </div>
     <div class="confirm-btns">
@@ -423,7 +423,7 @@ var PREFILL_DATA = null;
 // ─── 초기 로드: 프리필 데이터 조회 ─────────────────────────────
 function boot(){
   if(!PARENT_TOKEN){
-    showBanner('error','부모 REQ 토큰이 누락되었습니다. 대시보드에서 다시 진입해 주세요.');
+    showBanner('error','부모 품의 토큰이 누락되었습니다. 대시보드에서 다시 진입해 주세요.');
     return;
   }
   if(typeof google === 'undefined'){
@@ -440,7 +440,7 @@ function boot(){
   loadApproverList();
 
   // 프리필 데이터 조회
-  showBanner('loading','원본 REQ 데이터 로딩 중...');
+  showBanner('loading','원본 품의 데이터 로딩 중...');
   google.script.run
     .withSuccessHandler(function(res){
       if(!res || !res.ok){
@@ -524,7 +524,7 @@ function renderParentApprovers(list){
 
   if(!list || list.length === 0){
     head.innerHTML = '<th>결재 내역 없음</th>';
-    nameRow.innerHTML = '<td colspan="1" style="padding:14px;color:#888;font-style:italic">원본 REQ에 결재자 정보가 없습니다.</td>';
+    nameRow.innerHTML = '<td colspan="1" style="padding:14px;color:#888;font-style:italic">원본 품의에 결재자 정보가 없습니다.</td>';
     return;
   }
 
@@ -871,11 +871,11 @@ function renderParentAttachments(list){
   parentAttachments = list || [];
   var el = document.getElementById('parent-attach-list');
   if(parentAttachments.length === 0){
-    el.innerHTML = '<div style="font-size:11px;color:#aaa;padding:6px 0">원본 REQ에 첨부파일이 없습니다.</div>';
+    el.innerHTML = '<div style="font-size:11px;color:#aaa;padding:6px 0">원본 품의에 첨부파일이 없습니다.</div>';
   } else {
     el.innerHTML = parentAttachments.map(function(a){
       return '<div class="attach-item from-req">'
-        + '<span><span class="req-tag">REQ</span>' + escHtml(a.name) + ' <span style="font-size:10px;color:#aaa">(' + fmtBytes(a.size || 0) + ')</span></span>'
+        + '<span><span class="req-tag">품의</span>' + escHtml(a.name) + ' <span style="font-size:10px;color:#aaa">(' + fmtBytes(a.size || 0) + ')</span></span>'
         + (a.viewUrl ? ' <a href="' + escAttr(a.viewUrl) + '" target="_blank" style="font-size:10px;color:#1a6fc4;text-decoration:none">보기 ↗</a>' : '')
         + '</div>';
     }).join('');
@@ -916,7 +916,7 @@ function updateAttachSummary(){
   el.innerHTML =
     '<div style="font-size:10px;color:#666;margin-top:6px;">'
     + '합산: <b style="color:' + (used > MAX_TOTAL_SIZE ? '#c0392b' : '#111') + '">' + fmtBytes(used) + '</b>'
-    + ' (REQ ' + fmtBytes(parent) + ' + 추가 ' + fmtBytes(added) + ')'
+    + ' (품의 ' + fmtBytes(parent) + ' + 추가 ' + fmtBytes(added) + ')'
     + ' / 최대 ' + fmtBytes(MAX_TOTAL_SIZE) + ' · 잔여 ' + fmtBytes(remain)
     + '<div style="height:4px;background:#eee;border-radius:2px;margin-top:3px;overflow:hidden;display:flex;">'
     + '<div style="height:100%;width:' + Math.min(100, Math.round(parent/MAX_TOTAL_SIZE*100)) + '%;background:#1a6fc4;"></div>'
@@ -1155,7 +1155,7 @@ function submitForm(){
       .withSuccessHandler(function(res){
         showProgress(100, '완료');
         if(res && res.ok){
-          showBanner('success', res.message || 'PRC 제출이 완료되었습니다. 대시보드로 이동합니다.');
+          showBanner('success', res.message || '구매 문서 제출이 완료되었습니다. 대시보드로 이동합니다.');
           setTimeout(function(){
             window.top.location.href = WEBAPP_URL + '?action=home';
           }, 1500);

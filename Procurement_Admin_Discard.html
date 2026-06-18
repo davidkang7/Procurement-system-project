@@ -153,7 +153,7 @@
 <div class="page-head">
   <div>
     <div class="page-title">🛠 강제 폐기 <span class="url-hint">/ ?action=admin&fn=discard</span></div>
-    <div class="page-sub">진행 중인 REQ/PRC 문서를 관리자 권한으로 강제 폐기합니다. <strong>최종승인(PRC)</strong>은 폐기 불가 (보호 대상).</div>
+    <div class="page-sub">진행 중인 품의/구매 문서를 관리자 권한으로 강제 폐기합니다. <strong>최종승인(PRC)</strong>은 폐기 불가 (보호 대상).</div>
   </div>
   <a class="back-link" id="back-link" href="#">← 홈으로</a>
 </div>
@@ -462,8 +462,8 @@ function openConfirm() {
     previewMap[email].push(label);
   }
   addPreview(sel.requesterEmail, '기안자');
-  if (sel.claimedBy) addPreview(sel.claimedBy, 'REQ 락 점유자');
-  if (sel.docType === 'PRC' && sel.parentClaimedBy) addPreview(sel.parentClaimedBy, '부모 REQ 점유자');
+  if (sel.claimedBy) addPreview(sel.claimedBy, '품의 락 점유자');
+  if (sel.docType === 'PRC' && sel.parentClaimedBy) addPreview(sel.parentClaimedBy, '부모 품의 점유자');
 
   var previewKeys = Object.keys(previewMap);
   var notifyBlock = '';
@@ -485,17 +485,17 @@ function openConfirm() {
   var cascadeBlock = '';
   if (sel.claimedBy) {
     cascadeBlock += '<div class="confirm-warn">'
-      + '⚠ 이 REQ는 현재 <strong>' + escHtml(sel.claimedBy) + '</strong>님이 PRC 작업을 위해 락을 점유 중입니다'
+      + '⚠ 이 품의는 현재 <strong>' + escHtml(sel.claimedBy) + '</strong>님이 구매 문서 작업을 위해 락을 점유 중입니다'
       + (sel.claimedAt ? ' (점유 시각: ' + escHtml(sel.claimedAt) + ')' : '')
       + '.<br>강제 폐기 시 락이 자동 해제됩니다.'
       + '</div>';
   }
   if (sel.docType === 'PRC' && sel.parentToken && sel.parentDocNo) {
     cascadeBlock += '<div class="confirm-cascade">'
-      + '🔗 PRC 폐기 연쇄 처리: 부모 REQ <strong>' + escHtml(sel.parentDocNo) + '</strong>의 락'
+      + '🔗 구매 문서 폐기 연쇄 처리: 부모 품의 <strong>' + escHtml(sel.parentDocNo) + '</strong>의 락'
       + (sel.parentClaimedBy ? '(' + escHtml(sel.parentClaimedBy) + ')' : '')
       + '이 자동 해제되어 APPROVED_1ST 인박스로 환원됩니다.<br>'
-      + '<span style="font-weight:500;font-size:11px;color:var(--ink-mute);">※ REQ 원기안자에게는 알림 미발송 (REQ는 살아있고 인박스로 복귀하므로)</span>'
+      + '<span style="font-weight:500;font-size:11px;color:var(--ink-mute);">※ 품의 원기안자에게는 알림 미발송 (품의는 살아있고 인박스로 복귀하므로)</span>'
       + '</div>';
   }
 
@@ -574,7 +574,7 @@ function executeDiscard() {
 
         var msg = sel.docNo + ' 강제 폐기 완료';
         if (res.restoredParent) {
-          msg += ' (부모 REQ ' + res.restoredParent.docNo + ' 인박스로 환원됨)';
+          msg += ' (부모 품의 ' + res.restoredParent.docNo + ' 인박스로 환원됨)';
         }
         toast(msg, 'ok');
       } else {

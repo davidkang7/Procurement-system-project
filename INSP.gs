@@ -259,7 +259,7 @@ function _getInspGroupsByPrc(ss) {
 function getInspFormDataForClient(prcToken, resubToken) {
   try {
     var actor = (getActiveUserEmail() || '').toLowerCase();
-    if (!prcToken) return { ok: false, message: 'PRC 토큰이 필요합니다.' };
+    if (!prcToken) return { ok: false, message: '구매 문서 토큰이 필요합니다.' };
 
     var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
@@ -292,9 +292,9 @@ function getInspFormDataForClient(prcToken, resubToken) {
       }
     }
 
-    if (!prc) return { ok: false, message: '대상 구매품의서(PRC)를 찾을 수 없습니다.' };
+    if (!prc) return { ok: false, message: '대상 구매품의서(구매)를 찾을 수 없습니다.' };
     if (prc.status !== '최종승인(PRC)') {
-      return { ok: false, message: '최종승인(PRC) 상태의 품의에만 검수보고서를 제출할 수 있습니다.' };
+      return { ok: false, message: '최종승인(구매) 상태의 품의에만 검수보고서를 제출할 수 있습니다.' };
     }
 
     var req = reqByToken[prc.parentToken] || null;
@@ -431,9 +431,9 @@ function _submitInspCore(data) {
 
         // 대상 PRC + 원본 REQ 재검증 (폼 데이터 신뢰 금지)
         var prc = _findRowByTokenInDoc(docSheet, data.prcToken);
-        if (!prc) return { ok: false, message: '대상 PRC를 찾을 수 없습니다.' };
+        if (!prc) return { ok: false, message: '대상 구매 문서를 찾을 수 없습니다.' };
         if (String(prc.row[COL.STATUS] || '') !== '최종승인(PRC)') {
-          return { ok: false, message: '최종승인(PRC) 상태가 아닙니다.' };
+          return { ok: false, message: '최종승인(구매) 상태가 아닙니다.' };
         }
         var parentToken = String(prc.row[COL.PARENT_DOC_ID] || '');
         var reqInfo = _findRowByTokenInDoc(docSheet, parentToken);
