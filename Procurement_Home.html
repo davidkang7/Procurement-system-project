@@ -179,6 +179,7 @@
   .pkmodal-success { width: 46px; height: 46px; border-radius: 50%; background: var(--ok); display: flex; align-items: center; justify-content: center; animation: pkpop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
   .pkmodal-success svg { width: 22px; height: 22px; stroke: #fff; stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 30; stroke-dashoffset: 30; animation: pkdraw 0.4s 0.2s ease forwards; }
   .pkmodal-error { width: 46px; height: 46px; border-radius: 50%; background: var(--danger); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; animation: pkpop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); font-family: inherit; line-height: 1; }
+  .pkmodal-confirm { width: 46px; height: 46px; border-radius: 50%; background: var(--prc-soft); color: var(--prc); display: flex; align-items: center; justify-content: center; font-size: 24px; line-height: 1; animation: pkpop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
   @keyframes pkpop { 0% { transform: scale(0); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
   @keyframes pkdraw { to { stroke-dashoffset: 0; } }
 
@@ -380,7 +381,7 @@ function renderSidebar(){
     { key: 'final', label: '최종 완료 문서 조회', count: (d.finalDocs || []).length },   // [INSP Step 5]
   ];
   var proc = u.isProcurement ? [
-    { key: 'inbox',  label: 'APPROVED_1ST 인박스', count: (d.approvedInbox || []).length, urgent: (d.approvedInbox || []).length > 0 },
+    { key: 'inbox',  label: '구매팀 기안 문서', count: (d.approvedInbox || []).length, urgent: (d.approvedInbox || []).length > 0 },
     { key: 'myprc',  label: '진행 중 구매', count: (d.myPrc || []).length },
   ] : [];
 
@@ -587,7 +588,7 @@ function renderInbox(){
     { key:'open',    label:'대기 중', rows: rows.filter(function(x){ return !x.claimedBy; }) },
     { key:'claimed', label:'점유 중', rows: rows.filter(function(x){ return !!x.claimedBy; }) },
   ];
-  return pageHead('APPROVED_1ST 인박스',
+  return pageHead('구매팀 기안 문서',
     '1차 결재가 완료된 품의가 모이는 구매팀 작업 대기열입니다. 선착순으로 픽업하여 구매 문서를 생성할 수 있습니다.')
     + kpiFilterSection('inbox', segments, {
         panelTitle: '픽업 대기 (FIFO 정렬)', scopeClass: 'proc',
@@ -1023,6 +1024,8 @@ function pickupGoToPrc(){
     // 자동 nav가 user activation 만료로 차단됨 — 사용자에게 버튼 클릭 유도
     var statusEl = document.getElementById('pkmodal-success-status');
     if(statusEl){
+      // flex(가로 배치) 해제 → 가운데 정렬 블록으로 전환해야 <br> 줄바꿈이 적용됨
+      statusEl.className = 'pkmodal-detail';
       statusEl.innerHTML =
         '<span style="color:var(--danger);font-weight:600;">⚠ 자동 전환이 차단되었습니다.</span>'
         + '<br><span style="color:var(--ink-mute);">아래 버튼을 눌러 구매 문서 작성 화면으로 이동해 주세요.</span>';
@@ -1064,16 +1067,44 @@ function pkmodalRenderError(opts){
   pkmodalSetFooter(footer);
 }
 
-// 재시도 (네트워크 오류 시)
+// 재시도 (네트워크 오류 시) — 이미 확인을 거쳤으므로 곧바로 처리 단계로 진입
 function pickupRetry(){
-  if(PKMODAL.parentToken) pickupReq(PKMODAL.parentToken);
+  if(PKMODAL.parentToken) pickupConfirm();
 }
 
-function pickupReq(parentToken){
-  if(!confirm('이 품의를 픽업하여 구매 문서 생성을 시작하시겠습니까?\n(30초간 락이 점유되며, 동안 다른 담당자는 이 품의를 픽업할 수 없습니다.)')) return;
+// 픽업 확인 화면 (네이티브 confirm 대체) — 모달 + 백드롭으로 표시
+// [픽업] → pickupConfirm()으로 실제 점유 요청 / [취소] → 모달 닫고 대시보드 복귀
+function pkmodalRenderConfirm(){
+  pkmodalSetTitle('구매 문서 픽업 확인');
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-confirm">📥</div>'
+    + '<p class="pkmodal-message">이 품의를 픽업하여 구매 문서 생성을 시작하시겠습니까?</p>'
+    + '<p class="pkmodal-detail">픽업 시 30초간 락(Lock)이 점유되며, 그동안 다른 담당자는 이 품의를 픽업할 수 없습니다.</p>';
+  pkmodalSetFooter(
+    '<button type="button" class="pkmodal-btn secondary" onclick="pickupCancel()">취소</button>'
+    + '<button type="button" class="pkmodal-btn primary" onclick="pickupConfirm()">픽업</button>'
+  );
+}
 
+// 취소 — 이벤트에서 빠져나와 모달을 닫고 대시보드(인박스)로 복귀
+function pickupCancel(){
+  pkmodalClose();
+  PKMODAL.parentToken = null;
+}
+
+// 픽업 진입점 — 확인 모달을 띄운다 (실제 요청은 [픽업] 버튼 → pickupConfirm)
+function pickupReq(parentToken){
   PKMODAL.parentToken = parentToken;
   pkmodalOpen();
+  pkmodalClearStepTimers();
+  pkmodalRenderConfirm();
+}
+
+// 실제 점유 요청 — 처리 중 화면 → 성공/실패 모달
+function pickupConfirm(){
+  var parentToken = PKMODAL.parentToken;
+  if(!parentToken) return;
+
   pkmodalClearStepTimers();
   pkmodalRenderProcessing('lock');
 

@@ -9,7 +9,9 @@
 body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5f5f5;padding:20px;}
 .toolbar{max-width:794px;margin:0 auto 12px;display:flex;align-items:center;justify-content:space-between;}
 .toolbar .badge{font-size:12px;font-weight:700;padding:5px 14px;border-radius:20px;background:#E6F1FB;color:#185FA5;}
-.toolbar .back-btn{font-size:12px;color:#666;background:none;border:none;cursor:pointer;text-decoration:underline;font-family:inherit;}
+/* 홈으로 버튼 (우측 상단 고정) */
+.home-btn{position:fixed;top:16px;right:20px;z-index:5000;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;border:1px solid #83161A;background:#fff;color:#83161A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(131,22,26,.18);transition:background .15s,color .15s;}
+.home-btn:hover{background:#83161A;color:#fff;}
 .a4-wrap{width:794px;min-height:1123px;margin:0 auto;padding:32px 36px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.10);}
 .doc-title{text-align:center;font-size:22px;font-weight:700;letter-spacing:6px;color:#111;margin-bottom:14px;}
 .top-meta{display:flex;justify-content:space-between;margin-bottom:10px;font-size:12px;color:#666;}
@@ -89,9 +91,28 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .loading-wrap{text-align:center;padding:60px;color:#888;font-size:14px;}
 .folder-link{font-size:10px;color:#1a6fc4;text-decoration:none;font-weight:400;}
 .folder-link:hover{text-decoration:underline;}
+/* 승인/반려 처리 모달 (InLC 와인레드 스피너 + 회색 백그라운드) */
+.pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
+.pm-backdrop.show{display:flex;}
+.pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:380px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;}
+.pm-spinner{width:46px;height:46px;border:4px solid #eee;border-top-color:#83161A;border-radius:50%;animation:pm-spin .8s linear infinite;margin:0 auto 18px;}
+@keyframes pm-spin{to{transform:rotate(360deg);}}
+.pm-check{width:54px;height:54px;border-radius:50%;background:#27ae60;color:#fff;font-size:30px;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+.pm-x{width:54px;height:54px;border-radius:50%;background:#d64541;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+.pm-q{width:54px;height:54px;border-radius:50%;background:#83161A;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+@keyframes pm-pop{0%{transform:scale(0);}50%{transform:scale(1.15);}100%{transform:scale(1);}}
+.pm-msg{font-size:15px;font-weight:700;color:#111;margin-bottom:6px;}
+.pm-sub{font-size:12px;color:#888;line-height:1.5;}
+.pm-reason{width:100%;box-sizing:border-box;margin-top:14px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;min-height:72px;}
+.pm-reason:focus{outline:none;border-color:#83161A;}
+.pm-actions{margin-top:22px;display:flex;gap:10px;justify-content:center;}
+.pm-confirm{padding:9px 28px;border-radius:8px;border:none;background:#83161A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-confirm:hover{background:#6B1115;}
+.pm-cancel{padding:9px 28px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#555;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-cancel:hover{background:#f3f3f3;}
 @media print{
   body{background:#fff;padding:0;}
-  .toolbar,.action-bar,.status-banner,.info-notice{display:none!important;}
+  .toolbar,.action-bar,.status-banner,.info-notice,.pm-backdrop,.home-btn{display:none!important;}
   .attach-btns{display:none!important;}
   .a4-wrap{box-shadow:none;padding:16px 20px;min-height:auto;}
   @page{size:A4 portrait;margin:10mm;}
@@ -100,9 +121,10 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 </head>
 <body>
 
+<button class="home-btn" id="home-btn" onclick="goHome()">🏠 홈으로</button>
+
 <div class="toolbar">
   <span class="badge">읽기 전용</span>
-  <button class="back-btn" onclick="window.history.back()">← 이전으로</button>
 </div>
 
 <div class="a4-wrap" id="doc-wrap">
@@ -119,6 +141,17 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 
 <div id="info-notice" class="info-notice" style="display:none;"></div>
 <div class="status-banner" id="status-banner"></div>
+
+<!-- 승인/반려 처리 모달 -->
+<div class="pm-backdrop" id="pm-backdrop">
+  <div class="pm-card">
+    <div id="pm-icon"><div class="pm-spinner"></div></div>
+    <div class="pm-msg" id="pm-msg">처리 중입니다.</div>
+    <div class="pm-sub" id="pm-sub">잠시만 기다려 주세요.</div>
+    <div id="pm-reason-wrap" style="display:none;"><textarea class="pm-reason" id="pm-reason" placeholder="반려 사유를 입력해 주세요. (필수)"></textarea></div>
+    <div class="pm-actions" id="pm-actions"></div>
+  </div>
+</div>
 
 <script>
   var TOKEN    = '<?= token ?>';
@@ -448,41 +481,79 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
       .getRequisitionForViewer(TOKEN, IDX);
   }
 
+  // ── 승인/반려: 토스트/네이티브 확인 → 모달 + 백그라운드 ──
   function decide(decision){
-    if(decision === 'reject'){
-      var reason = prompt('반려 사유를 입력해 주세요. (필수)');
-      if(!reason || !reason.trim()){alert('반려 사유를 입력해야 합니다.'); return;}
-      processDecision(decision, reason.trim());
-    } else {
-      if(!confirm('승인 처리하시겠습니까?')) return;
-      processDecision(decision, '');
-    }
+    showConfirmModal(decision);
   }
 
+  // 1단계: 모달로 승인/반려 의사 확인 (반려는 사유 입력 필수)
+  function showConfirmModal(decision){
+    var isReject = decision === 'reject';
+    document.getElementById('pm-icon').innerHTML = '<div class="pm-q">' + (isReject ? '!' : '?') + '</div>';
+    document.getElementById('pm-msg').textContent = isReject ? '반려 처리하시겠습니까?' : '승인 처리하시겠습니까?';
+    document.getElementById('pm-sub').textContent = isReject ? '반려 사유를 입력한 뒤 진행해 주세요.' : '승인 후에는 되돌릴 수 없습니다.';
+
+    var reasonWrap = document.getElementById('pm-reason-wrap');
+    var reason = document.getElementById('pm-reason');
+    if(isReject){
+      reasonWrap.style.display = 'block';
+      reason.value = '';
+      reason.style.borderColor = '#ddd';
+    } else {
+      reasonWrap.style.display = 'none';
+    }
+
+    document.getElementById('pm-actions').innerHTML =
+      '<button class="pm-cancel" onclick="closeModal()">취소</button>' +
+      '<button class="pm-confirm" id="pm-ok-btn">' + (isReject ? '반려' : '승인') + '</button>';
+    document.getElementById('pm-ok-btn').onclick = function(){ confirmDecision(decision); };
+
+    document.getElementById('pm-backdrop').classList.add('show');
+    if(isReject){ reason.focus(); }
+  }
+
+  // 2단계: 확인 클릭 → 입력값 검증 후 서버 처리로 진행
+  function confirmDecision(decision){
+    var comment = '';
+    if(decision === 'reject'){
+      comment = document.getElementById('pm-reason').value.trim();
+      if(!comment){
+        var reason = document.getElementById('pm-reason');
+        reason.style.borderColor = '#d64541';
+        reason.focus();
+        return; // 사유 미입력 시 진행 차단 (기존 prompt 검증과 동일)
+      }
+    }
+    processDecision(decision, comment);
+  }
+
+  // 3단계: 서버 호출 — 처리 중 스피너 모달 → 완료/실패 모달
   function processDecision(decision, comment){
     document.getElementById('approve-btn').disabled = true;
     document.getElementById('reject-btn').disabled = true;
-    showBanner('loading','처리 중입니다...');
+    showProcessingModal();
 
     if(typeof google === 'undefined'){
-      showBanner('error','Google Apps Script 환경에서만 실행 가능합니다.');
+      showErrorModal('Google Apps Script 환경에서만 실행 가능합니다.');
+      document.getElementById('approve-btn').disabled = false;
+      document.getElementById('reject-btn').disabled = false;
       return;
     }
 
     google.script.run
       .withSuccessHandler(function(res){
         if(res && res.ok){
-          showBanner('success', decision === 'approve' ? '승인 완료되었습니다.' : '반려 처리되었습니다.');
+          showCompleteModal(decision === 'approve' ? '승인 완료되었습니다.' : '반려 처리되었습니다.');
           document.getElementById('approve-btn').style.display = 'none';
           document.getElementById('reject-btn').style.display = 'none';
         } else {
-          showBanner('error','오류: ' + (res ? res.message : '알 수 없는 오류'));
+          showErrorModal('오류: ' + (res ? res.message : '알 수 없는 오류'));
           document.getElementById('approve-btn').disabled = false;
           document.getElementById('reject-btn').disabled = false;
         }
       })
       .withFailureHandler(function(err){
-        showBanner('error','오류: ' + (err && err.message ? err.message : err));
+        showErrorModal('오류: ' + (err && err.message ? err.message : err));
         document.getElementById('approve-btn').disabled = false;
         document.getElementById('reject-btn').disabled = false;
       })
@@ -493,6 +564,41 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
         comment:  comment,
         idx:      IDX,
       });
+  }
+
+  // ── 모달 상태 표시 (Form html과 동일한 스피너/백그라운드 패턴) ──
+  function showProcessingModal(){
+    document.getElementById('pm-icon').innerHTML = '<div class="pm-spinner"></div>';
+    document.getElementById('pm-msg').textContent = '처리 중입니다.';
+    document.getElementById('pm-sub').textContent = '잠시만 기다려 주세요.';
+    document.getElementById('pm-reason-wrap').style.display = 'none';
+    document.getElementById('pm-actions').innerHTML = '';
+    document.getElementById('pm-backdrop').classList.add('show');
+  }
+  function showCompleteModal(detail){
+    document.getElementById('pm-icon').innerHTML = '<div class="pm-check">✓</div>';
+    document.getElementById('pm-msg').textContent = '처리가 완료되었습니다.';
+    document.getElementById('pm-sub').textContent = detail || '';
+    document.getElementById('pm-reason-wrap').style.display = 'none';
+    document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="closeModal()">확인</button>';
+    document.getElementById('pm-backdrop').classList.add('show');
+  }
+  function showErrorModal(detail){
+    document.getElementById('pm-icon').innerHTML = '<div class="pm-x">!</div>';
+    document.getElementById('pm-msg').textContent = '처리에 실패했습니다.';
+    document.getElementById('pm-sub').textContent = detail || '잠시 후 다시 시도해 주세요.';
+    document.getElementById('pm-reason-wrap').style.display = 'none';
+    document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="closeModal()">확인</button>';
+    document.getElementById('pm-backdrop').classList.add('show');
+  }
+  function closeModal(){
+    document.getElementById('pm-backdrop').classList.remove('show');
+  }
+
+  // ── 홈 이동 (Form html과 동일 로직) ──
+  function goHome(){
+    if(WEBAPP){ window.top.location.href = WEBAPP + '?action=home'; }
+    else { window.history.back(); }
   }
 
   function showBanner(type, msg){

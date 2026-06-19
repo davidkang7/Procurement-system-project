@@ -147,9 +147,9 @@ function doGet(e) {
 
   // 4) 신규 REQ 작성 (FR/AC-13: 명시적 진입)
   if (action === 'new') {
-    return HtmlService.createHtmlOutputFromFile('Procurement_Form')
-      .setTitle('구매품의서 작성')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    return _renderTemplate('Procurement_Form', {
+      webappUrl: CONFIG.WEBAPP_URL,
+    }, '구매품의서 작성');
   }
 
   // 5) PRC 작성 진입 (FR-51: 락 점유 후 진입)
@@ -1397,7 +1397,7 @@ function _discardCore(payload) {
 // ================================================================
 // - 진행 중 REQ/PRC를 관리자 권한으로 강제 폐기
 // - 폐기 대상: 모든 진행 상태 (단, '최종승인(PRC)' = 보호 대상은 거부)
-// - PRC 폐기 시 부모 REQ 락 자동 해제 (APPROVED_1ST 인박스로 환원)
+// - PRC 폐기 시 부모 REQ 락 자동 해제 (구매팀 기안 문서로 환원)
 // - 알림 이메일: 기안자 + 점유자 (관리자 본인 제외, 중복 통합)
 // - 시스템로그: ADMIN_FORCE_DISCARD 기록
 // ================================================================
@@ -1640,7 +1640,7 @@ function _adminForceDiscardCore(payload) {
       sheet.getRange(rowNum, COL.REJECT_LOG + 1)
         .setValue(existLog ? existLog + '\n' + discardLine : discardLine);
 
-      // 4) PRC 폐기 시: 부모 REQ 환원 (APPROVED_1ST 인박스로 복귀)
+      // 4) PRC 폐기 시: 부모 REQ 환원 (구매팀 기안 문서로 복귀)
       //    PRC 라이프사이클별로 부모 REQ가 처한 상태가 다름:
       //    - PRC_DRAFT (제출 전): 부모 REQ는 status='최종승인', claimedBy=점유자
       //      → claimedBy만 비우면 인박스 복귀
@@ -2622,7 +2622,7 @@ function getHomeDataForClient() {
         }
       }
 
-      // 3) 구매팀: APPROVED_1ST 인박스 (1차 최종 승인 + 아직 PRC 미생성)
+      // 3) 구매팀: 구매팀 기안 문서 (1차 최종 승인 + 아직 PRC 미생성)
       if (isProc && docType === 'REQ' && status === '최종승인') {
         approvedInbox.push(meta);
       }
@@ -3268,7 +3268,7 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
     + '<div style="background:#6a3eb5;padding:24px 32px;"><div style="color:#fff;font-size:18px;font-weight:700;letter-spacing:2px;">구매팀 작업 대기열</div></div>'
     + '<div style="padding:28px 32px;">'
     + '<p style="font-size:14px;color:#444;margin:0 0 20px;line-height:1.7;">'
-    + '아래 구매품의서의 1차 결재가 완료되어 구매팀 작업 대기열(APPROVED_1ST 인박스)에 등록되었습니다.<br>'
+    + '아래 구매품의서의 1차 결재가 완료되어 구매팀 작업 대기열(구매팀 기안 문서)에 등록되었습니다.<br>'
     + '구매팀 기안자 누구나 선착순으로 픽업하여 구매 문서를 생성할 수 있습니다.</p>'
     + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">'
     + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
@@ -3288,12 +3288,12 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
 
   var plainBody = [
     '[구매팀 작업 대기열]', '',
-    '아래 품의가 1차 결재 완료되어 인박스에 등록되었습니다.', '',
+    '아래 REQ가 1차 결재 완료되어 인박스에 등록되었습니다.', '',
     '■ 품의번호: ' + docNo,
     '■ 품의제목: ' + subject,
     '■ 기안자:   ' + drafter, '',
     '▶ 대시보드: ' + homeUrl,
-    '▶ 구매 문서 생성: ' + prcUrl, '',
+    '▶ PRC 생성: ' + prcUrl, '',
     '동일 품의에 대해 한 명만 구매 문서 생성이 가능합니다 (선착순).',
     '— ' + CONFIG.FROM_NAME,
   ].join('\n');
@@ -3785,7 +3785,7 @@ function buildPdfPayload(row) {
     parentApprovers: [],
     hasParentApprovers: false,
     generatedAt:   toDateTimeStr(new Date()),
-    title:         (docType === 'PRC' ? '구매품의서(구매)_' : '구매품의서_') + String(row[COL.DOC_NO] || ''),
+    title:         (docType === 'PRC' ? '구매품의서(PRC)_' : '구매품의서_') + String(row[COL.DOC_NO] || ''),
 
     // 의도적으로 제외:
     //   remarks, prcMemo, rejectLog, claimedBy, claimedAt, fieldChanges

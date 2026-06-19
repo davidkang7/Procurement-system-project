@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
 <title>구매품의서</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -81,10 +82,6 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .status-banner.success{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;}
 .status-banner.error{background:#fdecea;color:#c62828;border:1px solid #ef9a9a;}
 .status-banner.loading{background:#fff8e1;color:#f57f17;border:1px solid #ffe082;}
-.progress-wrap{display:none;margin-top:10px;}
-.progress-bar{height:6px;background:#eee;border-radius:3px;overflow:hidden;}
-.progress-fill{height:100%;background:#1a6fc4;width:0%;transition:width 0.3s;}
-.progress-text{font-size:11px;color:#666;text-align:center;margin-top:4px;}
 .required-note{font-size:10px;color:#c0392b;margin-bottom:8px;}
 .cur-select-wrap{position:relative;display:inline-block;width:100%;}
 .cur-trigger{border:none;background:transparent;width:100%;padding:3px 18px 3px 3px;font-size:11px;color:#111;outline:none;font-family:inherit;cursor:pointer;text-align:center;}
@@ -94,16 +91,33 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .cur-option{padding:5px 12px;font-size:11px;color:#111;cursor:pointer;white-space:nowrap;}
 .cur-option:hover{background:#f0f0f0;}
 .cur-option.active{background:#E6F1FB;color:#185FA5;font-weight:600;}
+/* 홈으로 버튼 (우측 상단 고정) */
+.home-btn{position:fixed;top:16px;right:20px;z-index:5000;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;border:1px solid #83161A;background:#fff;color:#83161A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(131,22,26,.18);transition:background .15s,color .15s;}
+.home-btn:hover{background:#83161A;color:#fff;}
+/* 처리 모달 (InLC 와인레드 스피너 + 회색 백그라운드) */
+.pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
+.pm-backdrop.show{display:flex;}
+.pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:360px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;}
+.pm-spinner{width:46px;height:46px;border:4px solid #eee;border-top-color:#83161A;border-radius:50%;animation:pm-spin .8s linear infinite;margin:0 auto 18px;}
+@keyframes pm-spin{to{transform:rotate(360deg);}}
+.pm-check{width:54px;height:54px;border-radius:50%;background:#27ae60;color:#fff;font-size:30px;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+.pm-x{width:54px;height:54px;border-radius:50%;background:#d64541;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+@keyframes pm-pop{0%{transform:scale(0);}50%{transform:scale(1.15);}100%{transform:scale(1);}}
+.pm-msg{font-size:15px;font-weight:700;color:#111;margin-bottom:6px;}
+.pm-sub{font-size:12px;color:#888;line-height:1.5;}
+.pm-confirm{margin-top:22px;padding:9px 32px;border-radius:8px;border:none;background:#83161A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-confirm:hover{background:#6B1115;}
 @media print{
   body{background:#fff;padding:0;}
   .a4-wrap{box-shadow:none;padding:16px 20px;min-height:auto;}
-  .btn-row,.add-btn,.del-btn,.attach-zone,.status-banner,.dropdown-wrap,.progress-wrap,.dup-msg{display:none!important;}
+  .btn-row,.add-btn,.del-btn,.attach-zone,.status-banner,.dropdown-wrap,.dup-msg,.home-btn,.pm-backdrop{display:none!important;}
   input,textarea,select{border:none!important;background:transparent!important;}
   @page{size:A4 portrait;margin:10mm;}
 }
 </style>
 </head>
 <body>
+<button class="home-btn" id="home-btn" onclick="goHome()">🏠 홈으로</button>
 <div class="a4-wrap">
   <div class="doc-title">구 매 품 의 서</div>
   <div class="top-meta">
@@ -254,12 +268,17 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
     <button class="btn btn-submit" id="submit-btn" onclick="submitForm()">제출 및 결재 요청</button>
   </div>
 
-  <div class="progress-wrap" id="progress-wrap">
-    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-    <div class="progress-text" id="progress-text">준비 중...</div>
-  </div>
-
   <div class="status-banner" id="status-banner"></div>
+</div>
+
+<!-- 제출 처리 모달 -->
+<div class="pm-backdrop" id="pm-backdrop">
+  <div class="pm-card">
+    <div id="pm-icon"><div class="pm-spinner"></div></div>
+    <div class="pm-msg" id="pm-msg">처리 중입니다.</div>
+    <div class="pm-sub" id="pm-sub">잠시만 기다려 주세요.</div>
+    <div id="pm-actions"></div>
+  </div>
 </div>
 
 <script>
@@ -706,13 +725,37 @@ function readFileAsBase64(file){
     reader.readAsDataURL(file);
   });
 }
-function showProgress(pct, txt){
-  document.getElementById('progress-wrap').style.display = 'block';
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('progress-text').textContent = txt;
+// ─── 홈 이동 ─────────────────────────────
+var WEBAPP_URL = '<?= webappUrl ?>';
+function goHome(){
+  if(WEBAPP_URL){ window.top.location.href = WEBAPP_URL + '?action=home'; }
+  else { window.history.back(); }
 }
-function hideProgress(){
-  document.getElementById('progress-wrap').style.display = 'none';
+
+// ─── 제출 처리 모달 ─────────────────────────────
+function showProcessingModal(){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-spinner"></div>';
+  document.getElementById('pm-msg').textContent = '처리 중입니다.';
+  document.getElementById('pm-sub').textContent = '잠시만 기다려 주세요.';
+  document.getElementById('pm-actions').innerHTML = '';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function showCompleteModal(detail){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-check">✓</div>';
+  document.getElementById('pm-msg').textContent = '결재 요청이 완료되었습니다.';
+  document.getElementById('pm-sub').textContent = detail || '결재자에게 결재 요청 메일이 발송되었습니다.';
+  document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="goHome()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function showErrorModal(detail){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-x">!</div>';
+  document.getElementById('pm-msg').textContent = '제출에 실패했습니다.';
+  document.getElementById('pm-sub').textContent = detail || '잠시 후 다시 시도해 주세요.';
+  document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="closeModal()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function closeModal(){
+  document.getElementById('pm-backdrop').classList.remove('show');
 }
 
 // ─── 제출 ─────────────────────────────
@@ -812,28 +855,12 @@ function submitForm(){
   var btn = document.getElementById('submit-btn');
   btn.disabled = true;
 
-  showBanner('loading','파일 준비 중...');
-  if(validFiles.length > 0) showProgress(0, '파일 0 / ' + validFiles.length + ' 변환 중...');
+  // 제출 및 결재 요청 트리거 → 처리 중 모달(스피너 + 회색 백그라운드)
+  showProcessingModal();
 
-  var readPromises = [];
-  for(var i = 0; i < validFiles.length; i++){
-    (function(idx, file){
-      readPromises.push(
-        readFileAsBase64(file).then(function(res){
-          showProgress(
-            Math.round((idx + 1) / validFiles.length * 60),
-            '파일 ' + (idx + 1) + ' / ' + validFiles.length + ' 변환 완료'
-          );
-          return res;
-        })
-      );
-    })(i, validFiles[i]);
-  }
+  var readPromises = validFiles.map(function(file){ return readFileAsBase64(file); });
 
   Promise.all(readPromises).then(function(fileData){
-    showProgress(70, '서버로 업로드 중...');
-    showBanner('loading','제출 중입니다. 잠시 기다려 주세요...');
-
     var payload = {
       action: 'submit',
       docNo: docNo,
@@ -855,31 +882,27 @@ function submitForm(){
     };
 
     if(typeof google === 'undefined'){
-      showBanner('error','Google Apps Script 환경에서만 제출 가능합니다.');
+      showErrorModal('Google Apps Script 환경에서만 제출 가능합니다.');
       btn.disabled = false;
-      hideProgress();
       return;
     }
 
     google.script.run
       .withSuccessHandler(function(res){
-        hideProgress();
         if(res && res.ok){
-          showBanner('success','제출 완료! ' + (res.uploaded || 0) + '개 파일이 업로드되었고 결재자에게 이메일이 발송되었습니다.');
+          showCompleteModal((res.uploaded || 0) + '개 파일 업로드 · 결재자에게 결재 요청 메일이 발송되었습니다.');
         } else {
-          showBanner('error','오류: ' + (res && res.message || '알 수 없는 오류'));
+          showErrorModal((res && res.message) || '알 수 없는 오류');
           btn.disabled = false;
         }
       })
       .withFailureHandler(function(err){
-        hideProgress();
-        showBanner('error','오류: ' + (err && err.message ? err.message : err));
+        showErrorModal((err && err.message) ? err.message : String(err));
         btn.disabled = false;
       })
       .submitRequisitionForClient(payload);
   }).catch(function(err){
-    hideProgress();
-    showBanner('error','파일 처리 오류: ' + err.message);
+    showErrorModal('파일 처리 오류: ' + err.message);
     btn.disabled = false;
   });
 }
@@ -932,7 +955,7 @@ function resetAll(){
   addRow(); addRow(); addRow();
   calcTotal();
   resetApprovers();          // ← 결재란도 최초 작성 모습 그대로 복원
-  hideProgress();
+  closeModal();
 }
 
 var today = new Date();
