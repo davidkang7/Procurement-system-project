@@ -102,20 +102,30 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .btn-submit{background:#6a3eb5;color:#fff;border:1px solid #6a3eb5;padding:10px 36px;font-size:14px;}
 .btn-submit:hover{background:#5832a0;}
 .btn-submit:disabled{background:#aaa;border-color:#aaa;cursor:not-allowed;}
-.btn-cancel{background:#fff;color:#c0392b;border:1px solid #c0392b;}
-.btn-cancel:hover{background:#fdecea;}
-.btn-back{background:#f0f0f0;color:#444;border:1px solid #ccc;}
-.btn-back:hover{background:#e0e0e0;}
+.btn-cancel{background:#d64541;color:#fff;border:1px solid #d64541;}
+.btn-cancel:hover{background:#b03a37;}
+
+/* 홈으로 버튼 (우측 상단 고정) — Form과 동일 */
+.home-btn{position:fixed;top:16px;right:20px;z-index:5000;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;border:1px solid #83161A;background:#fff;color:#83161A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(131,22,26,.18);transition:background .15s,color .15s;}
+.home-btn:hover{background:#83161A;color:#fff;}
+/* 처리 모달 (InLC 와인레드 스피너 + 회색 백그라운드) — Form과 동일 */
+.pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
+.pm-backdrop.show{display:flex;}
+.pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:360px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;}
+.pm-spinner{width:46px;height:46px;border:4px solid #eee;border-top-color:#83161A;border-radius:50%;animation:pm-spin .8s linear infinite;margin:0 auto 18px;}
+@keyframes pm-spin{to{transform:rotate(360deg);}}
+.pm-check{width:54px;height:54px;border-radius:50%;background:#27ae60;color:#fff;font-size:30px;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+.pm-x{width:54px;height:54px;border-radius:50%;background:#d64541;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+@keyframes pm-pop{0%{transform:scale(0);}50%{transform:scale(1.15);}100%{transform:scale(1);}}
+.pm-msg{font-size:15px;font-weight:700;color:#111;margin-bottom:6px;}
+.pm-sub{font-size:12px;color:#888;line-height:1.5;}
+.pm-confirm{margin-top:22px;padding:9px 32px;border-radius:8px;border:none;background:#83161A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-confirm:hover{background:#6B1115;}
 
 .status-banner{display:none;text-align:center;padding:14px;border-radius:6px;margin-top:12px;font-size:14px;font-weight:600;}
 .status-banner.loading{background:#fff8eb;color:#d97706;border:1px solid #f0d98f;}
 .status-banner.success{background:#e8f6ee;color:#27ae60;border:1px solid #b8e5c8;}
 .status-banner.error{background:#fdecea;color:#c0392b;border:1px solid #f5b7b1;}
-
-.progress-wrap{display:none;margin-top:10px;padding:10px;background:#f8f9fa;border-radius:4px;}
-.progress-bar{height:8px;background:#e0e0e0;border-radius:4px;overflow:hidden;}
-.progress-fill{height:100%;background:#6a3eb5;transition:width 0.2s;width:0%;}
-.progress-text{font-size:11px;color:#666;text-align:center;margin-top:6px;}
 
 .confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9998;align-items:center;justify-content:center;}
 .confirm-overlay.show{display:flex;}
@@ -136,11 +146,12 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 @media print {
   body{background:#fff;padding:0;}
   .a4-wrap{width:100%;box-shadow:none;padding:0;}
-  .btn-row,.status-banner,.confirm-overlay,.parent-banner{display:none;}
+  .btn-row,.status-banner,.confirm-overlay,.parent-banner,.home-btn,.pm-backdrop{display:none;}
 }
 </style>
 </head>
 <body>
+<button class="home-btn" id="home-btn" onclick="goHome()">🏠 홈으로</button>
 
 <div class="a4-wrap">
   <div class="doc-title">구 매 품 의 서 (구매)</div>
@@ -374,16 +385,11 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
   </div>
 
   <div class="btn-row">
-    <button class="btn btn-back" onclick="goBack()">← 대시보드로</button>
     <button class="btn btn-cancel" onclick="showReleaseConfirm()">회수 / 폐기</button>
     <button class="btn btn-submit" id="submit-btn" onclick="submitForm()">구매 문서 제출</button>
   </div>
 
   <div class="status-banner" id="status-banner"></div>
-  <div class="progress-wrap" id="progress-wrap">
-    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-    <div class="progress-text" id="progress-text">준비 중...</div>
-  </div>
 </div>
 
 <div class="confirm-overlay" id="confirm-overlay">
@@ -397,6 +403,16 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
       <button class="cbtn cbtn-cancel" onclick="hideConfirm()">계속 작성</button>
       <button class="cbtn cbtn-ok" onclick="doRelease()">회수 확인</button>
     </div>
+  </div>
+</div>
+
+<!-- 제출 처리 모달 (스피너 + 회색 백그라운드 + 안내 문구) -->
+<div class="pm-backdrop" id="pm-backdrop">
+  <div class="pm-card">
+    <div id="pm-icon"><div class="pm-spinner"></div></div>
+    <div class="pm-msg" id="pm-msg">처리 중입니다.</div>
+    <div class="pm-sub" id="pm-sub">잠시만 기다려 주세요.</div>
+    <div id="pm-actions"></div>
   </div>
 </div>
 
@@ -976,14 +992,30 @@ function readFileAsBase64(file){
   });
 }
 
-// ─── 진행 표시 ─────────────────────────────
-function showProgress(pct, txt){
-  document.getElementById('progress-wrap').style.display = 'block';
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('progress-text').textContent = txt;
+// ─── 제출 처리 모달 (Form과 동일) ─────────────────────────────
+function showProcessingModal(){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-spinner"></div>';
+  document.getElementById('pm-msg').textContent = '처리 중입니다.';
+  document.getElementById('pm-sub').textContent = '잠시만 기다려 주세요.';
+  document.getElementById('pm-actions').innerHTML = '';
+  document.getElementById('pm-backdrop').classList.add('show');
 }
-function hideProgress(){
-  document.getElementById('progress-wrap').style.display = 'none';
+function showCompleteModal(detail){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-check">✓</div>';
+  document.getElementById('pm-msg').textContent = '구매 문서 제출이 완료되었습니다.';
+  document.getElementById('pm-sub').textContent = detail || '구매팀 결재자에게 이메일이 발송되었습니다.';
+  document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="goHome()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function showErrorModal(detail){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-x">!</div>';
+  document.getElementById('pm-msg').textContent = '제출에 실패했습니다.';
+  document.getElementById('pm-sub').textContent = detail || '잠시 후 다시 시도해 주세요.';
+  document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="closeModal()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function closeModal(){
+  document.getElementById('pm-backdrop').classList.remove('show');
 }
 
 // ─── PRC 제출 ─────────────────────────────
@@ -1098,27 +1130,13 @@ function submitForm(){
 
   var btn = document.getElementById('submit-btn');
   btn.disabled = true;
-  showBanner('loading','파일 준비 중...');
-  if(validFiles.length > 0) showProgress(0, '파일 0 / ' + validFiles.length + ' 변환 중...');
 
-  var readPromises = [];
-  for(var i = 0; i < validFiles.length; i++){
-    (function(idx, file){
-      readPromises.push(
-        readFileAsBase64(file).then(function(res){
-          showProgress(
-            Math.round((idx+1) / validFiles.length * 60),
-            '파일 ' + (idx+1) + ' / ' + validFiles.length + ' 변환 완료'
-          );
-          return res;
-        })
-      );
-    })(i, validFiles[i]);
-  }
+  // 제출 트리거 → 처리 중 모달(스피너 + 회색 백그라운드)
+  showProcessingModal();
+
+  var readPromises = validFiles.map(function(file){ return readFileAsBase64(file); });
 
   Promise.all(readPromises).then(function(attaches){
-    showProgress(80, '서버 전송 중...');
-
     var existingAtt = (PREFILL_DATA && PREFILL_DATA.attachments) || [];
 
     var payload = {
@@ -1153,27 +1171,21 @@ function submitForm(){
 
     google.script.run
       .withSuccessHandler(function(res){
-        showProgress(100, '완료');
         if(res && res.ok){
-          showBanner('success', res.message || '구매 문서 제출이 완료되었습니다. 대시보드로 이동합니다.');
-          setTimeout(function(){
-            window.top.location.href = WEBAPP_URL + '?action=home';
-          }, 1500);
+          showCompleteModal(res.message || '구매팀 결재자에게 이메일이 발송되었습니다.');
         } else {
           btn.disabled = false;
-          showBanner('error','제출 실패: ' + (res ? res.message : '알 수 없는 오류'));
+          showErrorModal('제출 실패: ' + (res ? res.message : '알 수 없는 오류'));
         }
       })
       .withFailureHandler(function(err){
         btn.disabled = false;
-        hideProgress();
-        showBanner('error','네트워크 오류: ' + (err && err.message ? err.message : err));
+        showErrorModal('네트워크 오류: ' + (err && err.message ? err.message : err));
       })
       .submitPrcForClient(payload);
   }).catch(function(err){
     btn.disabled = false;
-    hideProgress();
-    showBanner('error', err && err.message ? err.message : String(err));
+    showErrorModal(err && err.message ? err.message : String(err));
   });
 }
 
@@ -1197,8 +1209,9 @@ function doRelease(){
     })
     .releaseClaimForClient({ parentToken: PARENT_TOKEN });
 }
-function goBack(){
-  window.top.location.href = WEBAPP_URL + '?action=home';
+function goHome(){
+  if(WEBAPP_URL){ window.top.location.href = WEBAPP_URL + '?action=home'; }
+  else { window.history.back(); }
 }
 
 // ─── 보조 ─────────────────────────────

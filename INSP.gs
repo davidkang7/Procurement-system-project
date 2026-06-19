@@ -1146,8 +1146,17 @@ function getInspViewerDataForClient(token, hintIdx) {
       var photoList = JSON.parse(String(r[INSP_COL.PHOTO_LIST] || '[]'));
       photoList.forEach(function (p) {
         if (p && p.id) {
+          // base64 data URL: Drive 썸네일 URL은 웹앱 iframe에서 미인증으로 깨지므로
+          // PDF 생성과 동일하게 STAGING Drive에서 바이트를 읽어 직접 임베드한다.
+          var dataUrl = '';
+          try {
+            var blob = DriveApp.getFileById(p.id).getBlob();
+            var mime = blob.getContentType() || 'image/jpeg';
+            dataUrl = 'data:' + mime + ';base64,' + Utilities.base64Encode(blob.getBytes());
+          } catch (ePhoto) { /* 개별 사진 실패는 썸네일 URL로 폴백 */ }
           photos.push({
             name: p.name || '',
+            dataUrl:  dataUrl,
             thumbUrl: 'https://drive.google.com/thumbnail?id=' + p.id + '&sz=w1000',
             viewUrl:  'https://drive.google.com/file/d/' + p.id + '/view',
           });

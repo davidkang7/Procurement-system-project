@@ -73,13 +73,17 @@
   .dd-m{font-size:10px;color:#888;}
   .dd-e{padding:12px;text-align:center;font-size:11px;color:#aaa;}
 
-  .actions{display:flex;gap:10px;justify-content:flex-end;margin:6px 0 0;}
+  .actions{display:flex;gap:10px;justify-content:center;margin:24px 0 8px;}
   .btn{border:none;border-radius:7px;padding:9px 18px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;}
   .btn.insp{background:var(--insp);color:#fff;}
   .btn.insp:hover{filter:brightness(1.08);}
   .btn.gray{background:#fff;color:var(--ink-soft);border:1px solid var(--line);}
   .btn.primary{background:var(--accent);color:#fff;}
   .btn:disabled{opacity:.5;cursor:default;}
+
+  /* 홈으로 버튼 (우측 상단 고정) — Form과 동일 */
+  .home-btn{position:fixed;top:16px;right:20px;z-index:5000;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;border:1px solid #83161A;background:#fff;color:#83161A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(131,22,26,.18);transition:background .15s,color .15s;}
+  .home-btn:hover{background:#83161A;color:#fff;}
 
   .loading{text-align:center;padding:60px 20px;color:var(--ink-mute);}
   .spinner{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--insp);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px;}
@@ -98,9 +102,9 @@
 </style>
 </head>
 <body>
+<button class="home-btn" id="home-btn" onclick="goHome()">🏠 홈으로</button>
 <div class="topbar">
   <div><div class="t">검수보고서 작성</div><div class="s">InLC Technology · 구매결재시스템</div></div>
-  <button class="btn gray" onclick="goHome()">← 홈으로</button>
 </div>
 
 <div class="wrap" id="wrap">
@@ -201,7 +205,7 @@ function render(){
 
   html+='<div class="actions">'
     + '<button class="btn gray" onclick="goHome()">취소</button>'
-    + '<button class="btn insp" id="submit-btn" onclick="submit()">'+(RESUB?'재상신':'검수보고서 제출')+' →</button>'
+    + '<button class="btn insp" id="submit-btn" onclick="submit()">'+(RESUB?'재상신':'검수보고서 제출')+'</button>'
     + '</div>';
 
   document.getElementById('wrap').innerHTML=html;

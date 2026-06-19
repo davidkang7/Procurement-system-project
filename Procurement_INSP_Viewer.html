@@ -70,16 +70,47 @@
   .banner.loading{background:var(--neutral-soft);color:var(--ink-soft);}
   .banner.success{background:var(--ok-soft);color:var(--ok);}
   .banner.error{background:var(--danger-soft);color:var(--danger);}
+
+  /* 홈으로 버튼 (우측 상단 고정) — Form과 동일 */
+  .home-btn{position:fixed;top:16px;right:20px;z-index:5000;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;border:1px solid #83161A;background:#fff;color:#83161A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(131,22,26,.18);transition:background .15s,color .15s;}
+  .home-btn:hover{background:#83161A;color:#fff;}
+
+  /* 승인/반려 처리 모달 (모달 + 백그라운드 + 가이드 메시지) */
+  .pm-backdrop{position:fixed;inset:0;background:rgba(20,22,28,.5);display:none;align-items:center;justify-content:center;z-index:9000;}
+  .pm-backdrop.show{display:flex;}
+  .pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:380px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;}
+  .pm-spinner{width:46px;height:46px;border:4px solid var(--line);border-top-color:var(--insp);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 18px;}
+  .pm-check{width:54px;height:54px;border-radius:50%;background:var(--ok);color:#fff;font-size:30px;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+  .pm-x{width:54px;height:54px;border-radius:50%;background:var(--danger);color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+  .pm-q{width:54px;height:54px;border-radius:50%;background:var(--insp);color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+  @keyframes pm-pop{0%{transform:scale(0);}50%{transform:scale(1.15);}100%{transform:scale(1);}}
+  .pm-msg{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+  .pm-sub{font-size:12px;color:var(--ink-mute);line-height:1.5;}
+  .pm-reason{width:100%;box-sizing:border-box;margin-top:14px;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;min-height:72px;}
+  .pm-reason:focus{outline:none;border-color:var(--insp);}
+  .pm-actions{margin-top:22px;display:flex;gap:10px;justify-content:center;}
+  .pm-actions .btn{padding:9px 28px;}
 </style>
 </head>
 <body>
+<button class="home-btn" id="home-btn" onclick="goHome()">🏠 홈으로</button>
 <div class="topbar">
   <div><div class="t">검수보고서</div><div class="s">InLC Technology · 구매결재시스템</div></div>
-  <button class="btn gray" onclick="goHome()">← 홈으로</button>
 </div>
 
 <div class="wrap" id="wrap">
   <div class="loading"><div class="spinner"></div>검수보고서를 불러오는 중...</div>
+</div>
+
+<!-- 승인/반려 처리 모달 -->
+<div class="pm-backdrop" id="pm-backdrop">
+  <div class="pm-card">
+    <div id="pm-icon"><div class="pm-spinner"></div></div>
+    <div class="pm-msg" id="pm-msg">처리 중입니다.</div>
+    <div class="pm-sub" id="pm-sub">잠시만 기다려 주세요.</div>
+    <div id="pm-reason-wrap" style="display:none;"><textarea class="pm-reason" id="pm-reason" placeholder="반려 사유를 입력해 주세요. (필수)"></textarea></div>
+    <div class="pm-actions" id="pm-actions"></div>
+  </div>
 </div>
 
 <script>
@@ -90,7 +121,13 @@ var WEBAPP_URL= '<?= webappUrl ?>';
 var DATA = null, MY_IDX = -1;
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-function goHome(){ try{window.top.location.href=WEBAPP_URL;}catch(e){location.href=WEBAPP_URL;} }
+function goHome(){
+  try { window.top.location.href = WEBAPP_URL; }
+  catch(e) {
+    try { window.open(WEBAPP_URL, '_top'); }
+    catch(e2) { location.href = WEBAPP_URL; }
+  }
+}
 
 function boot(){
   if(typeof google==='undefined'){document.getElementById('wrap').innerHTML='<div class="err-box">Apps Script 환경에서만 실행 가능합니다.</div>';return;}
@@ -111,7 +148,8 @@ function render(){
   var photoHtml;
   if((DATA.photos||[]).length){
     photoHtml='<div class="photos">'+DATA.photos.map(function(p){
-      return '<a href="'+esc(p.viewUrl)+'" target="_blank"><img src="'+esc(p.thumbUrl)+'" alt="'+esc(p.name)+'"></a>';
+      var src=p.dataUrl||p.thumbUrl;  // base64 우선 — Drive 썸네일 URL은 iframe에서 미인증으로 깨짐
+      return '<a href="'+esc(p.viewUrl)+'" target="_blank"><img src="'+esc(src)+'" alt="'+esc(p.name)+'"></a>';
     }).join('')+'</div>';
   } else {
     photoHtml='<div class="no-photo">'+(d.status==='최종승인(INSP)'?'(검수 사진은 PDF 보관 후 원본이 삭제되었습니다)':'(첨부된 검수 사진 없음)')+'</div>';
@@ -187,36 +225,101 @@ function tr(label,val){return '<tr><th>'+label+'</th><td>'+val+'</td></tr>';}
 
 function showBanner(type,msg){var b=document.getElementById('banner');b.className='banner show '+type;b.textContent=msg;}
 
-function decide(decision){
+// ── 승인/반려: 네이티브 prompt/confirm/alert → 모달 + 백그라운드 ──
+// 기존 프로세스(서버 호출 processInspDecisionFromClient·재로드)는 그대로 유지하고
+// 사유 입력/의사 확인 UI만 모달로 대체한다.
+function decide(decision){ showConfirmModal(decision); }
+
+// 1단계: 모달로 승인/반려 의사 확인 (반려는 사유 입력 필수)
+function showConfirmModal(decision){
+  var isReject = decision==='reject';
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-q">'+(isReject?'!':'?')+'</div>';
+  document.getElementById('pm-msg').textContent = isReject?'반려 처리하시겠습니까?':'승인 처리하시겠습니까?';
+  document.getElementById('pm-sub').textContent = isReject?'반려 사유를 입력한 뒤 진행해 주세요.':'승인 후에는 되돌릴 수 없습니다.';
+
+  var reasonWrap = document.getElementById('pm-reason-wrap');
+  var reason = document.getElementById('pm-reason');
+  if(isReject){
+    reasonWrap.style.display='block';
+    reason.value=''; reason.style.borderColor='';
+  } else {
+    reasonWrap.style.display='none';
+  }
+
+  document.getElementById('pm-actions').innerHTML =
+    '<button class="btn gray" onclick="closeModal()">취소</button>'+
+    '<button class="btn '+(isReject?'danger':'ok')+'" id="pm-ok-btn">'+(isReject?'반려':'승인')+'</button>';
+  document.getElementById('pm-ok-btn').onclick = function(){ confirmDecision(decision); };
+
+  document.getElementById('pm-backdrop').classList.add('show');
+  if(isReject){ reason.focus(); }
+}
+
+// 2단계: 확인 클릭 → 입력값 검증 후 서버 처리로 진행 (기존 prompt 검증과 동일)
+function confirmDecision(decision){
   var comment='';
   if(decision==='reject'){
-    comment=prompt('반려 사유를 입력해 주세요. (필수)');
-    if(!comment||!comment.trim()){alert('반려 사유를 입력해야 합니다.');return;}
-    comment=comment.trim();
-  } else {
-    if(!confirm('승인 처리하시겠습니까?'))return;
+    comment=document.getElementById('pm-reason').value.trim();
+    if(!comment){
+      var reason=document.getElementById('pm-reason');
+      reason.style.borderColor='var(--danger)';
+      reason.focus();
+      return;  // 사유 미입력 시 진행 차단
+    }
   }
+  processDecision(decision, comment);
+}
+
+// 3단계: 서버 호출 — 처리 중 스피너 모달 → 완료/실패 모달 (서버 프로세스는 기존과 동일)
+function processDecision(decision, comment){
   var ab=document.getElementById('approve-btn'), rb=document.getElementById('reject-btn');
   if(ab)ab.disabled=true; if(rb)rb.disabled=true;
-  showBanner('loading','처리 중입니다...');
+  showProcessingModal();
 
   google.script.run
     .withSuccessHandler(function(res){
       if(res&&res.ok){
-        showBanner('success', decision==='approve'?'승인 완료되었습니다.':'반려 처리되었습니다.');
+        showCompleteModal(decision==='approve'?'승인 완료되었습니다.':'반려 처리되었습니다.');
         if(ab)ab.style.display='none'; if(rb)rb.style.display='none';
-        setTimeout(function(){ boot(); },900);  // 갱신된 상태 재로드
+        setTimeout(function(){ closeModal(); boot(); },1100);  // 갱신된 상태 재로드
       }else{
-        showBanner('error','오류: '+(res?res.message:'알 수 없는 오류'));
+        showErrorModal('오류: '+(res?res.message:'알 수 없는 오류'));
         if(ab)ab.disabled=false; if(rb)rb.disabled=false;
       }
     })
     .withFailureHandler(function(err){
-      showBanner('error','네트워크 오류: '+(err&&err.message?err.message:err));
+      showErrorModal('네트워크 오류: '+(err&&err.message?err.message:err));
       if(ab)ab.disabled=false; if(rb)rb.disabled=false;
     })
     .processInspDecisionFromClient({ token:TOKEN, decision:decision, comment:comment });
 }
+
+// ── 모달 상태 표시 ──
+function showProcessingModal(){
+  document.getElementById('pm-icon').innerHTML='<div class="pm-spinner"></div>';
+  document.getElementById('pm-msg').textContent='처리 중입니다.';
+  document.getElementById('pm-sub').textContent='잠시만 기다려 주세요.';
+  document.getElementById('pm-reason-wrap').style.display='none';
+  document.getElementById('pm-actions').innerHTML='';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function showCompleteModal(detail){
+  document.getElementById('pm-icon').innerHTML='<div class="pm-check">✓</div>';
+  document.getElementById('pm-msg').textContent='처리가 완료되었습니다.';
+  document.getElementById('pm-sub').textContent=detail||'';
+  document.getElementById('pm-reason-wrap').style.display='none';
+  document.getElementById('pm-actions').innerHTML='';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function showErrorModal(detail){
+  document.getElementById('pm-icon').innerHTML='<div class="pm-x">!</div>';
+  document.getElementById('pm-msg').textContent='처리에 실패했습니다.';
+  document.getElementById('pm-sub').textContent=detail||'잠시 후 다시 시도해 주세요.';
+  document.getElementById('pm-reason-wrap').style.display='none';
+  document.getElementById('pm-actions').innerHTML='<button class="btn gray" onclick="closeModal()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function closeModal(){ document.getElementById('pm-backdrop').classList.remove('show'); }
 
 boot();
 </script>
