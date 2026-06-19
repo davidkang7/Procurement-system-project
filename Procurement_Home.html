@@ -107,6 +107,9 @@
   .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
   .kpi-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 15px 17px; box-shadow: var(--shadow-card); }
   .kpi-card.highlight { border-color: rgba(131,22,26,0.32); background: linear-gradient(145deg, #FFFFFF 0%, #FBF3F3 60%, #F5E7E7 100%); }
+  .kpi-card.kpi-click { cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .08s; }
+  .kpi-card.kpi-click:hover { border-color: rgba(131,22,26,0.32); box-shadow: 0 3px 10px rgba(131,22,26,0.10); }
+  .kpi-card.kpi-click:active { transform: translateY(1px); }
   .kpi-label { color: var(--ink-mute); font-size: 11px; font-weight: 700; letter-spacing: 0.02em; margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
   .kpi-label::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--grad-brand); flex-shrink: 0; }
   .kpi-value { font-size: 27px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
@@ -207,11 +210,6 @@
   .pickup-btn:hover { background: var(--grad-prc-hover); }
   .pickup-btn:disabled { background: #aaa; cursor: not-allowed; box-shadow: none; }
 
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding: 0 16px; background: linear-gradient(180deg, #FCFCFC, #FAFAFA); }
-  .tab { padding: 10px 14px; font-size: 12px; font-weight: 600; color: var(--ink-mute); cursor: pointer; border-bottom: 2px solid transparent; }
-  .tab.active { color: var(--brand); border-bottom-color: var(--brand); font-weight: 700; }
-  .tab:hover { color: var(--ink); }
-
   .role-empty-state { padding: 60px 24px; text-align: center; color: var(--ink-mute); }
   .role-empty-state h3 { font-size: 16px; color: var(--ink); margin-bottom: 6px; font-weight: 700; }
   /* ─── [INSP Step 2] 결재 완료 / 검수보고서 아코디언 (틸 계열 유지) ─── */
@@ -282,7 +280,7 @@ var STATE = {
   user: null,
   data: null,
   currentMenu: 'mydocs',
-  myDocsTab: 'all',
+  filters: {},   // 메뉴별 KPI 카드 필터 선택 상태 (menuKey → segmentKey). 미설정 시 'all'
   loading: false,
   openCompleted: {},   // [INSP Step 2] 결재 완료 아코디언 열림 상태 (prcToken → bool)
 };
@@ -485,10 +483,10 @@ function renderContent(){
 }
 
 function attachContentHandlers(){
-  // 탭
-  Array.from(document.querySelectorAll('[data-tab]')).forEach(function(el){
+  // KPI 카드 필터 (모든 메뉴 통일) — 카드를 누르면 현재 메뉴의 필터가 바뀜
+  Array.from(document.querySelectorAll('[data-kpi]')).forEach(function(el){
     el.addEventListener('click', function(){
-      STATE.myDocsTab = el.getAttribute('data-tab');
+      STATE.filters[STATE.currentMenu] = el.getAttribute('data-kpi');
       renderContent();
     });
   });
@@ -551,89 +549,101 @@ function renderMyDocs(){
   var d = STATE.data || {};
   var docs = d.myDocs || [];
 
-  // 상태별 분류
-  var grouped = {
-    all:      docs,
-    review:   docs.filter(function(x){ return x.status === '검토중' || x.status.indexOf('결재중') >= 0 || x.status === '재상신'; }),
-    approved: docs.filter(function(x){ return x.status === '최종승인' || x.status === '최종승인(PRC)' || x.status === 'PRC생성됨'; }),
-    rejected: docs.filter(function(x){ return x.status === '반려'; }),
-  };
-  var current = grouped[STATE.myDocsTab] || grouped.all;
-
-  var kpiHtml = '<div class="kpi-grid">'
-    + kpi('전체', docs.length, 'highlight')
-    + kpi('진행 중', grouped.review.length)
-    + kpi('완료', grouped.approved.length)
-    + kpi('반려', grouped.rejected.length)
-    + '</div>';
-
-  var tabsHtml = '<div class="tabs">'
-    + tab('all', '전체', grouped.all.length)
-    + tab('review', '진행 중', grouped.review.length)
-    + tab('approved', '완료', grouped.approved.length)
-    + tab('rejected', '반려', grouped.rejected.length)
-    + '</div>';
+  // 상태별 분류 → KPI 카드 클릭으로 필터
+  var segments = [
+    { key:'all',      label:'전체',   rows: docs },
+    { key:'review',   label:'진행 중', rows: docs.filter(function(x){ return x.status === '검토중' || x.status.indexOf('결재중') >= 0 || x.status === '재상신'; }) },
+    { key:'approved', label:'완료',   rows: docs.filter(function(x){ return x.status === '최종승인' || x.status === '최종승인(PRC)' || x.status === 'PRC생성됨'; }) },
+    { key:'rejected', label:'반려',   rows: docs.filter(function(x){ return x.status === '반려'; }) },
+  ];
 
   return pageHead('내 기안 문서', '내가 작성한 구매품의서의 전체 진행 상태입니다.')
-    + kpiHtml
-    + '<div class="panel">' + tabsHtml + tableOfDocs(current, 'mydocs') + '</div>';
+    + kpiFilterSection('mydocs', segments, {
+        panelTitle: '내 기안 문서',
+        renderTable: function(rows){ return tableOfDocs(rows, 'mydocs'); }
+      });
 }
 
 function renderPending(){
   var d = STATE.data || {};
   var rows = d.myPending || [];
+  var segments = [
+    { key:'all', label:'전체', rows: rows },
+    { key:'REQ', label:'품의', rows: rows.filter(function(x){ return x.docType === 'REQ'; }) },
+    { key:'PRC', label:'구매', rows: rows.filter(function(x){ return x.docType === 'PRC'; }) },
+  ];
   return pageHead('내 결재 대기함', '내가 다음에 결재해야 할 문서 목록입니다.')
-    + '<div class="panel">'
-    + '<div class="panel-head"><div><span class="panel-title">결재 대기 중인 문서</span><span class="scope-tag">' + rows.length + '건</span></div></div>'
-    + tableOfDocs(rows, 'pending')
-    + '</div>';
+    + kpiFilterSection('pending', segments, {
+        panelTitle: '결재 대기 중인 문서',
+        renderTable: function(r){ return tableOfDocs(r, 'pending'); }
+      });
 }
 
 function renderInbox(){
   var d = STATE.data || {};
   var rows = d.approvedInbox || [];
+  var segments = [
+    { key:'all',     label:'전체',   rows: rows },
+    { key:'open',    label:'대기 중', rows: rows.filter(function(x){ return !x.claimedBy; }) },
+    { key:'claimed', label:'점유 중', rows: rows.filter(function(x){ return !!x.claimedBy; }) },
+  ];
   return pageHead('APPROVED_1ST 인박스',
     '1차 결재가 완료된 품의가 모이는 구매팀 작업 대기열입니다. 선착순으로 픽업하여 구매 문서를 생성할 수 있습니다.')
-    + '<div class="panel">'
-    + '<div class="panel-head"><div><span class="panel-title">픽업 대기 (FIFO 정렬)</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
-    + tableOfDocs(rows, 'inbox')
-    + '</div>';
+    + kpiFilterSection('inbox', segments, {
+        panelTitle: '픽업 대기 (FIFO 정렬)', scopeClass: 'proc',
+        renderTable: function(r){ return tableOfDocs(r, 'inbox'); }
+      });
 }
 
 function renderMyPrc(){
   var d = STATE.data || {};
   var rows = d.myPrc || [];
+  var segments = [
+    { key:'all',         label:'전체',     rows: rows },
+    { key:'claimed_req', label:'품의(점유)', rows: rows.filter(function(x){ return x._type === 'claimed_req'; }) },
+    { key:'prc',         label:'구매',     rows: rows.filter(function(x){ return x._type !== 'claimed_req'; }) },
+  ];
   return pageHead('진행 중 구매', '내가 점유한 품의 또는 내가 생성한 구매 문서 목록입니다.')
-    + '<div class="panel">'
-    + '<div class="panel-head"><div><span class="panel-title">진행 중 작업</span><span class="scope-tag proc">' + rows.length + '건</span></div></div>'
-    + tableOfDocs(rows, 'myprc')
-    + '</div>';
+    + kpiFilterSection('myprc', segments, {
+        panelTitle: '진행 중 작업', scopeClass: 'proc',
+        renderTable: function(r){ return tableOfDocs(r, 'myprc'); }
+      });
 }
 
 // ─── [INSP Step 5] 내 검수보고서 결재 대기 ─────────────────────────────
 function renderInspPending(){
   var d = STATE.data || {};
   var rows = d.myInspPending || [];
-  var body;
-  if(rows.length === 0){
-    body = '<div class="empty"><div class="empty-icon">📭</div>결재할 검수보고서가 없습니다.</div>';
-  } else {
-    body = '<table><thead><tr><th>검수보고서 번호</th><th>PO 번호</th><th>품명</th><th>거래처</th><th>판정</th><th>입고일</th></tr></thead><tbody>';
-    rows.forEach(function(r){
-      body += '<tr class="row-clickable" data-insp-view="' + escAttr(r.token) + '">'
-        + '<td><span class="docno ir">' + escHtml(r.docNo) + '</span>' + (r.isFinal ? ' <span class="final-flag">★최종</span>' : '') + '</td>'
-        + '<td><span class="docno prc">' + escHtml(r.poNo) + '</span></td>'
-        + '<td>' + escHtml(r.subject) + '</td>'
-        + '<td>' + escHtml(r.vendorName) + '</td>'
-        + '<td>' + escHtml(r.verdict || '-') + '</td>'
-        + '<td>' + escHtml(r.receivedDate) + '</td>'
-        + '</tr>';
-    });
-    body += '</tbody></table>';
-  }
+  var segments = [
+    { key:'all',    label:'전체',     rows: rows },
+    { key:'final',  label:'최종 검수', rows: rows.filter(function(x){ return !!x.isFinal; }) },
+    { key:'normal', label:'일반 검수', rows: rows.filter(function(x){ return !x.isFinal; }) },
+  ];
   return pageHead('내 검수보고서 결재 대기', '내가 다음에 결재해야 할 검수보고서입니다. 행을 클릭하면 본문·사진을 확인하고 결재할 수 있습니다.')
-    + '<div class="panel"><div class="panel-head"><div><span class="panel-title">검수 결재 대기</span><span class="scope-tag">' + rows.length + '건</span></div></div>'
-    + body + '</div>';
+    + kpiFilterSection('insp_pending', segments, {
+        panelTitle: '검수 결재 대기',
+        renderTable: inspPendingTable
+      });
+}
+
+// 검수보고서 결재 대기 — 표 본문
+function inspPendingTable(rows){
+  if(!rows || rows.length === 0){
+    return '<div class="empty"><div class="empty-icon">📭</div>결재할 검수보고서가 없습니다.</div>';
+  }
+  var body = '<table><thead><tr><th>검수보고서 번호</th><th>PO 번호</th><th>품명</th><th>거래처</th><th>판정</th><th>입고일</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    body += '<tr class="row-clickable" data-insp-view="' + escAttr(r.token) + '">'
+      + '<td><span class="docno ir">' + escHtml(r.docNo) + '</span>' + (r.isFinal ? ' <span class="final-flag">★최종</span>' : '') + '</td>'
+      + '<td><span class="docno prc">' + escHtml(r.poNo) + '</span></td>'
+      + '<td>' + escHtml(r.subject) + '</td>'
+      + '<td>' + escHtml(r.vendorName) + '</td>'
+      + '<td>' + escHtml(r.verdict || '-') + '</td>'
+      + '<td>' + escHtml(r.receivedDate) + '</td>'
+      + '</tr>';
+  });
+  body += '</tbody></table>';
+  return body;
 }
 
 // ─── [INSP Step 5] 최종 완료 (REQ/PRC/검수보고서 통합) ─────────────────────────────
@@ -642,44 +652,47 @@ function renderFinal(){
   var rows = d.finalDocs || [];
   var isProc = !!(STATE.user || {}).isProcurement;
 
-  var cReq = rows.filter(function(x){return x.docType==='REQ';}).length;
-  var cPrc = rows.filter(function(x){return x.docType==='PRC';}).length;
-  var cInsp = rows.filter(function(x){return x.docType==='INSP';}).length;
-
-  var body;
-  if(rows.length === 0){
-    body = '<div class="empty"><div class="empty-icon">📭</div>최종 완료된 문서가 없습니다.</div>';
-  } else {
-    body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>거래처</th><th>상태</th><th>일자</th></tr></thead><tbody>';
-    rows.forEach(function(r){
-      var typeLabel = docTypeText(r.docType);
-      var typeCls   = r.docType==='PRC' ? 'docno prc' : (r.docType==='INSP' ? 'docno ir' : 'docno');
-      var clickAttr = r.docType==='INSP'
-        ? 'data-insp-view="' + escAttr(r.token) + '"'
-        : 'data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '"';
-      body += '<tr class="row-clickable" ' + clickAttr + '>'
-        + '<td><span class="' + typeCls + '">' + escHtml(typeLabel) + '</span></td>'
-        + '<td><span class="' + typeCls + '">' + escHtml(r.docNo) + '</span></td>'
-        + '<td>' + escHtml(r.subject) + '</td>'
-        + '<td>' + escHtml(r.vendorName) + '</td>'
-        + '<td>' + statusBadge(r.status) + '</td>'
-        + '<td>' + escHtml(r.issueDate || r.submitAt || '') + '</td>'
-        + '</tr>';
-    });
-    body += '</tbody></table>';
-  }
+  var segments = [
+    { key:'all',  label:'전체',       rows: rows },
+    { key:'REQ',  label:'품의',       rows: rows.filter(function(x){ return x.docType === 'REQ'; }) },
+    { key:'PRC',  label:'구매',       rows: rows.filter(function(x){ return x.docType === 'PRC'; }) },
+    { key:'INSP', label:'검수보고서', rows: rows.filter(function(x){ return x.docType === 'INSP'; }) },
+  ];
 
   return pageHead('최종 완료', '최종 승인 처리된 품의·구매 및 최종 검수 완료된 검수보고서입니다. '
       + (isProc ? '구매팀 권한으로 전체가 표시됩니다.' : '본인이 기안하거나 결재에 참여한 문서가 표시됩니다.')
       + ' 행을 클릭하면 처리된 문서를 열람할 수 있습니다.')
-    + '<div class="kpi-grid">'
-    +   kpi('전체', rows.length, 'highlight')
-    +   kpi('품의', cReq)
-    +   kpi('구매', cPrc)
-    +   kpi('검수보고서', cInsp)
-    + '</div>'
-    + '<div class="panel"><div class="panel-head"><div><span class="panel-title">최종 완료 문서</span><span class="scope-tag' + (isProc ? ' proc' : '') + '">' + rows.length + '건' + (isProc ? ' · 전체' : '') + '</span></div></div>'
-    + body + '</div>';
+    + kpiFilterSection('final', segments, {
+        panelTitle: '최종 완료 문서',
+        scopeClass: isProc ? 'proc' : '',
+        scopeSuffix: isProc ? ' · 전체' : '',
+        renderTable: finalTable
+      });
+}
+
+// 최종 완료 — 표 본문
+function finalTable(rows){
+  if(!rows || rows.length === 0){
+    return '<div class="empty"><div class="empty-icon">📭</div>최종 완료된 문서가 없습니다.</div>';
+  }
+  var body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>거래처</th><th>상태</th><th>일자</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    var typeLabel = docTypeText(r.docType);
+    var typeCls   = r.docType==='PRC' ? 'docno prc' : (r.docType==='INSP' ? 'docno ir' : 'docno');
+    var clickAttr = r.docType==='INSP'
+      ? 'data-insp-view="' + escAttr(r.token) + '"'
+      : 'data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '"';
+    body += '<tr class="row-clickable" ' + clickAttr + '>'
+      + '<td><span class="' + typeCls + '">' + escHtml(typeLabel) + '</span></td>'
+      + '<td><span class="' + typeCls + '">' + escHtml(r.docNo) + '</span></td>'
+      + '<td>' + escHtml(r.subject) + '</td>'
+      + '<td>' + escHtml(r.vendorName) + '</td>'
+      + '<td>' + statusBadge(r.status) + '</td>'
+      + '<td>' + escHtml(r.issueDate || r.submitAt || '') + '</td>'
+      + '</tr>';
+  });
+  body += '</tbody></table>';
+  return body;
 }
 
 // ─── [INSP Step 2] 결재 완료 메뉴 ─────────────────────────────
@@ -690,55 +703,57 @@ function renderCompleted(){
   var u = STATE.user || {};
   var isProc = !!u.isProcurement;
 
-  var kNone = 0, kProg = 0, kDone = 0;
-  docs.forEach(function(x){
-    var st = poInspState(x);
-    if(st.key === 'none') kNone++;
-    else if(st.key === 'closed') kDone++;
-    else kProg++;
-  });
-
-  var kpiHtml = '<div class="kpi-grid">'
-    + kpi('결재 완료(구매)', docs.length, 'highlight')
-    + kpi('검수 미제출', kNone)
-    + kpi('검수 진행 중', kProg)
-    + kpi('검수 종결', kDone)
-    + '</div>';
+  // 검수 진행 상태(poInspState)별 분류 → KPI 카드 클릭으로 필터
+  var inspKey = function(x){
+    var k = poInspState(x).key;
+    if(k === 'none') return 'none';
+    if(k === 'closed') return 'closed';
+    return 'prog';   // rejected / approving / partial → 검수 진행 중
+  };
+  var segments = [
+    { key:'all',    label:'결재 완료(구매)', rows: docs },
+    { key:'none',   label:'검수 미제출',    rows: docs.filter(function(x){ return inspKey(x) === 'none'; }) },
+    { key:'prog',   label:'검수 진행 중',    rows: docs.filter(function(x){ return inspKey(x) === 'prog'; }) },
+    { key:'closed', label:'검수 종결',      rows: docs.filter(function(x){ return inspKey(x) === 'closed'; }) },
+  ];
 
   var sub = '최종승인(구매)된 구매 품의의 최종 승인 확인 및 검수보고서 제출 메뉴입니다. '
     + (isProc ? '구매팀 권한으로 전체 문서가 표시됩니다.' : '본인이 기안한 품의가 표시됩니다.')
     + ' 행을 클릭하면 회차별 검수 이력이 펼쳐집니다.';
 
-  var body;
-  if(docs.length === 0){
-    body = '<div class="empty"><div class="empty-icon">📭</div>표시할 결재 완료 문서가 없습니다.</div>';
-  } else {
-    body = '<table><thead><tr>'
-      + '<th>품의 번호</th><th>PO 번호</th><th>제목</th><th>거래처</th><th>결재</th><th>검수 상태</th><th class="num">검수</th>'
-      + '</tr></thead><tbody>';
-    docs.forEach(function(x){
-      var open = !!STATE.openCompleted[x.prcToken];
-      var st = poInspState(x);
-      body += '<tr class="po-row' + (open ? ' open' : '') + '" data-toggle-insp="' + escAttr(x.prcToken) + '">'
-        + '<td><span class="chev">▶</span><span class="docno">' + escHtml(x.reqNo) + '</span></td>'
-        + '<td><span class="docno prc">' + escHtml(x.poNo) + '</span></td>'
-        + '<td>' + escHtml(x.subject) + '</td>'
-        + '<td>' + escHtml(x.vendorName) + '</td>'
-        + '<td>' + statusBadge('최종승인(PRC)') + '</td>'
-        + '<td><span class="status ' + st.cls + '">' + escHtml(st.label) + '</span></td>'
-        + '<td class="num">' + (x.insps || []).length + '건</td>'
-        + '</tr>';
-      if(open) body += inspSubRows(x);
-    });
-    body += '</tbody></table>';
-  }
-
   return pageHead('결재 완료', sub)
-    + kpiHtml
-    + '<div class="panel">'
-    + '<div class="panel-head"><div><span class="panel-title">최종 승인 문서</span><span class="scope-tag' + (isProc ? ' proc' : '') + '">' + docs.length + '건' + (isProc ? ' · 전체' : '') + '</span></div></div>'
-    + body
-    + '</div>';
+    + kpiFilterSection('completed', segments, {
+        panelTitle: '최종 승인 문서',
+        scopeClass: isProc ? 'proc' : '',
+        scopeSuffix: isProc ? ' · 전체' : '',
+        renderTable: completedTable
+      });
+}
+
+// 결재 완료 — 표 본문 (회차별 검수 이력 아코디언)
+function completedTable(docs){
+  if(!docs || docs.length === 0){
+    return '<div class="empty"><div class="empty-icon">📭</div>표시할 결재 완료 문서가 없습니다.</div>';
+  }
+  var body = '<table><thead><tr>'
+    + '<th>품의 번호</th><th>PO 번호</th><th>제목</th><th>거래처</th><th>결재</th><th>검수 상태</th><th class="num">검수</th>'
+    + '</tr></thead><tbody>';
+  docs.forEach(function(x){
+    var open = !!STATE.openCompleted[x.prcToken];
+    var st = poInspState(x);
+    body += '<tr class="po-row' + (open ? ' open' : '') + '" data-toggle-insp="' + escAttr(x.prcToken) + '">'
+      + '<td><span class="chev">▶</span><span class="docno">' + escHtml(x.reqNo) + '</span></td>'
+      + '<td><span class="docno prc">' + escHtml(x.poNo) + '</span></td>'
+      + '<td>' + escHtml(x.subject) + '</td>'
+      + '<td>' + escHtml(x.vendorName) + '</td>'
+      + '<td>' + statusBadge('최종승인(PRC)') + '</td>'
+      + '<td><span class="status ' + st.cls + '">' + escHtml(st.label) + '</span></td>'
+      + '<td class="num">' + (x.insps || []).length + '건</td>'
+      + '</tr>';
+    if(open) body += inspSubRows(x);
+  });
+  body += '</tbody></table>';
+  return body;
 }
 
 // PO(품의) 단위 검수 집계 상태 — 저장하지 않고 계산 (설계서 §3)
@@ -1116,13 +1131,42 @@ function pageHead(title, sub){
     + (sub ? '<div class="page-sub">' + escHtml(sub) + '</div>' : '')
     + '</div><div><button class="btn btn-primary" onclick="loadHome()">새로고침</button></div></div>';
 }
-function kpi(label, value, klass){
-  return '<div class="kpi-card ' + (klass || '') + '"><div class="kpi-label">' + escHtml(label) + '</div>'
+// 통일된 KPI 카드. key가 있으면 클릭 가능한 필터 카드, active면 강조(선택 상태).
+function kpiCard(label, value, key, active){
+  var clickable = (key != null);
+  return '<div class="kpi-card' + (active ? ' highlight' : '') + (clickable ? ' kpi-click' : '') + '"'
+    + (clickable ? ' data-kpi="' + escAttr(key) + '"' : '') + '>'
+    + '<div class="kpi-label">' + escHtml(label) + '</div>'
     + '<div class="kpi-value">' + value + '<span class="kpi-unit"> 건</span></div></div>';
 }
-function tab(key, label, count){
-  return '<div class="tab ' + (STATE.myDocsTab === key ? 'active' : '') + '" data-tab="' + key + '">'
-    + escHtml(label) + ' <span style="opacity:0.6;font-weight:500;">(' + count + ')</span></div>';
+
+// 메뉴 공통: KPI 카드 그리드 + 현재 필터로 걸러진 테이블 패널을 한 번에 생성.
+//   menuKey  : STATE.filters 키 (현재 메뉴)
+//   segments : [{ key, label, rows }] — 첫 항목이 '전체'(필터 기본값)
+//   opts     : { panelTitle, scopeClass, scopeSuffix, renderTable(rows)->html }
+function kpiFilterSection(menuKey, segments, opts){
+  opts = opts || {};
+  var active = STATE.filters[menuKey];
+  var cur = null;
+  for(var i = 0; i < segments.length; i++){ if(segments[i].key === active){ cur = segments[i]; break; } }
+  if(!cur){ cur = segments[0]; active = segments[0].key; }   // 정의에 없으면 전체로 폴백
+
+  var cards = '<div class="kpi-grid" style="grid-template-columns:repeat(' + segments.length + ',1fr);">';
+  segments.forEach(function(s){
+    cards += kpiCard(s.label, s.rows.length, s.key, s.key === active);
+  });
+  cards += '</div>';
+
+  var renderTable = opts.renderTable || function(){ return ''; };
+  var panel = '<div class="panel">';
+  if(opts.panelTitle){
+    var scopeCls = 'scope-tag' + (opts.scopeClass ? ' ' + opts.scopeClass : '');
+    panel += '<div class="panel-head"><div><span class="panel-title">' + escHtml(opts.panelTitle) + '</span>'
+      + '<span class="' + scopeCls + '">' + cur.rows.length + '건' + (opts.scopeSuffix || '') + '</span>'
+      + '</div></div>';
+  }
+  panel += renderTable(cur.rows) + '</div>';
+  return cards + panel;
 }
 // 유형 표시 라벨 — 데이터값(docType)은 그대로 두고 화면 표기만 한글화
 function docTypeText(t){
