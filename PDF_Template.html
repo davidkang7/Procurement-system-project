@@ -29,6 +29,7 @@
   .approval-block .stamp-name { font-size: 13px; font-weight: 700; color: #c0392b; letter-spacing: 2px; padding: 6px 4px 2px; line-height: 1; }
   .approval-block .stamp-date { font-size: 8.5px; color: #888; padding: 0 4px 6px; line-height: 1; font-family: 'Consolas', monospace; }
   .approval-block .stamp-pending { font-size: 10px; color: #aaa; letter-spacing: 1px; }
+  .approval-block .stamp-approved { font-size: 9px; font-weight: 700; color: #1f8b4c; letter-spacing: 0.5px; line-height: 1; padding: 1px 0 2px; }
   .approval-block .stamp-rejected { font-size: 12px; font-weight: 700; color: #444; letter-spacing: 2px; padding: 6px 4px 2px; line-height: 1; }
   .approval-block .label { background: #f7f7f7; color: #555; font-size: 8px; padding: 2px 6px; border-bottom: 1px solid #111; letter-spacing: 1px; text-align: center; font-weight: 700; }
 
@@ -111,6 +112,7 @@
               <? if (pa.status === '승인') { ?>
                 <td>
                   <div class="stamp-name"><?= pa.name ?></div>
+                  <div class="stamp-approved">✓ 승인</div>
                   <div class="stamp-date"><?= pa.processedAt ?></div>
                 </td>
               <? } else if (pa.status === '반려') { ?>
@@ -127,7 +129,7 @@
       </div>
     <? } ?>
 
-    <div class="approval-block <?= isPrc ? 'prc-block' : '' ?>">
+    <div class="approval-block <?= isPrc ? 'prc-block' : 'parent' ?>">
       <div class="label"><?= isPrc ? '2차 결재 (구매)' : '결재' ?></div>
       <table>
         <thead><tr>
@@ -140,6 +142,7 @@
             <? if (ap.status === '승인') { ?>
               <td>
                 <div class="stamp-name"><?= ap.name ?></div>
+                <div class="stamp-approved">✓ 승인</div>
                 <div class="stamp-date"><?= ap.processedAt ?></div>
               </td>
             <? } else if (ap.status === '반려') { ?>
@@ -235,7 +238,7 @@
       </tr>
       <tr>
         <td colspan="5" class="label">합계 금액</td>
-        <td class="value" style="color:#c0392b;"><?= Number(totalVat).toLocaleString() ?> <?= _sym ?></td>
+        <td class="value" style="color:#111;"><?= Number(totalVat).toLocaleString() ?> <?= _sym ?></td>
       </tr>
     </tfoot>
   </table>
