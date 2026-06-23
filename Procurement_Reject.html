@@ -423,7 +423,7 @@ function doResubmit(){
       .withSuccessHandler(function(res){
         hideProgress();
         if(res && res.ok){
-          showStatus('success','재상신 완료. ' + (res.uploaded || 0) + '개 파일이 업로드되었고 결재자 1에게 이메일이 발송되었습니다.');
+          showStatus('success','재상신 완료. ' + (res.uploaded || 0) + '개 파일이 업로드되었고 기안자에게 이메일이 발송되었습니다.');
         } else {
           showStatus('error','오류: ' + (res && res.message || '알 수 없는 오류'));
           btnR.disabled = false;

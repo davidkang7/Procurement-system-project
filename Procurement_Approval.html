@@ -69,8 +69,8 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
   var docNoEl = document.getElementById('doc-no-display');
   if(docNoEl) docNoEl.textContent = '품의번호: ' + DOC_NO;
 
-  // 결재순서 라벨: 기본은 결재자 N, INSP는 서버 라벨(기안자/결재자 N)로 갱신
-  var orderLabel = '결재자 ' + (IDX + 1);
+  // 결재순서 라벨: IDX=0은 기안자, 이후는 결재자 N (INSP는 서버 라벨로 갱신)
+  var orderLabel = IDX === 0 ? '기안자' : '결재자 ' + IDX;
   var infoHtml = [
     '<div class="row"><span class="lbl">' + (DOC_KIND === 'INSP' ? '문서번호' : '품의번호') + '</span><span class="val">' + DOC_NO + '</span></div>',
     '<div class="row"><span class="lbl">결재순서</span><span class="val" id="order-val">' + orderLabel + '</span></div>',
