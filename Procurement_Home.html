@@ -133,6 +133,27 @@
   .docno { color: var(--brand); font-weight: 700; }
   .docno.prc { color: var(--prc); }
 
+  /* ── 리스트 헤더 컬럼 필터 (엑셀형 다중 선택) ── */
+  th.th-filter { position: relative; padding-right: 32px; }
+  .col-filter-btn { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 19px; height: 19px; border-radius: 5px; color: var(--ink-mute); cursor: pointer; transition: background 0.12s, color 0.12s; }
+  .col-filter-btn:hover { background: var(--line-soft); color: var(--ink-soft); }
+  .col-filter-btn.active { background: var(--brand-soft); color: var(--brand); }
+  .col-filter-btn svg { display: block; }
+  .col-filter-pop { position: fixed; z-index: 1200; width: 232px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(26,26,26,0.18); padding: 8px; font-size: 12.5px; text-transform: none; letter-spacing: normal; color: var(--ink); font-weight: 500; }
+  .cfp-search { width: 100%; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; font-family: inherit; font-size: 12px; margin-bottom: 6px; outline: none; }
+  .cfp-search:focus { border-color: var(--brand); }
+  .cfp-all { font-weight: 700; border-bottom: 1px solid var(--line-soft); }
+  .cfp-list { max-height: 320px; overflow-y: auto; margin: 2px 0; }
+  .cfp-item { display: flex; align-items: center; gap: 8px; padding: 6px 7px; border-radius: 6px; cursor: pointer; }
+  .cfp-item:hover { background: var(--line-soft); }
+  .cfp-item input { width: 14px; height: 14px; accent-color: var(--brand); cursor: pointer; flex-shrink: 0; }
+  .cfp-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cfp-empty { padding: 10px 7px; color: var(--ink-mute); font-size: 12px; }
+  .cfp-foot { display: flex; gap: 6px; padding-top: 7px; border-top: 1px solid var(--line-soft); margin-top: 4px; }
+  .cfp-foot button { flex: 1; padding: 6px 0; border-radius: 7px; border: 1px solid var(--line); background: #fff; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+  .cfp-foot .cfp-close { background: var(--grad-brand); color: #fff; border: none; }
+  .cfp-foot button:hover { filter: brightness(0.97); }
+
   /* ── 상태 배지: 기존 디자인 그대로 유지 ── */
   .status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10.5px; font-weight: 700; }
   .status.review     { background: var(--accent-soft); color: var(--accent); }
@@ -146,6 +167,17 @@
 
   .empty { padding: 40px 20px; text-align: center; color: var(--ink-mute); }
   .empty-icon { font-size: 32px; margin-bottom: 8px; opacity: 0.5; }
+
+  /* ── 페이지네이션 ── */
+  .pager:empty { display: none; }
+  .pager { position: relative; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 11px 16px; border-top: 1px solid var(--line); background: linear-gradient(180deg, #FCFCFC, #FAFAFA); flex-wrap: wrap; }
+  .pager-info { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--ink-mute); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pager-btns { display: flex; align-items: center; gap: 4px; }
+  .pager-btn { min-width: 30px; height: 28px; padding: 0 9px; border: 1px solid var(--line); background: #fff; color: var(--ink-soft); border-radius: 7px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; font-variant-numeric: tabular-nums; transition: background 0.12s, color 0.12s, border-color 0.12s; }
+  .pager-btn:hover:not(:disabled):not(.active) { background: var(--line-soft); color: var(--ink); }
+  .pager-btn.active { background: var(--grad-brand); color: #fff; border-color: transparent; cursor: default; }
+  .pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .pager-gap { color: var(--ink-mute); font-size: 12px; padding: 0 2px; user-select: none; }
 
   .loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
   .spinner { width: 36px; height: 36px; border: 3px solid var(--line); border-top-color: var(--brand); border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -282,9 +314,14 @@ var STATE = {
   data: null,
   currentMenu: 'mydocs',
   filters: {},   // 메뉴별 KPI 카드 필터 선택 상태 (menuKey → segmentKey). 미설정 시 'all'
+  colFilters: {},   // 메뉴별 리스트 헤더 컬럼 필터 (menuKey → { 컬럼index → [허용값,...] }). 미설정 시 전체
   loading: false,
   openCompleted: {},   // [INSP Step 2] 결재 완료 아코디언 열림 상태 (prcToken → bool)
+  page: {},   // 메뉴별 현재 페이지 (menuKey → 1-based). 필터/메뉴 변경 시 1로 리셋
 };
+
+// 리스트 페이지당 최대 표시 항목 수 (관리자 메뉴 제외 — home에서 처리되는 모든 리스트 공통)
+var PAGE_SIZE = 20;
 
 // [INSP Step 2] 검수보고서 작성 화면 활성 여부 — Step 3 배포 시 true로 변경
 var INSP_FORM_ENABLED = true;   // [INSP Step 3] 작성 화면 활성화
@@ -488,6 +525,7 @@ function attachContentHandlers(){
   Array.from(document.querySelectorAll('[data-kpi]')).forEach(function(el){
     el.addEventListener('click', function(){
       STATE.filters[STATE.currentMenu] = el.getAttribute('data-kpi');
+      STATE.page[STATE.currentMenu] = 1;   // 필터 변경 → 첫 페이지로
       renderContent();
     });
   });
@@ -543,9 +581,289 @@ function attachContentHandlers(){
         + (resub ? '&resub=' + encodeURIComponent(resub) : '');
     });
   });
+  // 리스트 헤더 컬럼 필터 (엑셀형 다중 선택)
+  attachColumnFilters();
+}
+
+// ─── 리스트 헤더 컬럼 필터 (엑셀형 다중 선택) ─────────────────────────────
+// home에서 렌더되는 모든 리스트 테이블의 각 헤더에 체크박스 다중 선택 필터를 부착한다.
+// 관리자 메뉴는 다른 html로 이동하므로 #content에 테이블이 없어 자동으로 제외된다.
+var COL_FILTER_ICON = '<svg width="11" height="11" viewBox="0 0 16 16"><path d="M1.5 2.5h13L9.5 9v4.4l-3 1.2V9z" fill="currentColor"/></svg>';
+var COL_FILTER_STATE = null;        // 현재 열린 팝업 정보 ({ btn, table, menuKey, ci })
+var COL_FILTER_DOC_HANDLER = null;  // 외부 클릭 감지 핸들러
+
+function attachColumnFilters(){
+  closeColFilterPop();
+  var content = document.getElementById('content');
+  if(!content) return;
+  var menuKey = STATE.currentMenu;
+  Array.from(content.querySelectorAll('table')).forEach(function(table){
+    if(table.classList.contains('insp-sub-table')) return;   // 아코디언 하위 표는 제외
+    if(!table.tHead || !table.tHead.rows.length) return;
+    Array.from(table.tHead.rows[0].cells).forEach(function(th, ci){
+      var label = th.textContent.trim();
+      if(!label) return;   // 액션/빈 헤더에는 필터 미부착
+      th.classList.add('th-filter');
+      var btn = document.createElement('span');
+      btn.className = 'col-filter-btn';
+      btn.innerHTML = COL_FILTER_ICON;
+      if(getColFilter(menuKey, ci)) btn.classList.add('active');
+      btn.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        openColFilterPop(table, menuKey, ci, btn);
+      });
+      th.appendChild(btn);
+    });
+    applyColumnFilters(table, menuKey);   // 저장된 필터 재적용 (재렌더 후에도 유지)
+  });
+}
+
+// menuKey/컬럼별 허용값 배열 조회 (null = 필터 없음 = 전체 표시)
+function getColFilter(menuKey, ci){
+  var m = STATE.colFilters[menuKey];
+  return (m && m[ci]) ? m[ci] : null;
+}
+function setColFilter(menuKey, ci, allowedOrNull){
+  if(!STATE.colFilters[menuKey]) STATE.colFilters[menuKey] = {};
+  if(allowedOrNull == null) delete STATE.colFilters[menuKey][ci];
+  else STATE.colFilters[menuKey][ci] = allowedOrNull;
+}
+
+// 메인 테이블의 데이터 행 (아코디언 하위행 제외)
+function colDataRows(table){
+  if(!table.tBodies.length) return [];
+  return Array.from(table.tBodies[0].rows).filter(function(tr){
+    return !tr.classList.contains('insp-sub');
+  });
+}
+
+// 컬럼의 고유값 목록 (한글·숫자 자연 정렬)
+function distinctColValues(table, ci){
+  var seen = {}, out = [];
+  colDataRows(table).forEach(function(tr){
+    var cell = tr.cells[ci];
+    var v = cell ? cell.textContent.trim() : '';
+    if(!(v in seen)){ seen[v] = 1; out.push(v); }
+  });
+  out.sort(function(a, b){ return a.localeCompare(b, 'ko', { numeric: true }); });
+  return out;
+}
+
+// 한 데이터 행이 저장된 컬럼 필터를 통과하는지 판정
+function rowPassesColFilter(tr, m){
+  var pass = true;
+  Object.keys(m).forEach(function(ci){
+    if(!pass) return;
+    var allowed = m[ci];
+    if(!allowed || !allowed.length){ pass = false; return; }   // 전부 해제 → 숨김
+    var cell = tr.cells[ci];
+    var v = cell ? cell.textContent.trim() : '';
+    if(allowed.indexOf(v) < 0) pass = false;
+  });
+  return pass;
+}
+
+// 컬럼 필터 + 페이지네이션을 함께 적용해 행을 표시/숨김 처리
+// (필터를 통과한 행만 페이지 단위로 잘라 최대 PAGE_SIZE개만 표시)
+function applyColumnFilters(table, menuKey){
+  var rows = table.tBodies.length ? Array.from(table.tBodies[0].rows) : [];
+  var m = STATE.colFilters[menuKey] || {};
+
+  // 1) 필터 통과 데이터 행 수집 (아코디언 하위행 제외)
+  var passRows = rows.filter(function(tr){
+    return !tr.classList.contains('insp-sub') && rowPassesColFilter(tr, m);
+  });
+
+  // 2) 현재 페이지 보정 + 표시할 행 범위 계산
+  var totalPages = Math.max(1, Math.ceil(passRows.length / PAGE_SIZE));
+  var page = STATE.page[menuKey] || 1;
+  if(page > totalPages) page = totalPages;
+  if(page < 1) page = 1;
+  STATE.page[menuKey] = page;
+  var start = (page - 1) * PAGE_SIZE;
+  var pageRows = passRows.slice(start, start + PAGE_SIZE);
+
+  // 3) 표시/숨김 적용 (하위 아코디언 행은 부모 행을 따라감)
+  var lastVisible = false;
+  rows.forEach(function(tr){
+    if(tr.classList.contains('insp-sub')){
+      tr.style.display = lastVisible ? '' : 'none';
+      return;
+    }
+    var visible = pageRows.indexOf(tr) >= 0;
+    tr.style.display = visible ? '' : 'none';
+    lastVisible = visible;
+  });
+
+  // 4) 페이지네이션 컨트롤 렌더
+  renderPager(table, menuKey, passRows.length, page, totalPages);
+}
+
+// 페이지네이션 컨트롤 렌더 + 클릭 핸들러 부착
+function renderPager(table, menuKey, total, page, totalPages){
+  var box = document.getElementById('pager-' + menuKey);
+  if(!box) return;
+  if(total <= PAGE_SIZE){ box.innerHTML = ''; return; }   // 한 페이지면 컨트롤 숨김
+
+  var from = (page - 1) * PAGE_SIZE + 1;
+  var to   = Math.min(page * PAGE_SIZE, total);
+
+  // 페이지 번호 윈도우 (현재 페이지 기준 ±2, 양끝 보정)
+  var win = 2, lo = Math.max(1, page - win), hi = Math.min(totalPages, page + win);
+  if(page <= win) hi = Math.min(totalPages, 1 + win * 2);
+  if(page > totalPages - win) lo = Math.max(1, totalPages - win * 2);
+
+  var html = '<div class="pager-info">' + from + '–' + to + ' / 총 ' + total + '건</div>'
+    + '<div class="pager-btns">';
+  html += '<button class="pager-btn" data-page="' + (page - 1) + '"' + (page <= 1 ? ' disabled' : '') + '>이전</button>';
+  if(lo > 1){
+    html += '<button class="pager-btn" data-page="1">1</button>';
+    if(lo > 2) html += '<span class="pager-gap">…</span>';
+  }
+  for(var p = lo; p <= hi; p++){
+    html += '<button class="pager-btn' + (p === page ? ' active' : '') + '" data-page="' + p + '">' + p + '</button>';
+  }
+  if(hi < totalPages){
+    if(hi < totalPages - 1) html += '<span class="pager-gap">…</span>';
+    html += '<button class="pager-btn" data-page="' + totalPages + '">' + totalPages + '</button>';
+  }
+  html += '<button class="pager-btn" data-page="' + (page + 1) + '"' + (page >= totalPages ? ' disabled' : '') + '>다음</button>';
+  html += '</div>';
+  box.innerHTML = html;
+
+  Array.from(box.querySelectorAll('.pager-btn')).forEach(function(btn){
+    if(btn.disabled) return;
+    btn.addEventListener('click', function(){
+      var np = parseInt(btn.getAttribute('data-page'), 10);
+      if(isNaN(np) || np === page) return;
+      STATE.page[menuKey] = np;
+      applyColumnFilters(table, menuKey);   // 행 표시만 갱신 (전체 재렌더·재로드 없음)
+      // 페이지 이동 시 리스트 상단으로 스크롤
+      var panel = table.closest ? table.closest('.panel') : null;
+      if(panel && panel.scrollIntoView) panel.scrollIntoView({ block: 'nearest' });
+    });
+  });
+}
+
+function closeColFilterPop(){
+  var ex = document.getElementById('col-filter-pop');
+  if(ex && ex.parentNode) ex.parentNode.removeChild(ex);
+  if(COL_FILTER_DOC_HANDLER){
+    document.removeEventListener('mousedown', COL_FILTER_DOC_HANDLER, true);
+    COL_FILTER_DOC_HANDLER = null;
+  }
+}
+
+function openColFilterPop(table, menuKey, ci, btn){
+  var sameBtn = COL_FILTER_STATE && COL_FILTER_STATE.btn === btn;
+  closeColFilterPop();
+  if(sameBtn){ COL_FILTER_STATE = null; return; }   // 같은 버튼 재클릭 → 토글 닫기
+
+  var values = distinctColValues(table, ci);
+  var allowed = getColFilter(menuKey, ci);          // null = 전체 선택
+  var isChecked = function(v){ return !allowed || allowed.indexOf(v) >= 0; };
+
+  var pop = document.createElement('div');
+  pop.className = 'col-filter-pop';
+  pop.id = 'col-filter-pop';
+  var html = '<input class="cfp-search" type="text" placeholder="검색…">'
+    + '<label class="cfp-item cfp-all"><input type="checkbox" class="cfp-all-cb"><span>전체 선택</span></label>'
+    + '<div class="cfp-list">';
+  values.forEach(function(v, i){
+    var disp = v === '' ? '(빈 값)' : v;
+    html += '<label class="cfp-item">'
+      + '<input type="checkbox" class="cfp-cb" data-idx="' + i + '"' + (isChecked(v) ? ' checked' : '') + '>'
+      + '<span title="' + escAttr(disp) + '">' + escHtml(disp) + '</span></label>';
+  });
+  if(!values.length) html += '<div class="cfp-empty">표시할 값이 없습니다.</div>';
+  html += '</div><div class="cfp-foot"><button class="cfp-clear">초기화</button><button class="cfp-close">닫기</button></div>';
+  pop.innerHTML = html;
+  document.body.appendChild(pop);
+
+  // 위치 — 버튼 우하단 정렬, 화면 밖이면 보정
+  var r = btn.getBoundingClientRect();
+  var left = r.right - pop.offsetWidth;
+  var top = r.bottom + 4;
+  if(left < 8) left = 8;
+  if(top + pop.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - pop.offsetHeight - 4);
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+
+  COL_FILTER_STATE = { btn: btn, table: table, menuKey: menuKey, ci: ci };
+
+  var listCbs = function(){ return Array.from(pop.querySelectorAll('.cfp-cb')); };
+  var allCb = pop.querySelector('.cfp-all-cb');
+  var syncAllCb = function(){
+    var cbs = listCbs();
+    var on = cbs.filter(function(c){ return c.checked; }).length;
+    allCb.checked = cbs.length > 0 && on === cbs.length;
+    allCb.indeterminate = on > 0 && on < cbs.length;
+  };
+  syncAllCb();
+
+  var commit = function(){
+    var checkedVals = [];
+    listCbs().forEach(function(c){ if(c.checked) checkedVals.push(values[+c.getAttribute('data-idx')]); });
+    if(checkedVals.length === values.length){
+      setColFilter(menuKey, ci, null);          // 전체 선택 → 필터 해제
+      btn.classList.remove('active');
+    } else {
+      setColFilter(menuKey, ci, checkedVals);
+      btn.classList.add('active');
+    }
+    STATE.page[menuKey] = 1;   // 컬럼 필터 변경 → 첫 페이지로
+    applyColumnFilters(table, menuKey);
+  };
+
+  allCb.addEventListener('change', function(){
+    var on = allCb.checked;
+    listCbs().forEach(function(c){ c.checked = on; });
+    allCb.indeterminate = false;
+    commit();
+  });
+  listCbs().forEach(function(c){
+    c.addEventListener('change', function(){ syncAllCb(); commit(); });
+  });
+
+  var search = pop.querySelector('.cfp-search');
+  search.addEventListener('input', function(){
+    var q = search.value.trim().toLowerCase();
+    Array.from(pop.querySelectorAll('.cfp-list .cfp-item')).forEach(function(lab){
+      lab.style.display = (!q || lab.textContent.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+    });
+  });
+  pop.querySelector('.cfp-clear').addEventListener('click', function(){
+    listCbs().forEach(function(c){ c.checked = true; });
+    setColFilter(menuKey, ci, null);
+    btn.classList.remove('active');
+    STATE.page[menuKey] = 1;   // 컬럼 필터 초기화 → 첫 페이지로
+    applyColumnFilters(table, menuKey);
+    syncAllCb();
+  });
+  pop.querySelector('.cfp-close').addEventListener('click', function(){
+    closeColFilterPop();
+    COL_FILTER_STATE = null;
+  });
+
+  pop.addEventListener('mousedown', function(ev){ ev.stopPropagation(); });
+  COL_FILTER_DOC_HANDLER = function(ev){
+    if(pop.contains(ev.target) || btn.contains(ev.target)) return;
+    closeColFilterPop();
+    COL_FILTER_STATE = null;
+  };
+  document.addEventListener('mousedown', COL_FILTER_DOC_HANDLER, true);
+  search.focus();
 }
 
 // ─── 메뉴별 렌더 ─────────────────────────────
+// 최신 생성 건이 앞단에 오도록 내림차순 정렬 (원본 배열은 보존하기 위해 복제 후 정렬)
+function sortByNewest(rows, key){
+  key = key || 'submitAt';
+  return (rows || []).slice().sort(function(a, b){
+    return String(b[key] || '').localeCompare(String(a[key] || ''));
+  });
+}
+
 function renderMyDocs(){
   var d = STATE.data || {};
   var docs = d.myDocs || [];
@@ -567,7 +885,7 @@ function renderMyDocs(){
 
 function renderPending(){
   var d = STATE.data || {};
-  var rows = d.myPending || [];
+  var rows = sortByNewest(d.myPending);   // 최신순 (서버 미정렬 → 클라이언트 정렬)
   var segments = [
     { key:'all', label:'전체', rows: rows },
     { key:'REQ', label:'품의', rows: rows.filter(function(x){ return x.docType === 'REQ'; }) },
@@ -598,7 +916,7 @@ function renderInbox(){
 
 function renderMyPrc(){
   var d = STATE.data || {};
-  var rows = d.myPrc || [];
+  var rows = sortByNewest(d.myPrc);   // 최신순 (서버 미정렬 → 클라이언트 정렬)
   var segments = [
     { key:'all',         label:'전체',     rows: rows },
     { key:'claimed_req', label:'품의(점유)', rows: rows.filter(function(x){ return x._type === 'claimed_req'; }) },
@@ -614,7 +932,7 @@ function renderMyPrc(){
 // ─── [INSP Step 5] 내 검수보고서 결재 대기 ─────────────────────────────
 function renderInspPending(){
   var d = STATE.data || {};
-  var rows = d.myInspPending || [];
+  var rows = sortByNewest(d.myInspPending);   // 최신순 (서버는 오래된 순 → 최신순으로 재정렬)
   var segments = [
     { key:'all',    label:'전체',     rows: rows },
     { key:'final',  label:'최종 검수', rows: rows.filter(function(x){ return !!x.isFinal; }) },
@@ -1196,7 +1514,10 @@ function kpiFilterSection(menuKey, segments, opts){
       + '<span class="' + scopeCls + '">' + cur.rows.length + '건' + (opts.scopeSuffix || '') + '</span>'
       + '</div></div>';
   }
-  panel += renderTable(cur.rows) + '</div>';
+  panel += renderTable(cur.rows);
+  // 페이지네이션 컨트롤 컨테이너 (행 표시는 applyColumnFilters에서 페이지 단위로 처리)
+  panel += '<div class="pager" id="pager-' + escAttr(menuKey) + '"></div>';
+  panel += '</div>';
   return cards + panel;
 }
 // 유형 표시 라벨 — 데이터값(docType)은 그대로 두고 화면 표기만 한글화
