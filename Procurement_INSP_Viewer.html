@@ -239,12 +239,10 @@ function showConfirmModal(decision){
 
   var reasonWrap = document.getElementById('pm-reason-wrap');
   var reason = document.getElementById('pm-reason');
-  if(isReject){
-    reasonWrap.style.display='block';
-    reason.value=''; reason.style.borderColor='';
-  } else {
-    reasonWrap.style.display='none';
-  }
+  // 승인·반려 모두 의견 입력 가능 (반려는 필수, 승인은 선택)
+  reasonWrap.style.display='block';
+  reason.value=''; reason.style.borderColor='';
+  reason.placeholder = isReject ? '반려 사유를 입력해 주세요. (필수)' : '승인 의견을 입력하세요. (선택사항)';
 
   document.getElementById('pm-actions').innerHTML =
     '<button class="btn gray" onclick="closeModal()">취소</button>'+
@@ -257,15 +255,12 @@ function showConfirmModal(decision){
 
 // 2단계: 확인 클릭 → 입력값 검증 후 서버 처리로 진행 (기존 prompt 검증과 동일)
 function confirmDecision(decision){
-  var comment='';
-  if(decision==='reject'){
-    comment=document.getElementById('pm-reason').value.trim();
-    if(!comment){
-      var reason=document.getElementById('pm-reason');
-      reason.style.borderColor='var(--danger)';
-      reason.focus();
-      return;  // 사유 미입력 시 진행 차단
-    }
+  var comment=document.getElementById('pm-reason').value.trim();
+  if(decision==='reject' && !comment){
+    var reason=document.getElementById('pm-reason');
+    reason.style.borderColor='var(--danger)';
+    reason.focus();
+    return;  // 반려 사유 미입력 시 진행 차단 (승인 의견은 선택)
   }
   processDecision(decision, comment);
 }
