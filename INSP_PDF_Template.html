@@ -21,10 +21,8 @@
   .verdict.pass { background: #e8f6ee; color: #1f8b4c; border: 1px solid #9bd5b1; }
   .verdict.fail { background: #fdecec; color: #c0392b; border: 1px solid #e9a8a8; }
   .comment { font-size: 11px; color: #333; white-space: pre-wrap; margin-bottom: 10px; }
-  .photos { display: flex; flex-wrap: wrap; gap: 8px; }
-  .photos .ph { width: calc(50% - 4px); border: 0.8px solid #ccc; border-radius: 2px; overflow: hidden; }
-  .photos .ph img { width: 100%; display: block; max-height: 240px; object-fit: contain; background: #fafafa; }
-  .photos .ph .cap { font-size: 8.5px; color: #999; padding: 2px 5px; }
+  /* 사진 그리드는 표 기반(아래 인라인 스타일)로 렌더. ⚠ Google 문서 변환기는 flex를 무시하고,
+     img에 width:100%가 걸리면 이미지를 통째로 떨궈 깨지므로 여기서 폭 규칙을 두지 않는다. */
   .no-photo { font-size: 10px; color: #aaa; }
 
   .appr-wrap { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 14px; }
@@ -74,16 +72,19 @@
     <span class="verdict <?= verdictClass ?>"><?= verdict ?></span>
     <? if (comment) { ?><div class="comment"><?= comment ?></div><? } ?>
     <? if (photoTags && photoTags.length) { ?>
-      <!-- Google 문서 변환기는 flex를 무시하므로 표 기반 2열 레이아웃 + 인라인 스타일 사용 -->
-      <table class="photos" style="width:100%;border-collapse:collapse;"><tbody><tr>
+      <!-- ⚠ Google 문서 변환기는 flex를 무시하고 img width:100%에서 사진을 떨군다.
+           → 표 2열 + 고정폭 img(width 속성)로 렌더해야 사진이 정상 임베드된다. -->
+      <table class="photos" style="width:100%;border-collapse:separate;border-spacing:8px;"><tbody>
         <? for (var pi = 0; pi < photoTags.length; pi++) { ?>
-          <td class="ph" style="width:50%;border:0.8px solid #ccc;padding:4px;vertical-align:top;">
-            <img src="<?= photoTags[pi].src ?>" width="250" style="width:100%;max-width:250px;display:block;">
-            <div class="cap" style="font-size:8.5px;color:#999;padding:2px 5px;"><?= photoTags[pi].name ?></div>
-          </td>
-          <? if (pi % 2 === 1 && pi < photoTags.length - 1) { ?></tr><tr><? } ?>
+          <? if (pi % 2 === 0) { ?><tr><? } ?>
+            <td class="ph" style="width:50%;border:0.8px solid #ccc;border-radius:2px;padding:0;vertical-align:top;overflow:hidden;">
+              <!-- ⚠ src는 반드시 비이스케이프 출력 스크립틀릿(느낌표형)으로 — 자동이스케이프형은 data: URI를 보안 차단(#ZautoescZ)해 사진이 사라진다 -->
+              <img src="<?!= photoTags[pi].src ?>" width="320" style="display:block;max-height:240px;background:#fafafa;">
+              <div class="cap" style="font-size:8.5px;color:#999;padding:2px 5px;"><?= photoTags[pi].name ?></div>
+            </td>
+          <? if (pi % 2 === 1 || pi === photoTags.length - 1) { ?></tr><? } ?>
         <? } ?>
-      </tr></tbody></table>
+      </tbody></table>
     <? } else { ?>
       <div class="no-photo">(첨부된 검수 사진 없음)</div>
     <? } ?>
