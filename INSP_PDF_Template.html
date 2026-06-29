@@ -74,11 +74,16 @@
     <span class="verdict <?= verdictClass ?>"><?= verdict ?></span>
     <? if (comment) { ?><div class="comment"><?= comment ?></div><? } ?>
     <? if (photoTags && photoTags.length) { ?>
-      <div class="photos">
+      <!-- Google 문서 변환기는 flex를 무시하므로 표 기반 2열 레이아웃 + 인라인 스타일 사용 -->
+      <table class="photos" style="width:100%;border-collapse:collapse;"><tbody><tr>
         <? for (var pi = 0; pi < photoTags.length; pi++) { ?>
-          <div class="ph"><img src="<?= photoTags[pi].src ?>"><div class="cap"><?= photoTags[pi].name ?></div></div>
+          <td class="ph" style="width:50%;border:0.8px solid #ccc;padding:4px;vertical-align:top;">
+            <img src="<?= photoTags[pi].src ?>" width="250" style="width:100%;max-width:250px;display:block;">
+            <div class="cap" style="font-size:8.5px;color:#999;padding:2px 5px;"><?= photoTags[pi].name ?></div>
+          </td>
+          <? if (pi % 2 === 1 && pi < photoTags.length - 1) { ?></tr><tr><? } ?>
         <? } ?>
-      </div>
+      </tr></tbody></table>
     <? } else { ?>
       <div class="no-photo">(첨부된 검수 사진 없음)</div>
     <? } ?>

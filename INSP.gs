@@ -1247,6 +1247,39 @@ function _processInspPdfJob(job) {
 }
 
 /**
+ * 검수 사진을 PDF 임베드용 "축소 이미지" Blob으로 가져온다.
+ *  - HTML→PDF 변환기가 큰 base64 data URI를 렌더링하지 못해 사진이 깨지는 문제를
+ *    피하기 위해, 원본 대신 Drive 썸네일(약 1000px 축소본)을 사용한다.
+ *  - 썸네일을 못 받으면(생성 전·권한 등) 원본 Blob으로 폴백한다.
+ * @param {string} fileId Drive 파일 ID
+ * @returns {Blob|null}
+ */
+function _fetchInspPhotoBlobForPdf(fileId) {
+  // 1순위: Drive 썸네일(축소본) — data URI 용량을 줄여 PDF에서 정상 렌더되게 함
+  try {
+    var meta = Drive.Files.get(fileId, { fields: 'thumbnailLink', supportsAllDrives: true });
+    var link = meta && meta.thumbnailLink;
+    if (link) {
+      // 썸네일 URL 끝의 크기 토큰(=s220 등)을 =s1000으로 올려 화질 확보
+      link = link.replace(/=s\d+(-[\w-]+)?$/, '=s1000');
+      var resp = UrlFetchApp.fetch(link, { muteHttpExceptions: true });
+      if (resp.getResponseCode() === 200) {
+        var b = resp.getBlob();
+        if (b && /^image\//.test(b.getContentType() || '') && b.getBytes().length > 0) {
+          return b.setName(fileId + '.jpg');
+        }
+      }
+    }
+  } catch (e) { /* 썸네일 실패 → 원본 폴백 */ }
+  // 2순위: 원본 Blob (작은 사진은 그대로도 렌더 가능)
+  try {
+    return DriveApp.getFileById(fileId).getBlob();
+  } catch (e2) {
+    return null;
+  }
+}
+
+/**
  * 검수보고서 PDF 생성 → FINAL/{PO번호} 폴더에 저장
  *  - 사진은 Drive(STAGING)에서 읽어 base64로 템플릿에 삽입
  *  - FINAL 폴더는 getOrCreateFolder(PO번호, ..., 'final') — PRC가 이미 만든 PO폴더와 동일
@@ -1268,14 +1301,18 @@ function generateInspPdf(token) {
     var apprCount  = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
 
     // 사진 → base64 (STAGING Drive에서 읽음)
+    // ⚠ HTML→PDF 변환기(getAs(MimeType.PDF))는 용량이 큰 data URI 이미지를
+    //   렌더링하지 못하고 "깨진 이미지" 자리표시자로 표시한다(브라우저 뷰어는 정상).
+    //   원본(최대 1600px·수백 KB)을 그대로 임베드하면 PDF에서 사진이 깨지므로,
+    //   Drive 썸네일(축소본)을 가져와 작은 data URI로 삽입한다.
     var photoTags = [];
     try {
       var photoList = JSON.parse(String(r[INSP_COL.PHOTO_LIST] || '[]'));
       photoList.forEach(function (p) {
         if (!p || !p.id) return;
         try {
-          var f = DriveApp.getFileById(p.id);
-          var blob = f.getBlob();
+          var blob = _fetchInspPhotoBlobForPdf(p.id);
+          if (!blob) return;
           var b64  = Utilities.base64Encode(blob.getBytes());
           var mime = blob.getContentType() || 'image/jpeg';
           photoTags.push({ src: 'data:' + mime + ';base64,' + b64, name: p.name || '' });
@@ -1316,7 +1353,26 @@ function generateInspPdf(token) {
     tmpl.generatedAt  = toDateTimeStr(new Date());
 
     var html = tmpl.evaluate().getContent();
-    var blob = Utilities.newBlob(html, 'text/html', docNo + '.html').getAs(MimeType.PDF);
+
+    // HTML → Google 문서(임시) → PDF
+    //  ⚠ Utilities.newBlob(html).getAs(MimeType.PDF) 변환기는 <img>(data URI·외부 URL
+    //    모두)를 렌더링하지 못해 사진이 깨진다(CSS는 그려짐). 그래서 HTML을 먼저
+    //    Google 문서로 변환(이미지가 실제로 임베드됨)한 뒤, 그 문서를 PDF로 내보낸다.
+    //    무거운 변환은 Google 서버가 처리하므로 스크립트 부하는 작다. 임시 문서는
+    //    변환 직후 삭제한다.
+    var blob, tmpDocId = null;
+    try {
+      var htmlBlob = Utilities.newBlob(html, MimeType.HTML, docNo + '.html');
+      var tmpDoc = Drive.Files.create(
+        { name: 'INSP_TMP_' + docNo, mimeType: MimeType.GOOGLE_DOCS },
+        htmlBlob,
+        { supportsAllDrives: true }
+      );
+      tmpDocId = tmpDoc.id;
+      blob = DriveApp.getFileById(tmpDocId).getAs(MimeType.PDF);
+    } finally {
+      if (tmpDocId) { try { Drive.Files.remove(tmpDocId); } catch (_) {} }
+    }
 
     var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm');
     var fileName = 'INSP_' + docNo + '_' + ts + '.pdf';
