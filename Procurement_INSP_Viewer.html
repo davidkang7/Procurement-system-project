@@ -129,15 +129,16 @@ function goHome(){
   }
 }
 
-function boot(){
-  if(typeof google==='undefined'){document.getElementById('wrap').innerHTML='<div class="err-box">Apps Script 환경에서만 실행 가능합니다.</div>';return;}
+function boot(onComplete){
+  if(typeof google==='undefined'){document.getElementById('wrap').innerHTML='<div class="err-box">Apps Script 환경에서만 실행 가능합니다.</div>';if(onComplete)onComplete();return;}
   google.script.run
     .withSuccessHandler(function(res){
-      if(!res||!res.ok){document.getElementById('wrap').innerHTML='<div class="err-box">'+esc(res?res.message:'불러올 수 없습니다.')+'</div>';return;}
+      if(!res||!res.ok){document.getElementById('wrap').innerHTML='<div class="err-box">'+esc(res?res.message:'불러올 수 없습니다.')+'</div>';if(onComplete)onComplete();return;}
       DATA=res; MY_IDX=(typeof res.myApproverIdx==='number')?res.myApproverIdx:-1;
       render();
+      if(onComplete)onComplete();
     })
-    .withFailureHandler(function(err){document.getElementById('wrap').innerHTML='<div class="err-box">서버 오류: '+esc(err&&err.message?err.message:err)+'</div>';})
+    .withFailureHandler(function(err){document.getElementById('wrap').innerHTML='<div class="err-box">서버 오류: '+esc(err&&err.message?err.message:err)+'</div>';if(onComplete)onComplete();})
     .getInspViewerDataForClient(TOKEN, IDX_HINT||null);
 }
 
@@ -276,7 +277,16 @@ function processDecision(decision, comment){
       if(res&&res.ok){
         showCompleteModal(decision==='approve'?'승인 완료되었습니다.':'반려 처리되었습니다.');
         if(ab)ab.style.display='none'; if(rb)rb.style.display='none';
-        setTimeout(function(){ closeModal(); boot(); },1100);  // 갱신된 상태 재로드
+        // 완료 표시 → '결재 현황 업데이트 중' 모달로 전환한 뒤 백그라운드 재로드.
+        // 재로드(render)가 끝나야 모달을 닫아, 갱신 구간을 클라이언트가 인지하게 함.
+        setTimeout(function(){
+          showUpdatingModal();
+          var t0=Date.now();
+          boot(function(){
+            var wait=Math.max(0,700-(Date.now()-t0));  // 스피너가 깜빡이지 않도록 최소 노출
+            setTimeout(closeModal, wait);
+          });
+        },1100);
       }else{
         showErrorModal('오류: '+(res?res.message:'알 수 없는 오류'));
         if(ab)ab.disabled=false; if(rb)rb.disabled=false;
@@ -302,6 +312,14 @@ function showCompleteModal(detail){
   document.getElementById('pm-icon').innerHTML='<div class="pm-check">✓</div>';
   document.getElementById('pm-msg').textContent='처리가 완료되었습니다.';
   document.getElementById('pm-sub').textContent=detail||'';
+  document.getElementById('pm-reason-wrap').style.display='none';
+  document.getElementById('pm-actions').innerHTML='';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function showUpdatingModal(){
+  document.getElementById('pm-icon').innerHTML='<div class="pm-spinner"></div>';
+  document.getElementById('pm-msg').textContent='처리가 완료되었습니다.';
+  document.getElementById('pm-sub').textContent='결재 현황을 업데이트하고 있습니다…';
   document.getElementById('pm-reason-wrap').style.display='none';
   document.getElementById('pm-actions').innerHTML='';
   document.getElementById('pm-backdrop').classList.add('show');
