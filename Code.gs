@@ -233,8 +233,10 @@ function doGet(e) {
   if (action === 'getRejectData') return getRejectData(e.parameter.token);
 
   // 7) 기본 진입 = 대시보드 홈 (§12.2, AC-13)
+  //    menu 파라미터: 홈 진입 시 기본 선택할 메뉴 키 (예: 메일 링크의 menu=completed)
   return _renderTemplate('Procurement_Home', {
-    webappUrl: CONFIG.WEBAPP_URL,
+    webappUrl:   CONFIG.WEBAPP_URL,
+    initialMenu: e.parameter.menu || '',
   }, '구매결재 시스템');
 }
 
@@ -1119,19 +1121,37 @@ function _decisionCore(payload) {
       sheet.getRange(rowNum, COL.STATUS + 1).setValue(finalStatus);
       var drafterEmail2 = String(r[COL.APPR_START + 2] || '');
 
+      var completionNotify = {
+        type: 'completion',
+        toEmail: drafterEmail2,
+        drafter: drafter,
+        docNo: docNo,
+        subject: subject,
+        issueDate: toDateStr(issueDate),
+        token: token,
+        docType: docType,
+      };
+
+      // PRC 최종 승인 → 원 REQ 기안자에게 '검수보고서 작성 가능' 안내를 위해
+      // 원본 REQ 행에서 기안자/이메일/품의번호/토큰을 락 안에서 미리 조회 (락 밖 발송용)
+      if (docType === 'PRC') {
+        var reqToken = String(r[COL.PARENT_DOC_ID] || '');
+        if (reqToken) {
+          var reqRowNum = findRowNumByToken(sheet, reqToken);
+          if (reqRowNum > 0) {
+            var reqRow = readRow(sheet, reqRowNum);
+            completionNotify.reqToken       = reqToken;
+            completionNotify.reqDocNo       = String(reqRow[COL.DOC_NO] || '');
+            completionNotify.reqDrafter     = String(reqRow[COL.DRAFTER] || '');
+            completionNotify.reqDrafterEmail = String(reqRow[COL.APPR_START + 2] || '');
+          }
+        }
+      }
+
       return {
         ok: true,
         message: '승인 처리되었습니다.',
-        notify: {
-          type: 'completion',
-          toEmail: drafterEmail2,
-          drafter: drafter,
-          docNo: docNo,
-          subject: subject,
-          issueDate: toDateStr(issueDate),
-          token: token,
-          docType: docType,
-        },
+        notify: completionNotify,
       };
     } catch(err) {
       return { ok: false, message: err.toString() };
@@ -1162,6 +1182,20 @@ function _decisionCore(payload) {
           notifyProcurementTeamOfApproved1st(n.docNo, n.subject, n.drafter, n.token);
         } catch(e) {
           notifyAdminError('구매팀 알림 실패: ' + n.docNo + ' / ' + e.toString());
+        }
+      }
+
+      // PRC 최종 승인 → 원 REQ 기안자에게 '구매팀 결재 완료 & 검수보고서 작성 가능' 안내
+      // (검수보고서 제출이 실제로 열리는 시점 = PRC 최종 승인. 원 기안자는 이 시점 알림이 없었음)
+      if (n.docType === 'PRC') {
+        if (n.reqDrafterEmail) {
+          try {
+            sendInspReadyNoticeWithRetry(n.reqDrafterEmail, n.reqDrafter, n.reqDocNo, n.subject, n.docNo);
+          } catch(e) {
+            notifyAdminError('검수보고서 안내 메일 실패: ' + n.docNo + ' / ' + e.toString());
+          }
+        } else {
+          notifyAdminError('검수보고서 안내 수신자(원 REQ 기안자) 이메일 누락: ' + n.docNo + ' — 안내 메일 건너뜀');
         }
       }
 
@@ -3264,6 +3298,64 @@ function sendCompletionNoticeWithRetry(toEmail, drafter, docNo, subject, issueDa
   plainBodyArr.push('', '— ' + CONFIG.FROM_NAME);
 
   return sendEmailWithRetry(toEmail, emailSubject, plainBodyArr.join('\n'), htmlBody);
+}
+
+/**
+ * PRC(구매팀 구매품의서) 최종 승인 완료 → 원 REQ 기안자에게
+ * '구매팀 결재 완료 & 검수보고서 작성 가능' 안내 메일.
+ * 버튼('내 기안 확인')은 홈의 '결재 완료 + 검수보고서 제출' 메뉴가 기본 선택되도록 연결.
+ */
+function sendInspReadyNoticeWithRetry(toEmail, reqDrafter, reqDocNo, subject, poNo) {
+  var drafterName = escapeHtml(reqDrafter || '-');
+  var docNoEsc    = escapeHtml(reqDocNo || '-');
+  var docTitle    = escapeHtml(subject || '구매품의서');
+  var poNoEsc     = escapeHtml(poNo || '-');
+
+  // 홈 화면 진입 시 '결재 완료 + 검수보고서 제출'(menu=completed) 메뉴 기본 선택
+  var homeUrl = CONFIG.WEBAPP_URL + '?action=home&menu=completed';
+
+  var emailSubject = '[구매팀 결재 완료] ' + (reqDocNo || '-') + ' — 검수보고서를 작성할 수 있습니다.';
+
+  var htmlBody =
+    '<div style="font-family:\'Malgun Gothic\',Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;">'
+    + '<div style="background:#1a6fc4;padding:24px 32px;"><div style="color:#fff;font-size:18px;font-weight:700;letter-spacing:2px;">구매품의 시스템</div></div>'
+    + '<div style="padding:28px 32px;">'
+    + '<p style="font-size:15px;color:#111;margin:0 0 8px;"><b>' + drafterName + '</b> 님,</p>'
+    + '<p style="font-size:14px;color:#444;margin:0 0 24px;line-height:1.7;">'
+    + '기안하신 구매품의서에 대한 <b style="color:#27ae60;">구매팀 결재가 모두 완료</b>되었습니다.<br>'
+    + '이제 아래 버튼을 통해 <b>검수보고서를 작성·제출</b>하실 수 있습니다.</p>'
+    + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">'
+    + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
+    + '<tr><td style="color:#888;padding:4px 0;width:80px;">품의번호</td><td style="color:#111;font-weight:600;">' + docNoEsc + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 0;">품의제목</td><td style="color:#111;font-weight:600;">' + docTitle + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 0;">구매문서번호</td><td style="color:#111;">' + poNoEsc + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 0;">기안자</td><td style="color:#111;">' + drafterName + '</td></tr>'
+    + '</table></div>'
+    + '<table role="presentation" align="center" style="margin:0 auto 20px auto;border-collapse:collapse;">'
+    + '<tr><td align="center" bgcolor="#1a6fc4" style="border-radius:6px;">'
+    + '<a href="' + homeUrl + '" style="display:inline-block;background:#1a6fc4;color:#fff;font-size:14px;font-weight:700;padding:12px 36px;border-radius:6px;text-decoration:none;letter-spacing:1px;">내 기안 확인</a>'
+    + '</td></tr></table>'
+    + '<div style="border-top:1px solid #e0e0e0;margin:20px 0;"></div>'
+    + '<p style="font-size:12px;color:#888;text-align:center;margin:0;line-height:1.7;">'
+    + '※ \'내 기안 확인\'을 누르면 홈의 [결재 완료 + 검수보고서 제출] 메뉴로 이동합니다.</p>'
+    + '</div>'
+    + '<div style="background:#f0f0f0;padding:16px 32px;text-align:center;">'
+    + '<p style="font-size:11px;color:#888;margin:0;">— ' + escapeHtml(CONFIG.FROM_NAME) + ' · 이 메일은 자동 발송되었습니다.</p>'
+    + '</div></div>';
+
+  var plainBody = [
+    (reqDrafter || '-') + ' 님,', '',
+    '기안하신 구매품의서에 대한 구매팀 결재가 모두 완료되었습니다.',
+    '이제 검수보고서를 작성·제출하실 수 있습니다.', '',
+    '■ 품의번호:     ' + (reqDocNo || '-'),
+    '■ 품의제목:     ' + (subject || '구매품의서'),
+    '■ 구매문서번호: ' + (poNo || '-'),
+    '■ 기안자:       ' + (reqDrafter || '-'), '',
+    '▶ 내 기안 확인 (결재 완료 + 검수보고서 제출): ' + homeUrl, '',
+    '— ' + CONFIG.FROM_NAME,
+  ].join('\n');
+
+  return sendEmailWithRetry(toEmail, emailSubject, plainBody, htmlBody);
 }
 
 /**

@@ -311,6 +311,8 @@
 
 <script>
 var WEBAPP_URL = '<?= webappUrl ?>';
+// 메일 링크 등에서 전달된 기본 선택 메뉴 키 (예: ?action=home&menu=completed)
+var INITIAL_MENU = '<?= initialMenu ?>';
 var STATE = {
   user: null,
   data: null,
@@ -330,6 +332,11 @@ var INSP_FORM_ENABLED = true;   // [INSP Step 3] 작성 화면 활성화
 
 // ─── 부팅 ─────────────────────────────
 function boot(){
+  // 메일 링크로 전달된 기본 메뉴가 유효하면 초기 선택 메뉴로 적용
+  var ALLOWED_INITIAL_MENUS = ['mydocs','completed','pending','insp_pending','final','inbox','myprc'];
+  if(INITIAL_MENU && ALLOWED_INITIAL_MENUS.indexOf(INITIAL_MENU) >= 0){
+    STATE.currentMenu = INITIAL_MENU;
+  }
   loadHome();
 }
 
