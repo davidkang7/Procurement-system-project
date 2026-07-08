@@ -252,6 +252,8 @@
   tr.po-row:hover td { background: #fafbfc; }
   .chev { display: inline-block; transition: transform .15s; color: var(--ink-mute); font-size: 10px; margin-right: 6px; }
   tr.po-row.open .chev { transform: rotate(90deg); }
+  .po-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgba(0,0,0,.25); }
+  .po-link:hover { text-decoration-color: currentColor; }
   tr.insp-sub td { background: #e4f4f2; border-bottom: 1px solid #d4e9e6; padding: 0; }
   .insp-sub-box { padding: 10px 16px 12px 36px; }
   .insp-sub-table { width: 100%; border-collapse: collapse; }
@@ -557,6 +559,15 @@ function attachContentHandlers(){
       ev.stopPropagation();
       var parentToken = el.getAttribute('data-prc-resume');
       window.top.location.href = WEBAPP_URL + '?action=prc&parentId=' + encodeURIComponent(parentToken);
+    });
+  });
+  // [INSP Step 2] 결재 완료 — PO 번호 클릭 시 결재 완료된 구매(PRC) 문서 뷰어
+  Array.from(document.querySelectorAll('[data-po-view]')).forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var token = el.getAttribute('data-po-view');
+      var docNo = el.getAttribute('data-po-docno') || '';
+      window.top.location.href = WEBAPP_URL + '?action=view&token=' + encodeURIComponent(token) + '&docNo=' + encodeURIComponent(docNo);
     });
   });
   // [INSP Step 2] 결재 완료 — 행 클릭 시 검수 이력 아코디언 토글
@@ -876,9 +887,14 @@ function renderMyDocs(){
     { key:'rejected', label:'반려',   rows: docs.filter(function(x){ return x.status === '반려'; }) },
   ];
 
-  return pageHead('내 기안 문서', '내가 작성한 구매품의서의 전체 진행 상태입니다.')
+  var myDept = ((STATE.user || {}).dept) || '';
+  var sub = myDept
+    ? ('내가 작성한 문서와 같은 부서(' + escHtml(myDept) + ') 동료가 기안한 구매품의서입니다. '
+       + '기안자 열에서 내 문서(나 배지)와 부서 문서를 구분할 수 있습니다.')
+    : '내가 작성한 구매품의서의 전체 진행 상태입니다.';
+  return pageHead('기안 문서', sub)
     + kpiFilterSection('mydocs', segments, {
-        panelTitle: '내 기안 문서',
+        panelTitle: myDept ? ('기안 문서 · ' + escHtml(myDept)) : '내 기안 문서',
         renderTable: function(rows){ return tableOfDocs(rows, 'mydocs'); }
       });
 }
@@ -978,8 +994,10 @@ function renderFinal(){
     { key:'INSP', label:'검수보고서', rows: rows.filter(function(x){ return x.docType === 'INSP'; }) },
   ];
 
+  var myDept = ((STATE.user || {}).dept) || '';
   return pageHead('최종 완료', '최종 승인 처리된 품의·구매 및 최종 검수 완료된 검수보고서입니다. '
-      + (isProc ? '구매팀 권한으로 전체가 표시됩니다.' : '본인이 기안하거나 결재에 참여한 문서가 표시됩니다.')
+      + (isProc ? '구매팀 권한으로 전체가 표시됩니다.'
+                : ('본인이 기안·결재에 참여했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 문서가 표시됩니다.'))
       + ' 행을 클릭하면 처리된 문서를 열람할 수 있습니다.')
     + kpiFilterSection('final', segments, {
         panelTitle: '최종 완료 문서',
@@ -994,7 +1012,7 @@ function finalTable(rows){
   if(!rows || rows.length === 0){
     return '<div class="empty"><div class="empty-icon">📭</div>최종 완료된 문서가 없습니다.</div>';
   }
-  var body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>거래처</th><th>상태</th><th>일자</th></tr></thead><tbody>';
+  var body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>기안자</th><th>거래처</th><th>상태</th><th>일자</th></tr></thead><tbody>';
   rows.forEach(function(r){
     var typeLabel = docTypeText(r.docType);
     var typeCls   = r.docType==='PRC' ? 'docno prc' : (r.docType==='INSP' ? 'docno ir' : 'docno');
@@ -1005,6 +1023,7 @@ function finalTable(rows){
       + '<td><span class="' + typeCls + '">' + escHtml(typeLabel) + '</span></td>'
       + '<td><span class="' + typeCls + '">' + escHtml(r.docNo) + '</span></td>'
       + '<td>' + escHtml(r.subject) + '</td>'
+      + '<td>' + drafterCell(r) + '</td>'
       + '<td>' + escHtml(r.vendorName) + '</td>'
       + '<td>' + statusBadge(r.status) + '</td>'
       + '<td>' + escHtml(r.issueDate || r.submitAt || '') + '</td>'
@@ -1036,8 +1055,10 @@ function renderCompleted(){
     { key:'closed', label:'검수 종결',      rows: docs.filter(function(x){ return inspKey(x) === 'closed'; }) },
   ];
 
+  var myDept = (u.dept) || '';
   var sub = '최종승인(구매)된 구매 품의의 최종 승인 확인 및 검수보고서 제출 메뉴입니다. '
-    + (isProc ? '구매팀 권한으로 전체 문서가 표시됩니다.' : '본인이 기안한 품의가 표시됩니다.')
+    + (isProc ? '구매팀 권한으로 전체 문서가 표시됩니다.'
+              : ('본인이 기안했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 품의가 표시되며, 같은 부서 건은 검수보고서도 제출할 수 있습니다.'))
     + ' 행을 클릭하면 회차별 검수 이력이 펼쳐집니다.';
 
   return pageHead('결재 완료', sub)
@@ -1055,15 +1076,18 @@ function completedTable(docs){
     return '<div class="empty"><div class="empty-icon">📭</div>표시할 결재 완료 문서가 없습니다.</div>';
   }
   var body = '<table><thead><tr>'
-    + '<th>품의 번호</th><th>PO 번호</th><th>제목</th><th>거래처</th><th>결재</th><th>검수 상태</th><th class="num">검수</th>'
+    + '<th>품의 번호</th><th>PO 번호</th><th>제목</th><th>기안자</th><th>거래처</th><th>결재</th><th>검수 상태</th><th class="num">검수</th>'
     + '</tr></thead><tbody>';
   docs.forEach(function(x){
     var open = !!STATE.openCompleted[x.prcToken];
     var st = poInspState(x);
     body += '<tr class="po-row' + (open ? ' open' : '') + '" data-toggle-insp="' + escAttr(x.prcToken) + '">'
       + '<td><span class="chev">▶</span><span class="docno">' + escHtml(x.reqNo) + '</span></td>'
-      + '<td><span class="docno prc">' + escHtml(x.poNo) + '</span></td>'
+      + '<td>' + (x.poNo
+          ? '<span class="docno prc po-link" data-po-view="' + escAttr(x.prcToken) + '" data-po-docno="' + escAttr(x.poNo) + '" title="결재 완료된 구매(PO) 문서 보기">' + escHtml(x.poNo) + '</span>'
+          : '<span class="docno prc">-</span>') + '</td>'
       + '<td>' + escHtml(x.subject) + '</td>'
+      + '<td>' + drafterCell(x) + '</td>'
       + '<td>' + escHtml(x.vendorName) + '</td>'
       + '<td>' + statusBadge('최종승인(PRC)') + '</td>'
       + '<td><span class="status ' + st.cls + '">' + escHtml(st.label) + '</span></td>'
@@ -1093,8 +1117,8 @@ function poInspState(x){
 
 // 아코디언 하위 — 회차별 검수보고서 목록
 function inspSubRows(x){
-  var actor = (STATE.user || {}).email || '';
-  var isDrafter = String(x.drafter || '').toLowerCase() === String(actor || '').toLowerCase();
+  // canSubmit: 본인 기안 또는 같은 부서(서버 판정). 검수보고서 제출/재상신 가능 여부
+  var canSubmit = !!x.canSubmit;
   var inner;
 
   if((x.insps || []).length === 0){
@@ -1106,7 +1130,7 @@ function inspSubRows(x){
       + '</tr></thead><tbody>';
     x.insps.forEach(function(s){
       var act = '';
-      if(s.status === '반려' && isDrafter){
+      if(s.status === '반려' && canSubmit){
         act = '<button class="btn-insp' + (INSP_FORM_ENABLED ? '' : ' pending-feature') + '"'
             + ' data-insp-form="' + escAttr(x.prcToken) + '" data-insp-resub="' + escAttr(s.token) + '">수정 재상신</button>';
       }
@@ -1127,8 +1151,8 @@ function inspSubRows(x){
   }
 
   var footer;
-  if(!isDrafter){
-    footer = '<div style="margin-top:9px;font-size:11px;color:var(--ink-mute);">검수보고서 제출은 품의 기안자(' + escHtml(x.drafterName || x.drafter) + ')만 가능합니다.</div>';
+  if(!canSubmit){
+    footer = '<div style="margin-top:9px;font-size:11px;color:var(--ink-mute);">검수보고서 제출은 품의 기안자(' + escHtml(x.drafterName || x.drafter) + ') 또는 같은 부서 담당자만 가능합니다.</div>';
   } else if(x.inspClosed){
     footer = '<div style="margin-top:9px;font-size:11px;color:#0e7d72;font-weight:700;">★ 최종 검수가 승인되어 종결된 품의입니다. (추가 제출 불가)</div>';
   } else if(x.inspLocked){
@@ -1140,7 +1164,7 @@ function inspSubRows(x){
       + ' data-insp-form="' + escAttr(x.prcToken) + '">+ 검수보고서 제출 (' + (nextSeq < 10 ? '0' + nextSeq : nextSeq) + '회차)</button>';
   }
 
-  return '<tr class="insp-sub"><td colspan="7"><div class="insp-sub-box">' + inner + footer + '</div></td></tr>';
+  return '<tr class="insp-sub"><td colspan="8"><div class="insp-sub-box">' + inner + footer + '</div></td></tr>';
 }
 
 // ─── 표 렌더 ─────────────────────────────
@@ -1159,7 +1183,7 @@ function tableOfDocs(rows, mode){
     html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>기안자</th><th>거래처</th><th class="num">금액</th><th>상태</th></tr></thead><tbody>';
     rows.forEach(function(r){ html += pendingRow(r); });
   } else {
-    html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>거래처</th><th class="num">금액</th><th>상태</th><th>제출일</th></tr></thead><tbody>';
+    html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>기안자</th><th>거래처</th><th class="num">금액</th><th>상태</th><th>제출일</th></tr></thead><tbody>';
     rows.forEach(function(r){ html += docRow(r); });
   }
   html += '</tbody></table>';
@@ -1229,11 +1253,24 @@ function docRow(r){
     + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(docTypeText(r.docType)) + '</span></td>'
     + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docNo) + '</span></td>'
     + '<td>' + escHtml(r.subject) + '</td>'
+    + '<td>' + drafterCell(r) + '</td>'
     + '<td>' + escHtml(r.vendorName) + '</td>'
     + '<td class="num">' + fmtAmt(r.amount) + '</td>'
     + '<td>' + statusBadge(r.status) + '</td>'
     + '<td>' + escHtml(r.submitAt) + '</td>'
     + '</tr>';
+}
+
+// 기안자 셀: 부서 공유 목록에서 내 문서/부서 동료 문서를 구분 (내 문서엔 '나' 배지)
+// drafterName(이름) 우선 — 일부 목록은 drafter가 이메일이므로 이름을 먼저 사용
+function drafterCell(r){
+  var name = escHtml(r.drafterName || r.drafter || '');
+  if(r.mine){
+    return name + ' <span style="display:inline-block;font-size:10px;font-weight:700;color:#fff;'
+      + 'background:var(--grad-brand,#3b5bdb);border-radius:8px;padding:1px 6px;margin-left:4px;'
+      + 'vertical-align:middle;">나</span>';
+  }
+  return name;
 }
 
 // ─── PRC 픽업 ─────────────────────────────

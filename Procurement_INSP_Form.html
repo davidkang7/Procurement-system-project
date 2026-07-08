@@ -321,8 +321,13 @@ function submit(){
   for(var k=0;k<lastFilled;k++){ if(!STATE.appr[k]){toast('결재자 '+(k+1)+' 칸이 비어 있습니다. 순서대로 채워 주세요.');return;} }
   if(STATE.photos.length===0&&!confirm('첨부된 검수 사진이 없습니다. 사진 없이 제출하시겠습니까?'))return;
 
-  // approvers[0]=기안자(본인, 자기결재), [1..]=결재자 — REQ/PRC 동일 구조
-  var approvers=[{label:'기안자', name:(CURRENT_USER&&CURRENT_USER.name)||FORM.drafterName, email:FORM.drafterEmail}];
+  // approvers[0]=기안자(제출 본인, 자기결재), [1..]=결재자 — REQ/PRC 동일 구조
+  // 검수보고서의 기안자 = 실제 제출자(로그인 사용자). 원본 REQ 기안자와 다를 수 있음(같은 부서 대리 제출 허용).
+  var approvers=[{
+    label:'기안자',
+    name:(CURRENT_USER&&CURRENT_USER.name)||FORM.drafterName,
+    email:(CURRENT_USER&&CURRENT_USER.email)||FORM.drafterEmail
+  }];
   sels.forEach(function(a,i){ approvers.push({label:'결재자 '+(i+1), name:a.name, email:a.email}); });
 
   // 결재자 중복 배정 경고 (REQ/PRC 동일 — 의도된 본인/위임 케이스는 허용, 실수만 잡음)

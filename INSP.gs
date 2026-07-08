@@ -243,6 +243,20 @@ function _getInspGroupsByPrc(ss) {
 }
 
 // ================================================================
+// [INSP 부서 공유] 같은 부서 판정 (검수보고서 제출 권한 확장)
+// - 결재자목록 부서 열 기준. Code.gs의 getDeptByEmailMap 재사용.
+// - 두 이메일이 모두 등록되어 있고 부서가 같으면 true
+// ================================================================
+function _isSameDeptEmail(ss, emailA, emailB) {
+  if (!emailA || !emailB) return false;
+  if (typeof getDeptByEmailMap !== 'function') return false;
+  var m  = getDeptByEmailMap(ss);
+  var da = m[String(emailA).trim().toLowerCase()];
+  var db = m[String(emailB).trim().toLowerCase()];
+  return !!da && !!db && da === db;
+}
+
+// ================================================================
 // [INSP Step 3] 작성 폼 데이터 조회
 // ================================================================
 
@@ -300,9 +314,10 @@ function getInspFormDataForClient(prcToken, resubToken) {
     var req = reqByToken[prc.parentToken] || null;
     var drafterEmail = req ? String(req.drafterEmail || '') : '';
 
-    // 권한: 원본 REQ 기안자 본인만
-    if (!drafterEmail || drafterEmail.toLowerCase() !== actor) {
-      return { ok: false, message: '검수보고서는 원본 품의 기안자 본인만 제출할 수 있습니다.' };
+    // 권한: 원본 REQ 기안자 본인 또는 같은 부서 담당자 (부서 공유)
+    if (!drafterEmail ||
+        (drafterEmail.toLowerCase() !== actor && !_isSameDeptEmail(ss, drafterEmail, actor))) {
+      return { ok: false, message: '검수보고서는 원본 품의 기안자 또는 같은 부서 담당자만 제출할 수 있습니다.' };
     }
 
     // 기존 검수보고서 그룹 (회차 채번 + 종결 차단 + 재상신 prefill)
@@ -438,8 +453,9 @@ function _submitInspCore(data) {
         var parentToken = String(prc.row[COL.PARENT_DOC_ID] || '');
         var reqInfo = _findRowByTokenInDoc(docSheet, parentToken);
         var drafterEmail = reqInfo ? String(reqInfo.row[COL.APPR_START + 2] || '') : '';
-        if (!drafterEmail || drafterEmail.toLowerCase() !== actor) {
-          return { ok: false, message: '원본 품의 기안자 본인만 제출할 수 있습니다.' };
+        if (!drafterEmail ||
+            (drafterEmail.toLowerCase() !== actor && !_isSameDeptEmail(ss, drafterEmail, actor))) {
+          return { ok: false, message: '원본 품의 기안자 또는 같은 부서 담당자만 제출할 수 있습니다.' };
         }
 
         // 기존 INSP 그룹 (회차 + 종결)
@@ -1071,8 +1087,11 @@ function _getInspMenusForClient(ss, actor, isProc) {
       }
 
       // 최종 완료(INSP): IS_FINAL=Y && 최종승인(INSP)
+      // 가시성: 구매팀 / 결재 참여자 / 본인 기안 / 같은 부서(부서 공유)
       if (isFinal && status === '최종승인(INSP)') {
-        if (isProc || amParticipant || meta.drafter.toLowerCase() === actor) {
+        if (isProc || amParticipant ||
+            meta.drafter.toLowerCase() === actor ||
+            _isSameDeptEmail(ss, meta.drafter, actor)) {
           out.inspFinals.push(meta);
         }
       }

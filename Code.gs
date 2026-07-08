@@ -2561,6 +2561,17 @@ function getHomeDataForClient() {
 
     var isProc = isProcurementUser(actor);
 
+    // 부서 단위 가시성: 결재자목록 부서 열 기준으로 같은 부서 기안 문서를 공유
+    // - deptMap: 이메일(소문자) → 부서
+    // - myDept 가 비어있으면(등록 안 됨/부서 미기재) 부서 공유 없음(=기존 본인 문서만)
+    var deptMap = getDeptByEmailMap(ss);
+    var myDept  = deptMap[String(actor || '').toLowerCase()] || '';
+    function sameDeptAsMe(email) {
+      if (!myDept) return false;
+      var d = deptMap[String(email || '').toLowerCase()];
+      return !!d && d === myDept;
+    }
+
     for (var i = 1; i < rows.length; i++) {
       var r = rows[i];
       var status   = String(r[COL.STATUS] || '');
@@ -2606,9 +2617,12 @@ function getHomeDataForClient() {
         prcFinals.push(meta);
       }
 
-      // 1) 내가 작성한 문서
+      // 1) 내가 작성한 문서 + 같은 부서 동료가 기안한 문서 (부서 단위 공유)
+      //    mine 플래그로 클라이언트에서 '내 문서 / 부서 문서' 구분 표시
       if (drafterEmail === actor) {
-        myDocs.push(meta);
+        myDocs.push(Object.assign({}, meta, { mine: true }));
+      } else if (sameDeptAsMe(drafterEmail)) {
+        myDocs.push(Object.assign({}, meta, { mine: false }));
       }
 
       // 2) 내가 결재 대기인 문서
@@ -2628,18 +2642,19 @@ function getHomeDataForClient() {
       }
 
       // [INSP Step 5] 최종 완료(통합) 후보 수집: 최종승인 REQ + 최종승인(PRC)
-      //  가시성: 구매팀 전체 / 일반은 본인 관련(기안자 또는 결재 참여자)
+      //  가시성: 구매팀 전체 / 일반은 본인 관련(기안자 또는 결재 참여자) + 같은 부서 기안 문서
       if ((docType === 'REQ' && status === '최종승인') ||
           (docType === 'PRC' && status === '최종승인(PRC)')) {
-        var amParticipant = (drafterEmail === actor);
+        var amMine = (drafterEmail === actor);
+        var amParticipant = amMine;
         if (!amParticipant) {
           for (var pa = 0; pa < apprCount; pa++) {
             if (String(r[COL.APPR_START + pa * COL.APPR_COLS + 2] || '').toLowerCase()
                 === String(actor || '').toLowerCase()) { amParticipant = true; break; }
           }
         }
-        if (isProc || amParticipant) {
-          reqPrcFinals.push(Object.assign({}, meta, { drafterEmail: drafterEmail }));
+        if (isProc || amParticipant || sameDeptAsMe(drafterEmail)) {
+          reqPrcFinals.push(Object.assign({}, meta, { drafterEmail: drafterEmail, mine: amMine }));
         }
       }
 
@@ -2677,8 +2692,9 @@ function getHomeDataForClient() {
         var pf  = prcFinals[c];
         var req = reqMap[pf.parentToken] || null;
         var reqDrafter = req ? req.drafter : '';
-        if (!isProc &&
-            String(reqDrafter).toLowerCase() !== String(actor || '').toLowerCase()) continue;
+        var completedMine = (String(reqDrafter).toLowerCase() === String(actor || '').toLowerCase());
+        // 가시성: 구매팀 전체 / 본인 기안 / 같은 부서 기안 (검수보고서 제출도 같은 부서 허용)
+        if (!isProc && !completedMine && !sameDeptAsMe(reqDrafter)) continue;
 
         var insps = inspGroups[pf.token] || [];
         // 종결(최종 승인 완료) / 잠금대기(최종 검수가 반려 외 상태로 진행중) 구분
@@ -2706,6 +2722,9 @@ function getHomeDataForClient() {
           insps:       insps,
           inspClosed:  inspClosed,
           inspLocked:  inspLockedPending,   // [INSP Step 4 보강] 최종 검수 진행중 추가제출 차단
+          mine:        completedMine,        // 내 기안 여부(부서 공유 목록에서 구분 표시용)
+          // 검수보고서 제출 권한: 본인 기안 또는 같은 부서(서버 INSP 게이트와 동일 기준)
+          canSubmit:   (completedMine || sameDeptAsMe(reqDrafter)),
         });
       }
       // 최신 PRC 순
@@ -2726,6 +2745,7 @@ function getHomeDataForClient() {
         docNo: m.docNo, token: m.token, subject: m.subject,
         vendorName: m.vendorName, drafterName: m.drafter, dept: m.dept,
         status: m.status, docType: m.docType, issueDate: m.issueDate, submitAt: m.submitAt,
+        mine: m.mine,
       });
     });
     (inspMenus.inspFinals || []).forEach(function(m) {
@@ -2734,6 +2754,7 @@ function getHomeDataForClient() {
         vendorName: m.vendorName, drafterName: m.drafterName, dept: '',
         status: m.status, docType: 'INSP', issueDate: m.receivedDate, submitAt: m.submitAt,
         poNo: m.poNo, reqNo: m.reqNo, seq: m.seq,
+        mine: (String(m.drafter || '').toLowerCase() === String(actor || '').toLowerCase()),
       });
     });
     finalDocs.sort(function(a, b) { return (b.submitAt || '').localeCompare(a.submitAt || ''); });
@@ -2744,6 +2765,7 @@ function getHomeDataForClient() {
         email: actor,
         isProcurement: isProc,
         isAdmin: isAdminUser(actor),
+        dept: myDept,
       },
       myDrafts:      myDrafts,
       myPending:     myPending,
@@ -3493,6 +3515,29 @@ function getApproverListForClient() {
   } catch(err) {
     return { ok: false, message: err.toString(), approvers: [] };
   }
+}
+
+/**
+ * 결재자목록 탭 기반 이메일→부서 맵 (부서 단위 문서 가시성 판정용)
+ * - key: 이메일(소문자), value: 부서 문자열(trim)
+ * - 부서/이메일 미기재 행은 스킵
+ * - ss 인자를 재사용해 추가 시트 오픈 없이 1회 read
+ */
+function getDeptByEmailMap(ss) {
+  var map = {};
+  try {
+    ss = ss || SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var sheet = ss.getSheetByName('결재자목록');
+    if (!sheet) return map;
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      var email = String(rows[i][3] || '').trim().toLowerCase();
+      var dept  = String(rows[i][1] || '').trim();
+      if (!email || !dept) continue;
+      map[email] = dept;
+    }
+  } catch(_) { /* 부서 맵 실패는 가시성 축소로만 이어짐(본인 문서는 항상 표시) */ }
+  return map;
 }
 
 // ================================================================
