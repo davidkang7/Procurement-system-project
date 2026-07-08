@@ -115,11 +115,11 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
     <div class="form-card-body">
       <div class="row c3">
         <div class="field"><label>업체명</label><input type="text" id="vendorName"></div>
-        <div class="field"><label>사업자번호</label><input type="text" id="vendorBiz"></div>
         <div class="field"><label>담당자</label><input type="text" id="vendorContact"></div>
+        <div class="field"><label>담당자 이메일</label><input type="email" id="vendorEmail"></div>
       </div>
       <div class="row c3">
-        <div class="field"><label>연락처</label><input type="text" id="vendorPhone"></div>
+        <div class="field"><label>연락처</label><input type="text" id="vendorPhone" oninput="formatPhone(this)"></div>
         <div class="field"><label>납기일</label><input type="date" id="deliveryDate"></div>
         <div class="field"><label>납품장소 / 배송지</label><input type="text" id="deliveryAddr"></div>
       </div>
@@ -210,7 +210,7 @@ function loadData(){
           }).join('');
         }
       }
-      ['docNo','issueDate','drafter','dept','subject','purpose','vendorName','vendorBiz','vendorContact','vendorPhone','deliveryDate','deliveryAddr','remarks'].forEach(function(id){
+      ['docNo','issueDate','drafter','dept','subject','purpose','vendorName','vendorEmail','vendorContact','vendorPhone','deliveryDate','deliveryAddr','remarks'].forEach(function(id){
         var el = document.getElementById(id);
         if(el && d[id] !== undefined) el.value = d[id] || '';
       });
@@ -271,6 +271,7 @@ function reNum(){
   });
 }
 function calcRow(el){
+  if(el && /^0[0-9]/.test(el.value)){ el.value = String(Number(el.value)); }
   var row = el.closest('tr');
   var qty = parseFloat(row.querySelector('.qty').value) || 0;
   var prc = parseFloat(row.querySelector('.price').value) || 0;
@@ -366,7 +367,7 @@ function collectData(){
     subject: document.getElementById('subject').value,
     purpose: document.getElementById('purpose').value,
     vendorName: document.getElementById('vendorName').value,
-    vendorBiz: document.getElementById('vendorBiz').value,
+    vendorEmail: document.getElementById('vendorEmail').value,
     vendorContact: document.getElementById('vendorContact').value,
     vendorPhone: document.getElementById('vendorPhone').value,
     deliveryDate: document.getElementById('deliveryDate').value,
@@ -476,6 +477,22 @@ function doDiscard(){
 function fmt(n){return Math.round(n).toLocaleString('ko-KR');}
 function esc(s){return (s || '').toString().replace(/"/g, '&quot;');}
 function escHtml(s){return (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');}
+function formatPhone(el){
+  var v = (el.value || '').replace(/[^0-9]/g,'');
+  var out;
+  if(v.indexOf('02') === 0){
+    if(v.length < 3)       out = v;
+    else if(v.length < 6)  out = v.replace(/(\d{2})(\d+)/, '$1-$2');
+    else if(v.length < 10) out = v.replace(/(\d{2})(\d{3})(\d+)/, '$1-$2-$3');
+    else                   out = v.replace(/(\d{2})(\d{4})(\d{4}).*/, '$1-$2-$3');
+  } else {
+    if(v.length < 4)       out = v;
+    else if(v.length < 8)  out = v.replace(/(\d{3})(\d+)/, '$1-$2');
+    else if(v.length < 11) out = v.replace(/(\d{3})(\d{3})(\d+)/, '$1-$2-$3');
+    else                   out = v.replace(/(\d{3})(\d{4})(\d{4}).*/, '$1-$2-$3');
+  }
+  el.value = out;
+}
 function showStatus(type, msg){
   var b = document.getElementById('status-msg');
   b.className = 'status-msg ' + type;

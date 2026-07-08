@@ -49,8 +49,9 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .total-bar .val{font-size:15px;font-weight:700;color:#111;}
 .checkbox-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;}
 .checkbox-row label{display:flex;align-items:center;gap:5px;font-size:11px;color:#111;cursor:pointer;}
-.attach-zone{border:1px dashed #bbb;border-radius:4px;padding:10px;text-align:center;cursor:pointer;background:#fafafa;}
+.attach-zone{border:1px dashed #bbb;border-radius:4px;padding:10px;text-align:center;cursor:pointer;background:#fafafa;transition:border-color .15s,background .15s;}
 .attach-zone:hover{border-color:#555;}
+.attach-zone.dragover{border-color:#1a6fc4;background:#eef5fc;}
 .attach-zone p{font-size:11px;color:#777;}
 .attach-item{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#666;padding:4px 0;border-bottom:1px solid #eee;}
 .attach-item.err{color:#c0392b;}
@@ -155,9 +156,9 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
         <div class="field"><label>담당자 이메일 <span class="req">*</span></label><input type="email" id="vendorEmail" placeholder="contact@vendor.com"></div>
       </div>
       <div class="row c3">
-        <div class="field"><label>연락처</label><input type="text" id="vendorPhone" placeholder="02-0000-0000"></div>
+        <div class="field"><label>연락처</label><input type="text" id="vendorPhone" placeholder="02-0000-0000" oninput="formatPhone(this)"></div>
         <div class="field"><label>납기일</label><input type="date" id="deliveryDate"></div>
-        <div class="field"><label>납품장소 / 배송지</label><input type="text" id="deliveryAddr" placeholder="서울시 ○○구 ○○로 000"></div>
+        <div class="field"><label>납품장소 / 배송지</label><input type="text" id="deliveryAddr" value="대전광역시 유성구 테크노2로 187(용산동) 미건테크노월드 2차 A동 204호"></div>
       </div>
     </div>
   </div>
@@ -223,9 +224,12 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
         <label><input type="checkbox"> 계약서</label>
         <label><input type="checkbox"> 기타</label>
       </div>
-      <div class="attach-zone" onclick="document.getElementById('file-in').click()">
+      <div class="attach-zone" id="attach-zone" onclick="document.getElementById('file-in').click()"
+           ondragover="event.preventDefault();this.classList.add('dragover');"
+           ondragleave="this.classList.remove('dragover');"
+           ondrop="event.preventDefault();this.classList.remove('dragover');handleFiles(event.dataTransfer.files);">
         <input type="file" id="file-in" multiple style="display:none" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.doc,.pptx,.hwp,.zip" onchange="handleFiles(this.files)">
-        <p>클릭하여 파일 첨부</p>
+        <p>클릭하거나 파일을 이곳에 끌어놓아 첨부</p>
         <p style="font-size:10px;color:#aaa;margin-top:3px">PDF, 이미지, Office, HWP, ZIP</p>
       </div>
       <div id="attach-list"></div>
@@ -347,7 +351,10 @@ function applySelfAsDrafter(){
 
 // ─── 품의번호 중복 검사 ─────────────────────────────
 function onDocNoInput(){
-  var v = document.getElementById('doc-no').value;
+  var inpEl = document.getElementById('doc-no');
+  var up = (inpEl.value || '').toUpperCase();
+  if(inpEl.value !== up){ inpEl.value = up; }
+  var v = up;
   document.getElementById('dno-disp').textContent = v;
   var msg = document.getElementById('dup-msg');
   var inp = document.getElementById('doc-no');
@@ -461,6 +468,22 @@ function updateHeaderCurrency(cur){
 function fmt(n){return Math.round(n).toLocaleString('ko-KR');}
 function esc(s){return (s || '').toString().replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
 function escHtml(s){return (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function formatPhone(el){
+  var v = (el.value || '').replace(/[^0-9]/g,'');
+  var out;
+  if(v.indexOf('02') === 0){                  // 서울 지역번호
+    if(v.length < 3)       out = v;
+    else if(v.length < 6)  out = v.replace(/(\d{2})(\d+)/, '$1-$2');
+    else if(v.length < 10) out = v.replace(/(\d{2})(\d{3})(\d+)/, '$1-$2-$3');
+    else                   out = v.replace(/(\d{2})(\d{4})(\d{4}).*/, '$1-$2-$3');
+  } else {                                     // 휴대폰 / 그 외 지역번호
+    if(v.length < 4)       out = v;
+    else if(v.length < 8)  out = v.replace(/(\d{3})(\d+)/, '$1-$2');
+    else if(v.length < 11) out = v.replace(/(\d{3})(\d{3})(\d+)/, '$1-$2-$3');
+    else                   out = v.replace(/(\d{3})(\d{4})(\d{4}).*/, '$1-$2-$3');
+  }
+  el.value = out;
+}
 
 function reNum(){
   var allRows = document.querySelectorAll('#items-body tr');
@@ -472,6 +495,7 @@ function reNum(){
   });
 }
 function calcRow(el){
+  if(el && /^0[0-9]/.test(el.value)){ el.value = String(Number(el.value)); }
   var row = el.closest('tr');
   var qty = parseFloat(row.querySelector('.qty').value) || 0;
   var price = parseFloat(row.querySelector('.price').value) || 0;
@@ -937,6 +961,8 @@ function resetAll(){
     if(el.id === 'doc-no'){
       el.value = 'PRQ-2026-001';
       document.getElementById('dno-disp').textContent = 'PRQ-2026-001';
+    } else if(el.id === 'deliveryAddr'){
+      el.value = '대전광역시 유성구 테크노2로 187(용산동) 미건테크노월드 2차 A동 204호';
     } else el.value = '';
   });
   document.querySelectorAll('.a4-wrap input[type=date]').forEach(function(el){el.value = '';});
