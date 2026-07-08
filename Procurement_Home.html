@@ -403,7 +403,9 @@ function renderUser(){
   document.getElementById('user-name').textContent = email.split('@')[0] || email;
   document.getElementById('user-email').textContent = email;
 
-  var pills = '<span class="role-pill user">사용자</span>';
+  // 결재자 목록 시트의 부서 열(getDeptByEmailMap) 기준 부서명을 표시. 미매칭 시 '사용자' 폴백
+  var deptLabel = (u.dept && String(u.dept).trim()) ? escHtml(u.dept) : '사용자';
+  var pills = '<span class="role-pill user">' + deptLabel + '</span>';
   if(u.isProcurement) pills += '<span class="role-pill proc">구매팀</span>';
   if(u.isAdmin) pills += '<span class="role-pill admin">관리자</span>';
   document.getElementById('user-roles').innerHTML = pills;
@@ -1273,9 +1275,9 @@ function docRow(r){
 function drafterCell(r){
   var name = escHtml(r.drafterName || r.drafter || '');
   if(r.mine){
-    return name + ' <span style="display:inline-block;font-size:10px;font-weight:700;color:#fff;'
-      + 'background:var(--grad-brand,#3b5bdb);border-radius:8px;padding:1px 6px;margin-left:4px;'
-      + 'vertical-align:middle;">나</span>';
+    return name + ' <span title="본인 기안" aria-label="본인 기안" style="color:#f5b301;'
+      + 'font-size:14px;line-height:1;margin-left:4px;vertical-align:middle;'
+      + 'text-shadow:0 0 1px rgba(0,0,0,.15);">★</span>';
   }
   return name;
 }

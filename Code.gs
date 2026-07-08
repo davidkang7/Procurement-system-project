@@ -2399,7 +2399,11 @@ function parseItemsSummary(s) {
   var lines = String(s || '').split('\n');
   var items = [];
   lines.forEach(function(line) {
-    // 신규 포맷: "1. 품목 규격 / 100개 / 1,000 KRW"
+    // 신규 포맷(품목명·규격 '/' 구분): "1. 품목 명 / 규격 / 100개 / 1,000 KRW"
+    // qty(\d+개)를 우측 앵커로 삼아 품목명에 공백/슬래시가 있어도 규격과 정확히 분리
+    var mNew = line.match(/^\d+\.\s*(.+?)\s*\/\s*(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+)\s*([A-Z]{3})$/);
+    if (mNew) { items.push({ name: mNew[1].trim(), spec: mNew[2].trim(), qty: mNew[3], price: mNew[4].replace(/,/g,''), currency: mNew[5] }); return; }
+    // 구 포맷(품목명·규격 공백 구분): "1. 품목 규격 / 100개 / 1,000 KRW"
     var m = line.match(/^\d+\.\s*(.+?)\s+(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+)\s*([A-Z]{3})$/);
     if (m) { items.push({ name: m[1], spec: m[2], qty: m[3], price: m[4].replace(/,/g,''), currency: m[5] }); return; }
     // 하위호환 포맷: "... / 1,000원" → KRW (마이그레이션 없이 기존 행 호환)
@@ -3639,7 +3643,8 @@ function getDeptByEmailMap(ss) {
 function buildItemsSummary(items) {
   return (items || []).map(function(it, i) {
     var cur = String(it.currency || 'KRW');
-    return (i + 1) + '. ' + (it.name || '') + ' ' + (it.spec || '') +
+    // 품목명·규격을 ' / '로 구분 — 품목명에 공백이 있어도 규격 셀로 넘어가지 않도록 명시적 구분자 사용
+    return (i + 1) + '. ' + (it.name || '') + ' / ' + (it.spec || '') +
            ' / ' + (it.qty || 0) + '개 / ' + Number(it.price || 0).toLocaleString() + ' ' + cur;
   }).join('\n');
 }

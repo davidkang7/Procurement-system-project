@@ -64,8 +64,9 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .total-bar .lbl{font-size:11px;color:#666;}
 .total-bar .val{font-size:15px;font-weight:700;color:#111;}
 
-.attach-zone{border:1px dashed #bbb;border-radius:4px;padding:10px;text-align:center;cursor:pointer;background:#fafafa;}
+.attach-zone{border:1px dashed #bbb;border-radius:4px;padding:10px;text-align:center;cursor:pointer;background:#fafafa;transition:border-color .15s,background .15s;}
 .attach-zone:hover{border-color:#555;}
+.attach-zone.dragover{border-color:#6a3eb5;background:#f2ecfb;}
 .attach-zone p{font-size:11px;color:#777;}
 .attach-item{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#666;padding:4px 0;border-bottom:1px solid #eee;}
 .attach-item.err{color:#c0392b;}
@@ -318,9 +319,12 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
       <div id="parent-attach-list"></div>
 
       <div style="font-size:11px;color:#444;margin:10px 0 4px;font-weight:600;">+ 구매팀이 추가하는 첨부</div>
-      <div class="attach-zone" onclick="document.getElementById('file-in').click()">
+      <div class="attach-zone" onclick="document.getElementById('file-in').click()"
+           ondragover="event.preventDefault();this.classList.add('dragover');"
+           ondragleave="this.classList.remove('dragover');"
+           ondrop="event.preventDefault();this.classList.remove('dragover');handleFiles(event.dataTransfer.files);">
         <input type="file" id="file-in" multiple style="display:none" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.doc,.pptx,.hwp,.zip" onchange="handleFiles(this.files)">
-        <p>클릭하여 파일 첨부 (견적서, 발주서, 입금증 등)</p>
+        <p>클릭하거나 파일을 이곳에 끌어놓아 첨부 (견적서, 발주서, 입금증 등)</p>
         <p style="font-size:10px;color:#aaa;margin-top:3px">PDF, 이미지, Office, HWP, ZIP / 단일 25MB · 합산 30MB</p>
       </div>
       <div id="attach-list"></div>
@@ -643,8 +647,15 @@ function getFieldChanges(){
 // ─── PO No. 중복 검사 ─────────────────────────────
 function checkDocNo(){
   clearTimeout(docNoCheckTimer);
-  var docNo = document.getElementById('doc-no').value.trim();
   var input = document.getElementById('doc-no');
+  // PO No.는 대문자만 사용 — 입력 즉시 대문자로 변환 (커서 위치 유지)
+  var up = (input.value || '').toUpperCase();
+  if(input.value !== up){
+    var pos = input.selectionStart;
+    input.value = up;
+    try { input.setSelectionRange(pos, pos); } catch(e){}
+  }
+  var docNo = input.value.trim();
   if(!docNo){ setDupMsg('',''); input.classList.remove('dup-err','dup-ok'); docNoDuplicated = false; return; }
   setDupMsg('loading','검사 중...');
   docNoCheckTimer = setTimeout(function(){

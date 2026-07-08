@@ -529,7 +529,7 @@ function addRow(defaultCur){
   tr.id = id;
   tr.innerHTML = '<td class="no-cell" style="text-align:center;font-size:11px;color:#666;"></td>'
     +'<td><input type="text" placeholder="품목명" class="item-name" style="min-width:90px"></td>'
-    +'<td><input type="text" placeholder="EA" class="item-spec" style="text-align:center"></td>'
+    +'<td><input type="text" placeholder="단위/규격" class="item-spec" style="text-align:center"></td>'
     +'<td><input type="number" min="0" value="1" class="qty" oninput="calcRow(this)" style="text-align:right;min-width:36px"></td>'
     +'<td style="padding:2px 2px;">'+buildCurrencySelect(cur)+'</td>'
     +'<td><input type="number" min="0" value="0" class="price" oninput="calcRow(this)" style="text-align:right;min-width:70px"></td>'

@@ -247,7 +247,7 @@ function addRow(item){
   tr.id = id;
   tr.innerHTML = '<td class="no-cell" style="text-align:center;font-size:11px;color:#666;"></td>'+
     '<td><input type="text" class="item-name" placeholder="품목명" style="min-width:100px" value="'+esc(item&&item.name||'')+'"></td>'+
-    '<td><input type="text" class="item-spec" placeholder="EA" style="text-align:center" value="'+esc(item&&item.spec||'')+'"></td>'+
+    '<td><input type="text" class="item-spec" placeholder="단위/규격" style="text-align:center" value="'+esc(item&&item.spec||'')+'"></td>'+
     '<td><input type="number" min="0" value="'+(item&&item.qty||1)+'" class="qty" oninput="calcRow(this)" style="text-align:right;min-width:40px"></td>'+
     '<td><input type="number" min="0" value="'+(item&&item.price||0)+'" class="price" oninput="calcRow(this)" style="text-align:right;min-width:70px"></td>'+
     '<td class="row-amt amt" style="background:#f7f7f7;text-align:right;padding-right:8px">0</td>'+
