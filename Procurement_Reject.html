@@ -59,26 +59,38 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .btn-discard{background:#fff;color:#c0392b;border:1px solid #c0392b;}
 .btn-discard:hover{background:#fdecea;}
 .btn-discard:disabled{background:#f5f5f5;color:#aaa;border-color:#ccc;cursor:not-allowed;}
+/* 로드/유효성 오류 전용 배너. 재상신·폐기의 진행/완료/실패는 모두 pm-* 모달이 담당한다. */
 .status-msg{display:none;text-align:center;padding:12px;border-radius:6px;margin-top:12px;font-size:13px;font-weight:600;}
-.status-msg.success{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;}
 .status-msg.error{background:#fdecea;color:#c62828;border:1px solid #ef9a9a;}
-.status-msg.loading{background:#fff8e1;color:#f57f17;border:1px solid #ffe082;}
-.progress-wrap{display:none;margin-top:10px;}
-.progress-bar{height:6px;background:#eee;border-radius:3px;overflow:hidden;}
-.progress-fill{height:100%;background:#1a6fc4;width:0%;transition:width 0.3s;}
-.progress-text{font-size:11px;color:#666;text-align:center;margin-top:4px;}
-.confirm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;}
-.confirm-overlay.show{display:flex;}
-.confirm-box{background:#fff;border-radius:10px;padding:24px 28px;max-width:340px;width:90%;text-align:center;}
-.confirm-box .ctitle{font-size:15px;font-weight:700;color:#111;margin-bottom:8px;}
-.confirm-box .csub{font-size:13px;color:#666;margin-bottom:18px;line-height:1.6;}
-.confirm-btns{display:flex;gap:10px;}
-.cbtn{flex:1;padding:9px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;}
-.cbtn-cancel{background:#f0f0f0;color:#444;border:1px solid #ccc;}
-.cbtn-ok{background:#c0392b;color:#fff;border:1px solid #c0392b;}
+/* 홈으로 버튼 (우측 상단 고정) — Form과 동일 */
+.home-btn{position:fixed;top:16px;right:20px;z-index:5000;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;border:1px solid #83161A;background:#fff;color:#83161A;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(131,22,26,.18);transition:background .15s,color .15s;}
+.home-btn:hover{background:#83161A;color:#fff;}
+/* 재상신/폐기 처리 모달 (InLC 와인레드 스피너 + 회색 백그라운드) */
+.pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
+.pm-backdrop.show{display:flex;}
+.pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:380px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;}
+.pm-spinner{width:46px;height:46px;border:4px solid #eee;border-top-color:#83161A;border-radius:50%;animation:pm-spin .8s linear infinite;margin:0 auto 18px;}
+@keyframes pm-spin{to{transform:rotate(360deg);}}
+.pm-check{width:54px;height:54px;border-radius:50%;background:#27ae60;color:#fff;font-size:30px;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+.pm-x{width:54px;height:54px;border-radius:50%;background:#d64541;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+.pm-q{width:54px;height:54px;border-radius:50%;background:#83161A;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+@keyframes pm-pop{0%{transform:scale(0);}50%{transform:scale(1.15);}100%{transform:scale(1);}}
+.pm-msg{font-size:15px;font-weight:700;color:#111;margin-bottom:6px;}
+.pm-sub{font-size:12px;color:#888;line-height:1.5;}
+.pm-actions{margin-top:22px;display:flex;gap:10px;justify-content:center;}
+.pm-confirm{padding:9px 28px;border-radius:8px;border:none;background:#83161A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-confirm:hover{background:#6B1115;}
+.pm-cancel{padding:9px 28px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#555;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-cancel:hover{background:#f3f3f3;}
+@media print{
+  body{background:#fff;padding:0;}
+  .action-bar,.status-msg,.attach-zone,.add-row-btn,.del-btn,.home-btn,.pm-backdrop{display:none!important;}
+  @page{size:A4 portrait;margin:10mm;}
+}
 </style>
 </head>
 <body>
+<button class="home-btn" id="home-btn" onclick="goHome()">🏠 홈으로</button>
 <div class="wrap">
   <div class="sys-label">구매품의 시스템</div>
   <div class="reject-banner">
@@ -160,20 +172,14 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
     <button class="btn btn-discard" id="discard-btn" onclick="showDiscardConfirm()">기안 폐기</button>
     <button class="btn btn-resubmit" id="resubmit-btn" onclick="doResubmit()">수정 후 재상신</button>
   </div>
-  <div class="progress-wrap" id="progress-wrap">
-    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-    <div class="progress-text" id="progress-text">준비 중...</div>
-  </div>
   <div class="status-msg" id="status-msg"></div>
 </div>
-<div class="confirm-overlay" id="confirm-overlay">
-  <div class="confirm-box">
-    <div class="ctitle">기안을 폐기하시겠습니까?</div>
-    <div class="csub">폐기 후에는 복구가 불가합니다.<br>Drive의 품의서 폴더 전체도 휴지통으로 이동됩니다.</div>
-    <div class="confirm-btns">
-      <button class="cbtn cbtn-cancel" onclick="hideConfirm()">취소</button>
-      <button class="cbtn cbtn-ok" onclick="doDiscard()">폐기 확인</button>
-    </div>
+<div class="pm-backdrop" id="pm-backdrop">
+  <div class="pm-card">
+    <div id="pm-icon"><div class="pm-spinner"></div></div>
+    <div class="pm-msg" id="pm-msg">처리 중입니다.</div>
+    <div class="pm-sub" id="pm-sub">잠시만 기다려 주세요.</div>
+    <div class="pm-actions" id="pm-actions"></div>
   </div>
 </div>
 <script>
@@ -249,7 +255,7 @@ function addRow(item){
     '<td><input type="text" class="item-name" placeholder="품목명" style="min-width:100px" value="'+esc(item&&item.name||'')+'"></td>'+
     '<td><input type="text" class="item-spec" placeholder="단위/규격" style="text-align:center" value="'+esc(item&&item.spec||'')+'"></td>'+
     '<td><input type="number" min="0" value="'+(item&&item.qty||1)+'" class="qty" oninput="calcRow(this)" style="text-align:right;min-width:40px"></td>'+
-    '<td><input type="number" min="0" value="'+(item&&item.price||0)+'" class="price" oninput="calcRow(this)" style="text-align:right;min-width:70px"></td>'+
+    '<td><input type="text" inputmode="decimal" value="'+fmtPrice(item&&item.price||0)+'" class="price" oninput="formatPriceInput(this);calcRow(this)" style="text-align:right;min-width:70px"></td>'+
     '<td class="row-amt amt" style="background:#f7f7f7;text-align:right;padding-right:8px">0</td>'+
     '<td style="text-align:center;background:#f7f7f7"><button class="del-btn item-del" onclick="delRow(\''+id+'\')">×</button></td>';
   document.getElementById('items-body').appendChild(tr);
@@ -271,10 +277,11 @@ function reNum(){
   });
 }
 function calcRow(el){
-  if(el && /^0[0-9]/.test(el.value)){ el.value = String(Number(el.value)); }
+  // 수량의 선행 0 제거 (단가는 formatPriceInput이 이미 처리)
+  if(el && el.classList.contains('qty') && /^0[0-9]/.test(el.value)){ el.value = String(Number(el.value)); }
   var row = el.closest('tr');
-  var qty = parseFloat(row.querySelector('.qty').value) || 0;
-  var prc = parseFloat(row.querySelector('.price').value) || 0;
+  var qty = num(row.querySelector('.qty').value);
+  var prc = num(row.querySelector('.price').value);
   row.querySelector('.row-amt').textContent = fmt(qty * prc);
   calcTotal();
 }
@@ -338,13 +345,41 @@ function readFileAsBase64(file){
     reader.readAsDataURL(file);
   });
 }
-function showProgress(pct, txt){
-  document.getElementById('progress-wrap').style.display = 'block';
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('progress-text').textContent = txt;
+// ─── 홈 이동 ─────────────────────────────
+var WEBAPP_URL = '<?= webappUrl ?>';
+function goHome(){
+  if(WEBAPP_URL){ window.top.location.href = WEBAPP_URL + '?action=home'; }
+  else { window.history.back(); }
 }
-function hideProgress(){
-  document.getElementById('progress-wrap').style.display = 'none';
+
+// ─── 처리 모달 (Form/Viewer와 동일한 pm-* 패턴) ─────────────────────────────
+function showProcessingModal(msg, sub){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-spinner"></div>';
+  document.getElementById('pm-msg').textContent = msg || '처리 중입니다.';
+  document.getElementById('pm-sub').textContent = sub || '잠시만 기다려 주세요.';
+  document.getElementById('pm-actions').innerHTML = '';   // 처리 중에는 닫을 수 없음
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+// 파일 변환/업로드 진행 상황은 별도 진행바 대신 모달 부제로 표시
+function showProgressSub(text){
+  document.getElementById('pm-sub').textContent = text;
+}
+function showCompleteModal(msg, detail){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-check">✓</div>';
+  document.getElementById('pm-msg').textContent = msg;
+  document.getElementById('pm-sub').textContent = detail || '';
+  document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="goHome()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function showErrorModal(msg, detail){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-x">!</div>';
+  document.getElementById('pm-msg').textContent = msg;
+  document.getElementById('pm-sub').textContent = detail || '잠시 후 다시 시도해 주세요.';
+  document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="closeModal()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+function closeModal(){
+  document.getElementById('pm-backdrop').classList.remove('show');
 }
 
 function collectData(){
@@ -355,8 +390,8 @@ function collectData(){
     items.push({
       name: name,
       spec: tr.querySelector('.item-spec') ? tr.querySelector('.item-spec').value : '',
-      qty: tr.querySelector('.qty') ? tr.querySelector('.qty').value : 0,
-      price: tr.querySelector('.price') ? tr.querySelector('.price').value : 0
+      qty: tr.querySelector('.qty') ? num(tr.querySelector('.qty').value) : 0,
+      price: tr.querySelector('.price') ? num(tr.querySelector('.price').value) : 0
     });
   });
   return {
@@ -394,27 +429,32 @@ function doResubmit(){
   btnD.disabled = true;
 
   var validFiles = attachedFiles.filter(function(f){return f;});
-  showStatus('loading','파일 준비 중...');
-  if(validFiles.length > 0) showProgress(0, '파일 0 / ' + validFiles.length + ' 변환 중...');
+
+  // 파일 변환(FileReader) 전에 모달을 띄워, 변환 구간부터 업로드까지 전부 백드롭이 덮게 한다.
+  showProcessingModal('재상신 처리 중입니다.', validFiles.length > 0
+    ? '파일 0 / ' + validFiles.length + ' 변환 중...'
+    : '잠시만 기다려 주세요.');
 
   var readPromises = [];
   for(var i = 0; i < validFiles.length; i++){
     (function(idx, file){
       readPromises.push(
         readFileAsBase64(file).then(function(res){
-          showProgress(
-            Math.round((idx+1) / validFiles.length * 60),
-            '파일 ' + (idx+1) + ' / ' + validFiles.length + ' 변환 완료'
-          );
+          showProgressSub('파일 ' + (idx+1) + ' / ' + validFiles.length + ' 변환 완료');
           return res;
         })
       );
     })(i, validFiles[i]);
   }
 
+  function failBack(msg, detail){
+    showErrorModal(msg, detail);
+    btnR.disabled = false;
+    btnD.disabled = false;
+  }
+
   Promise.all(readPromises).then(function(fileData){
-    showProgress(70, '서버로 업로드 중...');
-    showStatus('loading','재상신 처리 중입니다...');
+    showProgressSub('서버로 업로드 중입니다...');
 
     var data = collectData();
     data.attachments = fileData;
@@ -422,59 +462,95 @@ function doResubmit(){
 
     google.script.run
       .withSuccessHandler(function(res){
-        hideProgress();
         if(res && res.ok){
-          showStatus('success','재상신 완료. ' + (res.uploaded || 0) + '개 파일이 업로드되었고 기안자에게 이메일이 발송되었습니다.');
+          // 성공 시 버튼은 계속 비활성 — 다음 행동은 모달이 갖는다(확인 → 홈).
+          showCompleteModal('재상신이 완료되었습니다.',
+            (res.uploaded || 0) + '개 파일 업로드 · 결재자에게 결재 요청 메일이 발송되었습니다.');
         } else {
-          showStatus('error','오류: ' + (res && res.message || '알 수 없는 오류'));
-          btnR.disabled = false;
-          btnD.disabled = false;
+          failBack('재상신에 실패했습니다.', (res && res.message) || '알 수 없는 오류');
         }
       })
       .withFailureHandler(function(err){
-        hideProgress();
-        showStatus('error','네트워크 오류: ' + (err && err.message ? err.message : err));
-        btnR.disabled = false;
-        btnD.disabled = false;
+        failBack('재상신에 실패했습니다.', '네트워크 오류: ' + (err && err.message ? err.message : err));
       })
       .resubmitRequisitionForClient(payload);
   }).catch(function(err){
-    hideProgress();
-    showStatus('error','파일 처리 오류: ' + err.message);
-    btnR.disabled = false;
-    btnD.disabled = false;
+    failBack('재상신에 실패했습니다.', '파일 처리 오류: ' + err.message);
   });
 }
 
-function showDiscardConfirm(){document.getElementById('confirm-overlay').classList.add('show');}
-function hideConfirm(){document.getElementById('confirm-overlay').classList.remove('show');}
+// 폐기 확인도 같은 pm-backdrop 안에서 처리 → 확인 → 완료로 이어진다.
+function showDiscardConfirm(){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-q">?</div>';
+  document.getElementById('pm-msg').textContent = '기안을 폐기하시겠습니까?';
+  document.getElementById('pm-sub').innerHTML = '폐기 후에는 복구가 불가합니다.<br>Drive의 품의서 폴더 전체도 휴지통으로 이동됩니다.';
+  document.getElementById('pm-actions').innerHTML =
+    '<button class="pm-cancel" onclick="closeModal()">취소</button>' +
+    '<button class="pm-confirm" onclick="doDiscard()">폐기 확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
 function doDiscard(){
-  hideConfirm();
   if(typeof google === 'undefined'){
-    showStatus('error','Google Apps Script 환경에서만 실행 가능합니다.');
+    showErrorModal('폐기에 실패했습니다.', 'Google Apps Script 환경에서만 실행 가능합니다.');
     return;
   }
-  document.getElementById('resubmit-btn').disabled = true;
-  document.getElementById('discard-btn').disabled = true;
-  showStatus('loading','폐기 처리 중입니다...');
+  var btnR = document.getElementById('resubmit-btn');
+  var btnD = document.getElementById('discard-btn');
+  btnR.disabled = true;
+  btnD.disabled = true;
+  showProcessingModal('폐기 처리 중입니다.', '잠시만 기다려 주세요.');
 
   google.script.run
     .withSuccessHandler(function(res){
       if(res && res.ok){
-        showStatus('success','기안이 폐기 처리되었습니다. (Drive 폴더도 휴지통으로 이동)');
+        showCompleteModal('기안이 폐기되었습니다.',
+          'Drive 폴더도 휴지통으로 이동되었습니다. 잠시 후 홈으로 이동합니다.');
+        setTimeout(goHome, 1800);   // 문서가 사라졌으므로 자동으로 홈 복귀
       } else {
-        showStatus('error','오류: ' + (res && res.message || '알 수 없는 오류'));
-        document.getElementById('discard-btn').disabled = false;
+        showErrorModal('폐기에 실패했습니다.', (res && res.message) || '알 수 없는 오류');
+        btnR.disabled = false;
+        btnD.disabled = false;
       }
     })
     .withFailureHandler(function(err){
-      showStatus('error','네트워크 오류: ' + (err && err.message ? err.message : err));
-      document.getElementById('discard-btn').disabled = false;
+      showErrorModal('폐기에 실패했습니다.', '네트워크 오류: ' + (err && err.message ? err.message : err));
+      btnR.disabled = false;
+      btnD.disabled = false;
     })
     .discardRequisitionForClient({token: TOKEN, reason: '기안자 폐기 (반려 후)'});
 }
 
 function fmt(n){return Math.round(n).toLocaleString('ko-KR');}
+
+// 단가 입력란은 콤마 표시(1,430,000)를 쓰므로, 값을 읽는 모든 곳에서 콤마를 떼고 숫자화해야 한다.
+// parseFloat('1,430,000')은 콤마에서 멈춰 1이 되고, 서버의 Number()는 NaN → 0이 된다.
+function num(v){ return parseFloat(String(v == null ? '' : v).replace(/,/g, '')) || 0; }
+
+// 서버에서 받은 단가를 입력란 초기값으로 넣을 때 사용 (소수점 유지, fmt는 반올림해버림)
+function fmtPrice(v){
+  var parts = String(num(v)).split('.');
+  var out = Number(parts[0]).toLocaleString('ko-KR');
+  if(parts.length > 1) out += '.' + parts[1].slice(0, 2);
+  return out;
+}
+
+// 단가 입력 시 천 단위 콤마를 실시간으로 넣는다. 커서 앞의 '숫자 개수'를 기준으로 위치를 복원해
+// 숫자 중간을 수정할 때 커서가 끝으로 튀지 않게 한다. 외화 단가를 위해 소수점 2자리까지 허용.
+function formatPriceInput(el){
+  var digitsBefore = el.value.slice(0, el.selectionStart).replace(/[^0-9]/g, '').length;
+  var parts = el.value.replace(/[^0-9.]/g, '').split('.');
+  var ip = parts[0].replace(/^0+(?=\d)/, '');
+  var out = ip ? Number(ip).toLocaleString('ko-KR') : (parts.length > 1 ? '0' : '');
+  if(parts.length > 1) out += '.' + parts.slice(1).join('').slice(0, 2);
+  el.value = out;
+  var pos = 0, seen = 0;
+  while(pos < out.length && seen < digitsBefore){
+    if(/[0-9]/.test(out.charAt(pos))) seen++;
+    pos++;
+  }
+  try { el.setSelectionRange(pos, pos); } catch(_) {}
+}
+
 function esc(s){return (s || '').toString().replace(/"/g, '&quot;');}
 function escHtml(s){return (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');}
 function formatPhone(el){

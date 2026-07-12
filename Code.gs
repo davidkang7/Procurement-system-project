@@ -44,6 +44,7 @@ var CONFIG = {
   ],
   AUDIT_SHEET_NAME: '시스템로그',
   INSP_SHEET_NAME:  '검수보고서목록',   // [INSP Step 1] 검수보고서 시트 탭명
+  VENDOR_SHEET_NAME: '업체목록',        // 공급업체 마스터 (REQ 폼 조회 자동입력용)
 };
 
 // ================================================================
@@ -125,8 +126,9 @@ function doGet(e) {
   // 2) 반려 후 수정/폐기 화면
   if (action === 'reject_view') {
     return _renderTemplate('Procurement_Reject', {
-      token: e.parameter.token || '',
-      docNo: e.parameter.docNo || '',
+      token:     e.parameter.token || '',
+      docNo:     e.parameter.docNo || '',
+      webappUrl: CONFIG.WEBAPP_URL,
     }, '반려 처리');
   }
 
@@ -2681,7 +2683,9 @@ function getHomeDataForClient() {
 
       // [INSP Step 5] 최종 완료(통합) 후보 수집: 최종승인 REQ + 최종승인(PRC)
       //  가시성: 구매팀 전체 / 일반은 본인 관련(기안자 또는 결재 참여자) + 같은 부서 기안 문서
-      if ((docType === 'REQ' && status === '최종승인') ||
+      //  REQ는 PRC가 생성되면 status가 'PRC생성됨'으로 바뀌므로(결재 자체는 최종승인 완료)
+      //  두 상태를 모두 최종 완료로 취급해야 구매까지 진행된 품의가 목록에서 사라지지 않음
+      if ((docType === 'REQ' && (status === '최종승인' || status === 'PRC생성됨')) ||
           (docType === 'PRC' && status === '최종승인(PRC)')) {
         var amMine = (drafterEmail === actor);
         var amParticipant = amMine;
@@ -2779,11 +2783,15 @@ function getHomeDataForClient() {
     // 최종 완료 통합: REQ/PRC 최종 + INSP 최종(IS_FINAL) — 단일 리스트, docType으로 구분
     var finalDocs = [];
     reqPrcFinals.forEach(function(m) {
+      // 'PRC생성됨' REQ는 결재상 최종승인 완료 건이므로 목록에서는 '최종승인'으로 표기하고
+      // 후속 구매 진행 여부는 prcCreated 플래그로 구분
+      var prcCreated = (m.docType === 'REQ' && m.status === 'PRC생성됨');
       finalDocs.push({
         docNo: m.docNo, token: m.token, subject: m.subject,
         vendorName: m.vendorName, drafterName: m.drafter, dept: m.dept,
-        status: m.status, docType: m.docType, issueDate: m.issueDate, submitAt: m.submitAt,
-        mine: m.mine,
+        status: prcCreated ? '최종승인' : m.status,
+        docType: m.docType, issueDate: m.issueDate, submitAt: m.submitAt,
+        mine: m.mine, prcCreated: prcCreated,
       });
     });
     (inspMenus.inspFinals || []).forEach(function(m) {
@@ -2943,6 +2951,8 @@ function getRequisitionForViewer(token, urlIdxHint) {
         deliveryAddr:  String(r[COL.DELIVERY_ADDR] || ''),
         remarks:       String(r[COL.REMARKS] || ''),
         status:        String(r[COL.STATUS] || ''),
+        // 반려 상태에서 기안자 본인에게만 재상신/폐기 진입 버튼을 노출하기 위한 플래그
+        isDrafter:     !!(approvers[0] && String(approvers[0].email || '').toLowerCase() === myEmail),
         rejectHistory: String(r[COL.REJECT_LOG] || ''),
         moveStatus:    String(r[COL.MOVE_STATUS] || ''),
         docType:       String(r[COL.DOC_TYPE] || 'REQ'),
@@ -3614,6 +3624,56 @@ function getApproverListForClient() {
 }
 
 /**
+ * 공급업체 마스터 조회 (REQ 폼 '조회' 모달용)
+ * - 폼 로드 시 1회만 호출해 전량 내려주고, 검색/필터는 클라이언트 메모리에서 처리
+ * - 업체목록 열: A:업체명 B:담당자 C:담당자이메일 D:연락처 E:사업자번호 F:활성여부
+ * - 시트가 없거나 읽기에 실패해도 throw 하지 않는다 (조회 실패가 폼 자체를 막으면 안 됨)
+ */
+function getVendorListForClient() {
+  try {
+    var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var sheet = ss.getSheetByName(CONFIG.VENDOR_SHEET_NAME);
+    if (!sheet) return { ok: true, vendors: [] };
+    var rows = sheet.getDataRange().getValues();
+    var vendors = [];
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r[0]) continue;
+      vendors.push({
+        name:    String(r[0] || '').trim(),
+        contact: String(r[1] || '').trim(),
+        email:   String(r[2] || '').trim(),
+        phone:   String(r[3] || '').trim(),
+        bizNo:   String(r[4] || '').trim(),
+        active:  r[5] !== '비활성',
+      });
+    }
+    return { ok: true, vendors: vendors };
+  } catch(err) {
+    return { ok: false, message: err.toString(), vendors: [] };
+  }
+}
+
+/**
+ * 업체목록 탭이 없으면 헤더만 만들어 둔다 (데이터는 사용자가 직접 입력)
+ * - GAS 편집기에서 1회 수동 실행용
+ */
+function ensureVendorSheet() {
+  var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var exists = !!ss.getSheetByName(CONFIG.VENDOR_SHEET_NAME);
+  var sheet = getOrCreateSheet(ss, CONFIG.VENDOR_SHEET_NAME);
+  if (exists) return '이미 존재: ' + CONFIG.VENDOR_SHEET_NAME;
+
+  var headers = ['업체명', '담당자', '담당자이메일', '연락처', '사업자번호', '활성여부'];
+  sheet.appendRow(headers);
+  sheet.getRange(1, 1, 1, headers.length)
+       .setFontWeight('bold')
+       .setBackground('#f0f0f0');
+  sheet.setFrozenRows(1);
+  return '생성 완료: ' + CONFIG.VENDOR_SHEET_NAME;
+}
+
+/**
  * 결재자목록 탭 기반 이메일→부서 맵 (부서 단위 문서 가시성 판정용)
  * - key: 이메일(소문자), value: 부서 문자열(trim)
  * - 부서/이메일 미기재 행은 스킵
@@ -3640,12 +3700,18 @@ function getDeptByEmailMap(ss) {
 // 18. 유틸 (계산)
 // ================================================================
 
+// 폼의 단가 입력란은 콤마 표시(1,430,000)를 쓴다. 클라이언트가 콤마를 떼고 보내지만,
+// Number('1,430,000')은 NaN → 0이 되어 금액을 조용히 0으로 만들므로 서버에서도 한 번 더 막는다.
+function toNum(v) {
+  return Number(String(v == null ? '' : v).replace(/,/g, '')) || 0;
+}
+
 function buildItemsSummary(items) {
   return (items || []).map(function(it, i) {
     var cur = String(it.currency || 'KRW');
     // 품목명·규격을 ' / '로 구분 — 품목명에 공백이 있어도 규격 셀로 넘어가지 않도록 명시적 구분자 사용
     return (i + 1) + '. ' + (it.name || '') + ' / ' + (it.spec || '') +
-           ' / ' + (it.qty || 0) + '개 / ' + Number(it.price || 0).toLocaleString() + ' ' + cur;
+           ' / ' + (it.qty || 0) + '개 / ' + toNum(it.price).toLocaleString() + ' ' + cur;
   }).join('\n');
 }
 
@@ -3662,7 +3728,7 @@ function computeVat(totalAmt, items) {
 
 function calcTotal(items) {
   return (items || []).reduce(function(s, it) {
-    return s + (Number(it.qty) || 0) * (Number(it.price) || 0);
+    return s + toNum(it.qty) * toNum(it.price);
   }, 0);
 }
 

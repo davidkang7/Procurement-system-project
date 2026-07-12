@@ -14,6 +14,8 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
 .top-meta b{color:#111;font-weight:600;}
 .section{border:1px solid #ccc;border-radius:6px;margin-bottom:10px;overflow:hidden;}
 .sec-header{background:#f0f0f0;padding:5px 12px;font-size:11px;font-weight:700;color:#444;letter-spacing:1px;border-bottom:1px solid #ddd;}
+/* 조회 버튼이 붙는 헤더만 flex — 다른 섹션 헤더의 부가설명 간격은 그대로 둔다 */
+.sec-header.with-btn{display:flex;align-items:center;justify-content:flex-start;gap:1.1em;}
 .sec-body{padding:10px 12px;}
 .row{display:grid;gap:10px;margin-bottom:8px;}
 .row:last-child{margin-bottom:0;}
@@ -108,10 +110,37 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .pm-sub{font-size:12px;color:#888;line-height:1.5;}
 .pm-confirm{margin-top:22px;padding:9px 32px;border-radius:8px;border:none;background:#83161A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
 .pm-confirm:hover{background:#6B1115;}
+/* 공급업체 조회 (섹션 헤더 '조회' 버튼 + 중앙 모달) */
+.vd-lookup-btn{font-family:inherit;font-size:10px;font-weight:700;letter-spacing:.5px;color:#fff;background:#1a6fc4;border:1px solid #1a6fc4;border-radius:4px;padding:2px 10px;cursor:pointer;line-height:1.5;flex-shrink:0;}
+.vd-lookup-btn:hover{background:#fff;color:#1a6fc4;}
+.vd-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9100;}
+.vd-backdrop.show{display:flex;}
+.vd-card{background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:560px;max-width:calc(100vw - 40px);display:flex;flex-direction:column;overflow:hidden;}
+.vd-head{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid #ddd;background:#f0f0f0;}
+.vd-head h2{font-size:12px;font-weight:700;color:#444;letter-spacing:1px;}
+.vd-close{background:none;border:none;font-family:inherit;font-size:16px;line-height:1;color:#83161A;cursor:pointer;padding:2px 5px;border-radius:4px;}
+.vd-close:hover{background:#f7e7e8;}
+.vd-search{padding:10px 14px 8px;border-bottom:1px solid #eee;}
+.vd-search input{width:100%;border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:12px;font-family:inherit;color:#111;outline:none;}
+.vd-search input:focus{border-color:#185FA5;}
+/* 행 높이를 고정해 헤더 + 정확히 10행까지만 노출, 나머지는 스크롤 */
+.vd-list{--vd-row:32px;--vd-head:26px;max-height:calc(var(--vd-head) + var(--vd-row) * 10);overflow-y:auto;}
+table.vd-tbl{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
+table.vd-tbl th{background:#f7f7f7;color:#444;font-weight:700;font-size:10px;text-align:left;height:var(--vd-head);padding:0 10px;position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px 0 #ccc;}
+table.vd-tbl td{height:var(--vd-row);padding:0 10px;border-bottom:1px solid #f0f0f0;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+table.vd-tbl td.num{font-variant-numeric:tabular-nums;color:#555;}
+table.vd-tbl td.mail{color:#555;}
+table.vd-tbl tr.vd-row{cursor:pointer;}
+table.vd-tbl tr.vd-row:hover td,table.vd-tbl tr.vd-row:focus-visible td{background:#E6F1FB;color:#185FA5;}
+table.vd-tbl tr.vd-row:hover td.vd-nm{font-weight:700;}
+table.vd-tbl tr.vd-row:focus-visible{outline:2px solid #185FA5;outline-offset:-2px;}
+.vd-empty{padding:26px 12px;text-align:center;font-size:11px;color:#aaa;}
+.vd-foot{padding:7px 14px;border-top:1px solid #eee;font-size:10px;color:#999;display:flex;justify-content:space-between;}
+.field input.vd-filled{border-color:#185FA5;background:#E6F1FB;transition:background .45s ease,border-color .45s ease;}
 @media print{
   body{background:#fff;padding:0;}
   .a4-wrap{box-shadow:none;padding:16px 20px;min-height:auto;}
-  .btn-row,.add-btn,.del-btn,.attach-zone,.status-banner,.dropdown-wrap,.dup-msg,.home-btn,.pm-backdrop{display:none!important;}
+  .btn-row,.add-btn,.del-btn,.attach-zone,.status-banner,.dropdown-wrap,.dup-msg,.home-btn,.pm-backdrop,.vd-backdrop,.vd-lookup-btn{display:none!important;}
   input,textarea,select{border:none!important;background:transparent!important;}
   @page{size:A4 portrait;margin:10mm;}
 }
@@ -148,7 +177,10 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
   </div>
 
   <div class="section">
-    <div class="sec-header">공급업체 정보</div>
+    <div class="sec-header with-btn">
+      <span>공급업체 정보</span>
+      <button type="button" class="vd-lookup-btn" onclick="openVendorModal()">조회</button>
+    </div>
     <div class="sec-body">
       <div class="row c3">
         <div class="field"><label>업체명 <span class="req">*</span></label><input type="text" id="vendorName" placeholder="(주) ○○○"></div>
@@ -275,6 +307,31 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
   <div class="status-banner" id="status-banner"></div>
 </div>
 
+<!-- 공급업체 조회 모달 -->
+<div class="vd-backdrop" id="vendorModal" onclick="if(event.target===this) closeVendorModal()">
+  <div class="vd-card" role="dialog" aria-modal="true" aria-labelledby="vd-title">
+    <div class="vd-head">
+      <h2 id="vd-title">공급업체 조회</h2>
+      <button type="button" class="vd-close" onclick="closeVendorModal()" aria-label="닫기">✕</button>
+    </div>
+    <div class="vd-search">
+      <input type="text" id="vendorQuery" placeholder="업체명 · 담당자 · 이메일로 검색" oninput="renderVendorRows(this.value)" autocomplete="off">
+    </div>
+    <div class="vd-list">
+      <table class="vd-tbl">
+        <colgroup><col style="width:31%"><col style="width:17%"><col style="width:30%"><col style="width:22%"></colgroup>
+        <thead><tr><th>업체명</th><th>담당자</th><th>담당자 이메일</th><th>연락처</th></tr></thead>
+        <tbody id="vendorRows"></tbody>
+      </table>
+      <div class="vd-empty" id="vendorEmpty" hidden>검색 결과가 없습니다.</div>
+    </div>
+    <div class="vd-foot">
+      <span>행을 클릭하면 공급업체 정보가 자동 입력됩니다.</span>
+      <span id="vendorCount"></span>
+    </div>
+  </div>
+</div>
+
 <!-- 제출 처리 모달 -->
 <div class="pm-backdrop" id="pm-backdrop">
   <div class="pm-card">
@@ -294,6 +351,9 @@ var CURRENCIES     = ['KRW','USD','EUR','JPY','CNY','GBP','AUD','CAD','CHF','HKD
 var rowCount = 0, apprSeq = 0, apprIds = [];
 var attachedFiles = [];
 var approverList = [];
+var vendorList = [];
+var vendorMatches = [];
+var vendorLoaded = false;
 var currentUser = null;
 var activeDropdownCid = null;
 var currentDropdownEl = null;
@@ -309,6 +369,75 @@ function loadApproverList(){
     })
     .withFailureHandler(function(){})
     .getApproverListForClient();
+}
+
+// ─── 공급업체 조회 ────────────────────────────────
+// 폼 로드 시 업체목록 시트를 1회만 내려받고, 검색은 브라우저 메모리에서 처리한다.
+// 실패해도 조용히 넘어간다 — 조회는 편의 기능이고 수기 입력은 항상 가능해야 한다.
+function loadVendorList(){
+  if(typeof google === 'undefined'){ vendorLoaded = true; return; }
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res && res.ok) vendorList = res.vendors || [];
+      vendorLoaded = true;
+      // 도착 전에 모달을 열었다면 현재 검색어로 다시 그린다 (빈 목록으로 남지 않도록)
+      if(document.getElementById('vendorModal').classList.contains('show')){
+        renderVendorRows(document.getElementById('vendorQuery').value);
+      }
+    })
+    .withFailureHandler(function(){ vendorLoaded = true; })
+    .getVendorListForClient();
+}
+
+function openVendorModal(){
+  var q = document.getElementById('vendorQuery');
+  q.value = '';
+  renderVendorRows('');
+  document.getElementById('vendorModal').classList.add('show');
+  q.focus();
+}
+
+function closeVendorModal(){
+  document.getElementById('vendorModal').classList.remove('show');
+}
+
+function renderVendorRows(q){
+  q = (q || '').trim().toLowerCase();
+  vendorMatches = vendorList.filter(function(v){
+    if(v.active === false) return false;
+    if(!q) return true;
+    return (v.name + ' ' + v.contact + ' ' + v.email).toLowerCase().indexOf(q) >= 0;
+  });
+  document.getElementById('vendorRows').innerHTML = vendorMatches.map(function(v, i){
+    return '<tr class="vd-row" tabindex="0" onclick="selectVendor('+i+')" onkeydown="if(event.key===\'Enter\'){selectVendor('+i+');}">'
+      + '<td class="vd-nm">'+escHtml(v.name)+'</td>'
+      + '<td>'+escHtml(v.contact)+'</td>'
+      + '<td class="mail">'+escHtml(v.email)+'</td>'
+      + '<td class="num">'+escHtml(v.phone)+'</td></tr>';
+  }).join('');
+  var empty = document.getElementById('vendorEmpty');
+  empty.hidden = vendorMatches.length > 0;
+  empty.textContent = vendorLoaded ? '검색 결과가 없습니다.' : '업체 목록을 불러오는 중입니다...';
+  document.getElementById('vendorCount').textContent = vendorLoaded ? (vendorMatches.length + '건') : '';
+}
+
+function selectVendor(i){
+  var v = vendorMatches[i];
+  if(!v) return;
+  var nm = document.getElementById('vendorName');
+  var ct = document.getElementById('vendorContact');
+  var em = document.getElementById('vendorEmail');
+  var ph = document.getElementById('vendorPhone');
+  nm.value = v.name;
+  ct.value = v.contact;
+  em.value = v.email;
+  ph.value = v.phone;
+  formatPhone(ph);   // value 직접 대입은 oninput 을 발화시키지 않으므로 명시 호출
+  [nm, ct, em, ph].forEach(function(el){
+    el.classList.add('vd-filled');
+    setTimeout(function(){ el.classList.remove('vd-filled'); }, 900);
+  });
+  closeVendorModal();
 }
 
 // ─── 기안자 본인 고정 ─────────────────────────────
@@ -466,6 +595,28 @@ function updateHeaderCurrency(cur){
 }
 
 function fmt(n){return Math.round(n).toLocaleString('ko-KR');}
+
+// 단가 입력란은 콤마 표시(1,430,000)를 쓰므로, 값을 읽는 모든 곳에서 콤마를 떼고 숫자화해야 한다.
+// parseFloat('1,430,000')은 콤마에서 멈춰 1이 되고, 서버의 Number()는 NaN → 0이 된다.
+function num(v){ return parseFloat(String(v == null ? '' : v).replace(/,/g, '')) || 0; }
+
+// 단가 입력 시 천 단위 콤마를 실시간으로 넣는다. 커서 앞의 '숫자 개수'를 기준으로 위치를 복원해
+// 숫자 중간을 수정할 때 커서가 끝으로 튀지 않게 한다. 외화 단가를 위해 소수점 2자리까지 허용.
+function formatPriceInput(el){
+  var digitsBefore = el.value.slice(0, el.selectionStart).replace(/[^0-9]/g, '').length;
+  var parts = el.value.replace(/[^0-9.]/g, '').split('.');
+  var ip = parts[0].replace(/^0+(?=\d)/, '');
+  var out = ip ? Number(ip).toLocaleString('ko-KR') : (parts.length > 1 ? '0' : '');
+  if(parts.length > 1) out += '.' + parts.slice(1).join('').slice(0, 2);
+  el.value = out;
+  var pos = 0, seen = 0;
+  while(pos < out.length && seen < digitsBefore){
+    if(/[0-9]/.test(out.charAt(pos))) seen++;
+    pos++;
+  }
+  try { el.setSelectionRange(pos, pos); } catch(_) {}
+}
+
 function esc(s){return (s || '').toString().replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
 function escHtml(s){return (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function formatPhone(el){
@@ -495,10 +646,11 @@ function reNum(){
   });
 }
 function calcRow(el){
-  if(el && /^0[0-9]/.test(el.value)){ el.value = String(Number(el.value)); }
+  // 수량의 선행 0 제거 (단가는 formatPriceInput이 이미 처리)
+  if(el && el.classList.contains('qty') && /^0[0-9]/.test(el.value)){ el.value = String(Number(el.value)); }
   var row = el.closest('tr');
-  var qty = parseFloat(row.querySelector('.qty').value) || 0;
-  var price = parseFloat(row.querySelector('.price').value) || 0;
+  var qty = num(row.querySelector('.qty').value);
+  var price = num(row.querySelector('.price').value);
   row.querySelector('.row-amt').textContent = fmt(qty * price);
   calcTotal();
 }
@@ -532,7 +684,7 @@ function addRow(defaultCur){
     +'<td><input type="text" placeholder="단위/규격" class="item-spec" style="text-align:center"></td>'
     +'<td><input type="number" min="0" value="1" class="qty" oninput="calcRow(this)" style="text-align:right;min-width:36px"></td>'
     +'<td style="padding:2px 2px;">'+buildCurrencySelect(cur)+'</td>'
-    +'<td><input type="number" min="0" value="0" class="price" oninput="calcRow(this)" style="text-align:right;min-width:70px"></td>'
+    +'<td><input type="text" inputmode="decimal" value="0" class="price" oninput="formatPriceInput(this);calcRow(this)" style="text-align:right;min-width:70px"></td>'
     +'<td class="row-amt amt" style="background:#f7f7f7;text-align:right;padding-right:8px">0</td>'
     +'<td style="text-align:center;background:#f7f7f7"><button class="del-btn item-del" onclick="delRow(\''+id+'\')">×</button></td>';
   document.getElementById('items-body').appendChild(tr);
@@ -860,8 +1012,8 @@ function submitForm(){
     items.push({
       name: name,
       spec: tr.querySelector('.item-spec') ? tr.querySelector('.item-spec').value : '',
-      qty: tr.querySelector('.qty') ? tr.querySelector('.qty').value : 0,
-      price: tr.querySelector('.price') ? tr.querySelector('.price').value : 0,
+      qty: tr.querySelector('.qty') ? num(tr.querySelector('.qty').value) : 0,
+      price: tr.querySelector('.price') ? num(tr.querySelector('.price').value) : 0,
       currency: getRowCurrency(tr)
     });
   });
@@ -993,7 +1145,12 @@ addApprover('결재자 1');
 addApprover('결재자 2');
 addApprover('결재자 3');
 loadApproverList();
+loadVendorList();
 loadCurrentUser();
+
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeVendorModal();
+});
 </script>
 </body>
 </html>

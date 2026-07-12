@@ -683,6 +683,36 @@ function setDupMsg(type, txt){
 }
 
 // ─── 품목 행 ─────────────────────────────
+
+// 단가 입력란은 콤마 표시(1,430,000)를 쓰므로, 값을 읽는 모든 곳에서 콤마를 떼고 숫자화해야 한다.
+// parseFloat('1,430,000')은 콤마에서 멈춰 1이 되고, 서버의 Number()는 NaN → 0이 된다.
+function num(v){ return parseFloat(String(v == null ? '' : v).replace(/,/g, '')) || 0; }
+
+// 서버에서 받은 단가를 입력란 초기값으로 넣을 때 사용 (소수점 유지)
+function fmtPrice(v){
+  var parts = String(num(v)).split('.');
+  var out = Number(parts[0]).toLocaleString('ko-KR');
+  if(parts.length > 1) out += '.' + parts[1].slice(0, 2);
+  return out;
+}
+
+// 단가 입력 시 천 단위 콤마를 실시간으로 넣는다. 커서 앞의 '숫자 개수'를 기준으로 위치를 복원해
+// 숫자 중간을 수정할 때 커서가 끝으로 튀지 않게 한다. 외화 단가를 위해 소수점 2자리까지 허용.
+function formatPriceInput(el){
+  var digitsBefore = el.value.slice(0, el.selectionStart).replace(/[^0-9]/g, '').length;
+  var parts = el.value.replace(/[^0-9.]/g, '').split('.');
+  var ip = parts[0].replace(/^0+(?=\d)/, '');
+  var out = ip ? Number(ip).toLocaleString('ko-KR') : (parts.length > 1 ? '0' : '');
+  if(parts.length > 1) out += '.' + parts.slice(1).join('').slice(0, 2);
+  el.value = out;
+  var pos = 0, seen = 0;
+  while(pos < out.length && seen < digitsBefore){
+    if(/[0-9]/.test(out.charAt(pos))) seen++;
+    pos++;
+  }
+  try { el.setSelectionRange(pos, pos); } catch(_) {}
+}
+
 function addRow(prefill){
   rowCount++;
   var row = document.createElement('tr');
@@ -691,7 +721,7 @@ function addRow(prefill){
     + '<td><input class="item-name" placeholder="품목명" data-original="' + escAttr(prefill ? prefill.name : '') + '" oninput="markItemChange(this)"></td>'
     + '<td><input class="item-spec" placeholder="규격/사양" data-original="' + escAttr(prefill ? prefill.spec : '') + '" oninput="markItemChange(this)"></td>'
     + '<td><input class="qty" type="number" min="0" placeholder="0" oninput="calcTotal()" data-original="' + escAttr(prefill ? prefill.qty : '') + '"></td>'
-    + '<td><input class="price" type="number" min="0" placeholder="0" oninput="calcTotal()" data-original="' + escAttr(prefill ? prefill.price : '') + '"></td>'
+    + '<td><input class="price" type="text" inputmode="decimal" placeholder="0" oninput="formatPriceInput(this);calcTotal()" data-original="' + escAttr(prefill ? fmtPrice(prefill.price) : '') + '"></td>'
     + '<td class="amt">0 원</td>'
     + '<td style="text-align:center"><button class="del-btn" onclick="removeRow(this)">×</button></td>';
   document.getElementById('items-body').appendChild(row);
@@ -700,7 +730,7 @@ function addRow(prefill){
     inputs[0].value = prefill.name || '';
     inputs[1].value = prefill.spec || '';
     inputs[2].value = prefill.qty || '';
-    inputs[3].value = prefill.price || '';
+    inputs[3].value = prefill.price ? fmtPrice(prefill.price) : '';
   }
   calcTotal();
 }
@@ -720,8 +750,8 @@ function calcTotal(){
   var sym = curSym(prcCurrency);
   var total = 0;
   document.querySelectorAll('#items-body tr').forEach(function(tr){
-    var qty = parseFloat(tr.querySelector('.qty').value) || 0;
-    var price = parseFloat(tr.querySelector('.price').value) || 0;
+    var qty = num(tr.querySelector('.qty').value);
+    var price = num(tr.querySelector('.price').value);
     var amt = qty * price;
     tr.querySelector('.amt').textContent = amt.toLocaleString() + ' ' + sym;
     total += amt;
@@ -1110,8 +1140,8 @@ function submitForm(){
     items.push({
       name: name,
       spec: tr.querySelector('.item-spec') ? tr.querySelector('.item-spec').value : '',
-      qty:  tr.querySelector('.qty') ? tr.querySelector('.qty').value : 0,
-      price:tr.querySelector('.price') ? tr.querySelector('.price').value : 0,
+      qty:  tr.querySelector('.qty') ? num(tr.querySelector('.qty').value) : 0,
+      price:tr.querySelector('.price') ? num(tr.querySelector('.price').value) : 0,
       currency: prcCurrency,
     });
   });

@@ -87,6 +87,8 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .info-notice.ok{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7;}
 .info-notice.warn{background:#fff8e1;color:#F57F17;border:1px solid #ffe082;}
 .info-notice.gray{background:#f5f5f5;color:#666;border:1px solid #ddd;}
+.resub-btn{margin-left:12px;padding:7px 18px;border-radius:6px;border:1px solid #F57F17;background:#F57F17;color:#fff;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;vertical-align:middle;white-space:nowrap;}
+.resub-btn:hover{background:#e06d0a;border-color:#e06d0a;}
 .readonly-badge{display:inline-block;font-size:10px;background:#f0f0f0;color:#888;padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;}
 .loading-wrap{text-align:center;padding:60px;color:#888;font-size:14px;}
 .folder-link{font-size:10px;color:#1a6fc4;text-decoration:none;font-weight:400;}
@@ -158,6 +160,12 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
   var DECISION = '<?= decision ?>';
   var IDX      = parseInt('<?= approverIndex ?>'); if(isNaN(IDX)) IDX = -1;  // URL 힌트, 서버 응답으로 갱신됨
   var WEBAPP   = '<?= webappUrl ?>';
+  var DOC_NO   = '';   // 반려 배너의 재상신 링크용, 뷰 데이터 로드 시 설정
+
+  function goRejectView(){
+    window.top.location.href = WEBAPP + '?action=reject_view&token=' + encodeURIComponent(TOKEN)
+      + '&docNo=' + encodeURIComponent(DOC_NO);
+  }
 
   function fmt(n){return Math.round(parseFloat(n)||0).toLocaleString('ko-KR');}
   function escHtml(s){return(s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -387,7 +395,14 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
       hideButtons();
       info.style.display = 'block';
       info.className = 'info-notice warn';
-      info.textContent = '이 품의서는 반려 상태입니다. 기안자의 재상신을 기다리고 있습니다.';
+      if(d.isDrafter){
+        // 기안자 본인: 여기서 바로 재상신/폐기로 넘어갈 수 있어야 한다 (반려 안내 메일의 버튼과 같은 목적지)
+        DOC_NO = d.docNo || '';
+        info.innerHTML = '이 품의서는 반려되었습니다. 수정 후 재상신하거나 기안을 폐기할 수 있습니다.'
+          + '<button type="button" class="resub-btn" onclick="goRejectView()">재상신 / 기안 폐기</button>';
+      } else {
+        info.textContent = '이 품의서는 반려 상태입니다. 기안자의 재상신을 기다리고 있습니다.';
+      }
       return;
     }
     if(!TOKEN || !me){

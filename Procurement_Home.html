@@ -165,6 +165,10 @@
   .status.prc_made   { background: var(--procurement-soft); color: var(--procurement); }
   .status.unknown    { background: var(--neutral-soft); color: var(--ink-mute); }
 
+  /* 반려 배지 옆 후속 처리 버튼 — 본인 기안 반려 건에만 노출 */
+  .reject-act-btn { margin-left: 6px; padding: 2px 8px; border: 1px solid var(--danger); border-radius: 3px; background: var(--danger); color: #fff; font-family: inherit; font-size: 10.5px; font-weight: 700; line-height: 1.45; cursor: pointer; vertical-align: middle; white-space: nowrap; }
+  .reject-act-btn:hover { background: #fff; color: var(--danger); }
+
   .empty { padding: 40px 20px; text-align: center; color: var(--ink-mute); }
   .empty-icon { font-size: 32px; margin-bottom: 8px; opacity: 0.5; }
 
@@ -553,6 +557,15 @@ function attachContentHandlers(){
       var token = el.getAttribute('data-view-token');
       var docNo = el.getAttribute('data-docno') || '';
       window.top.location.href = WEBAPP_URL + '?action=view&token=' + encodeURIComponent(token) + '&docNo=' + encodeURIComponent(docNo);
+    });
+  });
+  // 반려 건 재상신/폐기 버튼 → 반려 처리 화면 (행 클릭의 뷰어 이동을 막아야 함)
+  Array.from(document.querySelectorAll('[data-reject-token]')).forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var token = el.getAttribute('data-reject-token');
+      var docNo = el.getAttribute('data-reject-docno') || '';
+      window.top.location.href = WEBAPP_URL + '?action=reject_view&token=' + encodeURIComponent(token) + '&docNo=' + encodeURIComponent(docNo);
     });
   });
   // [INSP Step 5] 행 클릭 → 검수보고서 전용 뷰어
@@ -1034,7 +1047,9 @@ function finalTable(rows){
       + '<td>' + escHtml(r.subject) + '</td>'
       + '<td>' + drafterCell(r) + '</td>'
       + '<td>' + escHtml(r.vendorName) + '</td>'
-      + '<td>' + statusBadge(r.status) + '</td>'
+      + '<td>' + statusBadge(r.status)
+      + (r.prcCreated ? ' <span class="status prc_made">구매 진행</span>' : '')
+      + '</td>'
       + '<td>' + escHtml(r.issueDate || r.submitAt || '') + '</td>'
       + '</tr>';
   });
@@ -1265,9 +1280,18 @@ function docRow(r){
     + '<td>' + drafterCell(r) + '</td>'
     + '<td>' + escHtml(r.vendorName) + '</td>'
     + '<td class="num">' + fmtAmt(r.amount) + '</td>'
-    + '<td>' + statusBadge(r.status) + '</td>'
+    + '<td>' + statusBadge(r.status) + rejectActionBtn(r) + '</td>'
     + '<td>' + escHtml(r.submitAt) + '</td>'
     + '</tr>';
+}
+
+// 반려된 본인 기안 건: 상태 배지 옆에서 바로 재상신/폐기 화면으로 진입 (반려 안내 메일의 버튼과 같은 목적지)
+// 부서 동료의 반려 건은 열람만 가능하므로 버튼을 노출하지 않는다.
+function rejectActionBtn(r){
+  if(!r.mine || r.status !== '반려') return '';
+  return '<button type="button" class="reject-act-btn"'
+    + ' data-reject-token="' + escAttr(r.token) + '"'
+    + ' data-reject-docno="' + escAttr(r.docNo) + '">재상신/폐기</button>';
 }
 
 // 기안자 셀: 부서 공유 목록에서 내 문서/부서 동료 문서를 구분 (내 문서엔 '나' 배지)
