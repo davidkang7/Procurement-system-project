@@ -68,7 +68,7 @@ var INSP_COL = {
   RESUB_COUNT:   23,  // 재상신 횟수
   REJECT_LOG:    24,  // 반려 이력 누적 텍스트
   PHOTO_LIST:    25,  // JSON: [{id, name, size}] — 임시 사진 파일 목록
-  MOVE_STATUS:   26,  // 'STAGING' | 'FINAL'
+  MOVE_STATUS:   26,  // 'STAGING' | 'PENDING_PDF'(결재완료·로컬 PDF 대기) | 'FINAL'(PDF 생성 완료)
   APPR_START:    27,  // 결재 블록 시작 (블록0=기안자, 블록1~3=결재자 1~3 — REQ/PRC 동일 구조)
   APPR_COLS:     6,   // 블록당 컬럼 수: label, name, email, status, processedAt, comment
   MAX_APPROVERS: 4,   // 기안자 1 + 결재자 최대 3 (Q-INSP-03). approvers[0]=기안자
@@ -967,13 +967,14 @@ function processInspDecisionFromClient(payload) {
       reason: lockResult.message + (n.isFinal && lockResult.finalized ? ' (최종 검수 — 품의 종결)' : '') });
   } catch (_) {}
 
-  // [INSP Step 6] 최종 승인 완료 → PDF 생성·FINAL 이동·사진 삭제 작업을 큐에 등록
-  //  (enqueueJob은 메일/감사로그와 무관하게 항상 실행 — 기존 학습: 완료메일 조건 밖 배치)
+  // [INSP] 최종 승인 완료 → PDF 생성을 로컬 파이썬(코워크)으로 이관.
+  //  GAS는 구글 변환 서버(불안정)를 쓰지 않는다. 대신 STAGING 폴더에 manifest.json을
+  //  기록하고 David에게 작업요청 메일만 보낸다. 사진은 삭제하지 않고 보존한다.
   if (lockResult.finalized) {
     try {
-      enqueueJob({ type: 'insp_pdf', token: n.token, docNo: n.docNo, docType: 'INSP' });
+      _prepareInspPdfHandoff(n.token);
     } catch (e) {
-      try { notifyAdminError('[INSP] PDF 큐 등록 실패: ' + n.docNo + ' / ' + e.toString()); } catch (_) {}
+      try { notifyAdminError('[INSP] PDF 핸드오프(매니페스트/메일) 실패: ' + n.docNo + ' / ' + e.toString()); } catch (_) {}
     }
   }
   return { ok: true, message: lockResult.message, finalized: !!lockResult.finalized };
@@ -1218,51 +1219,229 @@ function getInspViewerDataForClient(token, hintIdx) {
 // [INSP Step 6] PDF 생성 → FINAL/PO폴더 이동 → 사진 삭제
 // ================================================================
 
+// ================================================================
+// [INSP] PDF 생성 로컬 이관 (매니페스트 핸드오프)
+//  - 최종 승인 시 GAS는 PDF를 직접 만들지 않는다. STAGING 폴더에 manifest.json
+//    (파이썬 렌더러 입력)을 기록하고 David에게 작업요청 메일을 보낸다.
+//  - 사진은 삭제하지 않고 보존한다. 실제 PDF 생성은 로컬 파이썬(코워크)이 수행.
+// ================================================================
+
 /**
- * insp_pdf 큐 job 처리 진입점 (Code.gs의 processQueueTrigger에서 호출)
- *  1) 검수보고서 PDF 생성 (사진 base64 삽입)
- *  2) FINAL/{PO번호} 폴더에 저장 (REQ/PRC와 동일 PO폴더)
- *  3) 성공 시: 사진 원본 + INSP STAGING 임시폴더 삭제, 시트 갱신(MOVE_STATUS=FINAL)
- *  실패 시: 사진 보존 (재시도 — 큐가 자동 처리). 모두 실패해도 사진은 남겨 수동 복구 가능
+ * 결재 완료된 검수보고서의 PDF 생성 작업을 로컬 파이썬으로 핸드오프.
+ *  1) PRC 기안일 기준 FINAL/{PO} 폴더 확보 → finalFolderId (유령 폴더 방지)
+ *  2) STAGING 폴더에 manifest.json 기록 (PDF 필드 + 사진 id + finalFolderId)
+ *  3) MOVE_STATUS='PENDING_PDF' (워크리스트 상태)
+ *  4) David(관리자)에게 작업요청 메일
+ * @param {string} token INSP token
+ * @returns {Object} { ok, manifestFileId, finalFolderId }
+ */
+function _prepareInspPdfHandoff(token) {
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var info = _readInspRowByToken(ss, token);
+  if (!info) return { ok: false, message: '검수보고서 행을 찾을 수 없음' };
+  var r = info.row, rowNum = info.rowNum;
+
+  var status = String(r[INSP_COL.STATUS] || '');
+  if (status !== '최종승인(INSP)') {
+    return { ok: false, message: '최종승인(INSP) 상태가 아님: ' + status };
+  }
+
+  var manifest = _buildInspManifest(ss, r);
+
+  // STAGING 폴더에 manifest.json 기록 (기존 것 있으면 교체)
+  var stagingId = String(r[INSP_COL.DRIVE_ID] || '');
+  if (!stagingId) return { ok: false, message: 'STAGING 폴더 ID 없음' };
+  var folder = DriveApp.getFolderById(stagingId);
+  var existing = folder.getFilesByName('manifest.json');
+  while (existing.hasNext()) { try { existing.next().setTrashed(true); } catch (_) {} }
+  var mBlob = Utilities.newBlob(JSON.stringify(manifest, null, 2), 'application/json', 'manifest.json');
+  var mFile = folder.createFile(mBlob);
+
+  // 워크리스트 상태 마킹
+  var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+  sheet.getRange(rowNum, INSP_COL.MOVE_STATUS + 1).setValue('PENDING_PDF');
+
+  // David에게 작업요청 메일
+  try {
+    _sendInspPdfHandoffEmail(manifest, stagingId);
+  } catch (e) {
+    try { notifyAdminError('[INSP] 핸드오프 메일 실패: ' + manifest.docNo + ' / ' + e.toString()); } catch (_) {}
+  }
+
+  Logger.log('[INSP] 핸드오프 완료: ' + manifest.docNo + ' / manifest=' + mFile.getId());
+  return { ok: true, manifestFileId: mFile.getId(), finalFolderId: manifest.finalFolderId };
+}
+
+/**
+ * INSP 행 → 파이썬 렌더러 입력 매니페스트 객체.
+ *  - 파이썬이 시트 45컬럼 스키마를 몰라도 되도록 필요한 값을 이름표로 전부 담는다.
+ *  - 사진은 파일명이 아니라 Drive 파일 id로 참조 (위치 독립·자족).
+ *  - finalFolderId는 PRC 기안일 기준 PO 폴더 (REQ/PRC 파일과 동일 위치).
+ * @param {Spreadsheet} ss 열린 스프레드시트
+ * @param {Array} r INSP 행 배열
+ * @returns {Object} manifest
+ */
+function _buildInspManifest(ss, r) {
+  var docNo = String(r[INSP_COL.DOC_NO] || '');
+  var poNo  = String(r[INSP_COL.PO_NO] || '');
+  var prcToken = String(r[INSP_COL.PRC_TOKEN] || '');
+
+  // PRC 기안일 기준 FINAL/{PO} 폴더 — consolidateToFinalByPrc와 동일 기준 (유령 폴더 방지)
+  var prcIssueDate = '';
+  try {
+    var docSheet = ss.getSheetByName(CONFIG.SHEET_NAME);
+    var prc = _findRowByTokenInDoc(docSheet, prcToken);
+    if (prc) prcIssueDate = prc.row[COL.ISSUE_DATE];
+  } catch (_) {}
+  var finalFolder = getOrCreateFolder(poNo, prcIssueDate || toDateStr(r[INSP_COL.ISSUE_DATE]), 'final');
+
+  var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
+  var approvers = [];
+  for (var a = 0; a < apprCount; a++) {
+    approvers.push({
+      label:       String(r[inspApprCol(a, 0)] || ''),
+      name:        String(r[inspApprCol(a, 1)] || ''),
+      status:      String(r[inspApprCol(a, 3)] || ''),
+      processedAt: toDateTimeStr(r[inspApprCol(a, 4)]),
+    });
+  }
+
+  var photos = [];
+  try {
+    JSON.parse(String(r[INSP_COL.PHOTO_LIST] || '[]')).forEach(function (p) {
+      if (p && p.id) photos.push({ id: p.id, name: p.name || '' });
+    });
+  } catch (_) {}
+
+  return {
+    schemaVersion: 'insp-manifest-v1',
+    token:        String(r[INSP_COL.TOKEN] || ''),
+    docNo:        docNo,
+    seq:          parseInt(r[INSP_COL.SEQ]) || 0,
+    isFinal:      String(r[INSP_COL.IS_FINAL] || '') === 'Y',
+    reqNo:        String(r[INSP_COL.REQ_NO] || ''),
+    poNo:         poNo,
+    subject:      String(r[INSP_COL.SUBJECT] || ''),
+    vendorName:   String(r[INSP_COL.VENDOR_NAME] || ''),
+    drafterName:  String(r[INSP_COL.DRAFTER_NAME] || ''),
+    dept:         String(r[INSP_COL.DEPT] || ''),
+    issueDate:    toDateStr(r[INSP_COL.ISSUE_DATE]),
+    receivedDate: toDateStr(r[INSP_COL.RECEIVED_DATE]),
+    receivedNote: String(r[INSP_COL.RECEIVED_NOTE] || ''),
+    verdict:      String(r[INSP_COL.VERDICT] || ''),
+    comment:      String(r[INSP_COL.COMMENT] || ''),
+    approvers:    approvers,
+    photos:       photos,
+    finalFolderId: finalFolder.getId(),
+    generatedAt:  toDateTimeStr(new Date()),
+  };
+}
+
+/** INSP PDF 작업요청 메일 (David/관리자) — 매니페스트 준비 완료 통지 */
+function _sendInspPdfHandoffEmail(m, stagingFolderId) {
+  var toList = CONFIG.ADMIN_EMAILS || [];
+  if (!toList.length) return;
+  var stagingUrl = 'https://drive.google.com/drive/folders/' + stagingFolderId;
+  var finalUrl   = 'https://drive.google.com/drive/folders/' + m.finalFolderId;
+  var subj = '[검수보고서 PDF 생성 요청] ' + m.docNo + ' - ' + m.subject;
+  var html = '<div style="font-family:sans-serif;max-width:600px;">'
+    + '<h2 style="color:#0e7d72;">검수보고서 결재 완료 — PDF 생성 대기</h2>'
+    + '<p>아래 검수보고서의 결재가 완료되었습니다. 로컬 렌더러로 PDF를 생성해 PO 폴더에 보관하세요.</p>'
+    + '<table style="border-collapse:collapse;font-size:14px;">'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">문서번호</td><td>' + escapeHtml(m.docNo) + ' (' + m.seq + '회차' + (m.isFinal ? ' · 최종' : '') + ')</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">품명</td><td>' + escapeHtml(m.subject) + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">판정</td><td>' + escapeHtml(m.verdict) + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">사진</td><td>' + m.photos.length + '장</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">token</td><td>' + escapeHtml(m.token) + '</td></tr>'
+    + '</table>'
+    + '<p style="margin-top:12px;">'
+    + '· 입력 폴더(manifest.json + 사진): <a href="' + stagingUrl + '">' + stagingUrl + '</a><br>'
+    + '· 출력 폴더(PO): <a href="' + finalUrl + '">' + finalUrl + '</a></p>'
+    + '<p style="font-size:12px;color:#888;">완료 후 GAS에서 <b>markInspPdfDone("' + escapeHtml(m.token) + '", "생성된PDF파일ID")</b> 실행해 마감하세요.</p>'
+    + '</div>';
+  var plain = '검수보고서 PDF 생성 요청\n문서번호: ' + m.docNo + '\n품명: ' + m.subject
+    + '\n입력 폴더: ' + stagingUrl + '\n출력 폴더(PO): ' + finalUrl + '\ntoken: ' + m.token
+    + '\n완료 후: markInspPdfDone("' + m.token + '", "PDF파일ID")';
+  sendEmailWithRetry(toList.join(','), subj, plain, html);
+}
+
+/**
+ * PDF 생성 대기 목록 (David/코워크 워크리스트).
+ *  - status=최종승인(INSP) && MOVE_STATUS=PENDING_PDF 인 회차.
+ * @returns {Array} [{docNo, token, subject, poNo, stagingFolderId, photoCount}]
+ */
+function listInspAwaitingPdf() {
+  var out = [];
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) return out;
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r[INSP_COL.STATUS] || '') !== '최종승인(INSP)') continue;
+    if (String(r[INSP_COL.MOVE_STATUS] || '') !== 'PENDING_PDF') continue;
+    var photoCount = 0;
+    try { photoCount = JSON.parse(String(r[INSP_COL.PHOTO_LIST] || '[]')).length; } catch (_) {}
+    out.push({
+      docNo:           String(r[INSP_COL.DOC_NO] || ''),
+      token:           String(r[INSP_COL.TOKEN] || ''),
+      subject:         String(r[INSP_COL.SUBJECT] || ''),
+      poNo:            String(r[INSP_COL.PO_NO] || ''),
+      stagingFolderId: String(r[INSP_COL.DRIVE_ID] || ''),
+      photoCount:      photoCount,
+    });
+  }
+  Logger.log('[INSP] PDF 대기 ' + out.length + '건: ' + out.map(function(x){return x.docNo;}).join(', '));
+  return out;
+}
+
+/**
+ * PDF 생성·업로드 완료 마감. MOVE_STATUS=FINAL.
+ * @param {string} token INSP token
+ * @param {string=} pdfFileId 생성된 PDF 파일 id (감사로그 기록용, 선택)
+ * @returns {Object} { ok, message }
+ */
+function markInspPdfDone(token, pdfFileId) {
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var info = _readInspRowByToken(ss, token);
+  if (!info) return { ok: false, message: '행 없음: ' + token };
+  var docNo = String(info.row[INSP_COL.DOC_NO] || '');
+  var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+  sheet.getRange(info.rowNum, INSP_COL.MOVE_STATUS + 1).setValue('FINAL');
+  try {
+    writeAuditLog({ eventType: AUDIT_EVENT.INSP_FINALIZED, docNo: docNo, docToken: token,
+      docType: 'INSP', reason: 'PDF 로컬 생성 완료' + (pdfFileId ? ' / fileId=' + pdfFileId : '') });
+  } catch (_) {}
+  Logger.log('[INSP] PDF 마감(FINAL): ' + docNo);
+  return { ok: true, message: 'FINAL 마감 완료: ' + docNo };
+}
+
+/**
+ * 실패/누락 회차의 PDF 핸드오프 재생성 (매니페스트 재작성 + 메일).
+ *  - 큐 실패로 PDF가 안 만들어진 기존 회차 복구용. 사진이 STAGING에 보존돼 있어야 함.
+ *  - 사용법: rerunInspHandoff("검수보고서_token")
+ * @param {string} token INSP token
+ */
+function rerunInspHandoff(token) {
+  if (!token) { console.log('사용법: rerunInspHandoff("검수보고서_token")'); return; }
+  var res = _prepareInspPdfHandoff(token);
+  console.log(JSON.stringify(res, null, 2));
+  return res;
+}
+
+/**
+ * insp_pdf 큐 job 처리 진입점 — [이관됨/무력화]
+ *  INSP PDF는 더 이상 GAS(구글 변환 서버)에서 생성하지 않는다. 결재 완료 시
+ *  _prepareInspPdfHandoff가 manifest.json을 기록하고, 실제 PDF는 로컬 파이썬(코워크)이 만든다.
+ *  큐에 남은 과거 insp_pdf job(예: 예전 실패분)은 사진/폴더를 건드리지 않고 조용히 배수한다.
+ *  ⚠ 아래 generateInspPdf / _cleanupInspPhotos / _fetchInspPhotoBlobForPdf 는
+ *    현재 호출되지 않는 사양(dead code) — 참고용으로만 남겨둠(사진 삭제·구글 변환 미실행).
  * @param {Object} job { token, docNo, ... }
- * @returns {Object} { ok, message, ... }
+ * @returns {Object} { ok, message, skipped }
  */
 function _processInspPdfJob(job) {
-  try {
-    var token = job.token;
-    if (!token) return { ok: false, message: 'token 없음' };
-
-    var ss   = SpreadsheetApp.openById(CONFIG.SHEET_ID);
-    var info = _readInspRowByToken(ss, token);
-    if (!info) return { ok: false, message: '검수보고서 행을 찾을 수 없음' };
-    var r = info.row, rowNum = info.rowNum;
-
-    var status = String(r[INSP_COL.STATUS] || '');
-    if (status !== '최종승인(INSP)') {
-      return { ok: false, message: '최종승인(INSP) 상태가 아님: ' + status };
-    }
-    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
-      return { ok: true, message: '이미 FINAL 처리됨 (멱등)', skipped: true };
-    }
-
-    // 1) PDF 생성 (FINAL 폴더에 직접 저장)
-    var pdfResult = generateInspPdf(token);
-    if (!pdfResult.ok) return { ok: false, message: 'PDF 생성 실패: ' + pdfResult.message };
-
-    // 2) 사진 원본 + STAGING 임시폴더 삭제 (PDF 성공 후에만)
-    var photoDeleteMsg = _cleanupInspPhotos(r);
-
-    // 3) 시트 갱신: DRIVE_ID=FINAL폴더, MOVE_STATUS=FINAL, PHOTO_LIST 비움
-    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
-    sheet.getRange(rowNum, INSP_COL.DRIVE_ID + 1).setValue(pdfResult.folderId);
-    sheet.getRange(rowNum, INSP_COL.MOVE_STATUS + 1).setValue('FINAL');
-    sheet.getRange(rowNum, INSP_COL.PHOTO_LIST + 1).setValue('[]');
-
-    return { ok: true, message: 'PDF 생성·FINAL 이동·사진 삭제 완료. ' + photoDeleteMsg,
-             fileId: pdfResult.fileId, folderId: pdfResult.folderId };
-  } catch (err) {
-    return { ok: false, message: '_processInspPdfJob 예외: ' + err.toString() };
-  }
+  return { ok: true, skipped: true,
+    message: 'INSP PDF는 로컬 렌더러로 이관됨 — 큐 처리 없음 (' + ((job && job.docNo) || '') + ')' };
 }
 
 /**

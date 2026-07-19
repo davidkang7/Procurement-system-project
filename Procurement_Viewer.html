@@ -91,8 +91,6 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .resub-btn:hover{background:#e06d0a;border-color:#e06d0a;}
 .readonly-badge{display:inline-block;font-size:10px;background:#f0f0f0;color:#888;padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;}
 .loading-wrap{text-align:center;padding:60px;color:#888;font-size:14px;}
-.folder-link{font-size:10px;color:#1a6fc4;text-decoration:none;font-weight:400;}
-.folder-link:hover{text-decoration:underline;}
 /* 승인/반려 처리 모달 (InLC 와인레드 스피너 + 회색 백그라운드) */
 .pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
 .pm-backdrop.show{display:flex;}
@@ -258,12 +256,11 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
     }).join('');
 
     // 첨부파일: 파일별 미리보기/다운로드 버튼
-    var attachments = d.attachments || [];
-    var attachRows;
-    if(attachments.length === 0){
-      attachRows = '<div class="no-attach">첨부파일 없음</div>';
-    } else {
-      attachRows = attachments.map(function(f){
+    function buildAttachRows(list){
+      if(!list || list.length === 0){
+        return '<div class="no-attach">첨부파일 없음</div>';
+      }
+      return list.map(function(f){
         var ic = getFileIconClass(f.name);
         var it = getFileIconText(f.name);
         var viewUrl = f.viewUrl || '';
@@ -277,10 +274,17 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
           +'</div></div>';
       }).join('');
     }
+    var attachments = d.attachments || [];
+    var attachRows = buildAttachRows(attachments);
 
-    var folderLinkHtml = '';
-    if(d.driveFolderUrl){
-      folderLinkHtml = '<a class="folder-link" href="'+d.driveFolderUrl+'" target="_blank" rel="noopener">📁 Drive 폴더 열기 →</a>';
+    // PRC 문서인 경우: 원본 REQ의 첨부(견적서 등)를 별도 섹션으로 표시
+    var parentAttachSection = '';
+    if(isPrc && d.parentAttachments && d.parentAttachments.length > 0){
+      var parentAttachRows = buildAttachRows(d.parentAttachments);
+      var parentAttachDocNoHtml = d.parentDocNo ? ' <span style="font-weight:400;color:#888;font-size:11px;margin-left:6px;">('+escHtml(d.parentDocNo)+')</span>' : '';
+      parentAttachSection = ''
+        +'<div class="section"><div class="sec-header"><span>원본 품의 첨부'+parentAttachDocNoHtml+' <span class="readonly-badge">1차 결재 · 읽기 전용</span></span></div>'
+        +'<div class="sec-body">'+parentAttachRows+'</div></div>';
     }
 
     var statusHtml = '';
@@ -334,7 +338,9 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
       +'<div class="total-bar"><span class="lbl">'+(_isKrw?'합계 (부가세 포함)':'합계 (부가세 없음)')+'</span><span class="val-total">'+fmt(totalVat)+' '+escHtml(_sym)+'</span></div>'
       +'</div></div>'
 
-      +'<div class="section"><div class="sec-header"><span>첨부자료</span>'+folderLinkHtml+'</div><div class="sec-body">'+attachRows+'</div></div>'
+      + parentAttachSection
+
+      +'<div class="section"><div class="sec-header"><span>'+(isPrc ? '구매팀 첨부자료' : '첨부자료')+'</span></div><div class="sec-body">'+attachRows+'</div></div>'
 
       +'<div class="section"><div class="sec-header"><span>비고 / 특이사항</span></div><div class="sec-body">'
       +'<div class="field"><div class="val" style="min-height:40px;white-space:pre-wrap;">'+escHtml(d.remarks || '—')+'</div></div>'

@@ -2867,17 +2867,11 @@ function getRequisitionForViewer(token, urlIdxHint) {
       };
     });
 
-    var driveFolderUrl = '';
-    var folderId = r[COL.DRIVE_ID] || '';
-    if (folderId) {
-      try { driveFolderUrl = DriveApp.getFolderById(folderId).getUrl(); }
-      catch(_) {}
-    }
-
-    // ── PRC 문서이면 부모 REQ의 결재 내역도 함께 조회 ──
-    // (PRC viewer에서 1차 결재 현황을 보여주기 위함)
+    // ── PRC 문서이면 부모 REQ의 결재 내역 + 원본 첨부도 함께 조회 ──
+    // (PRC viewer에서 1차 결재 현황 및 원본 REQ 견적서 등을 보여주기 위함)
     var parentApprovers = [];
     var parentDocNo = '';
+    var parentAttachments = [];
     var docType = String(r[COL.DOC_TYPE] || 'REQ');
     var parentToken = String(r[COL.PARENT_DOC_ID] || '');
     if (docType === 'PRC' && parentToken) {
@@ -2897,6 +2891,17 @@ function getRequisitionForViewer(token, urlIdxHint) {
               comment:     String(pr[pb+5] || ''),
             });
           }
+          // 원본 REQ의 첨부(견적서 등) 메타 조회
+          parentAttachments = parseAttachments(pr[COL.ATTACH_LIST]).map(function(f) {
+            return {
+              name: String(f.name || ''),
+              id:   String(f.id   || ''),
+              size: Number(f.size) || 0,
+              type: String(f.type || ''),
+              viewUrl:     'https://drive.google.com/file/d/' + f.id + '/view',
+              downloadUrl: 'https://drive.google.com/uc?export=download&id=' + f.id,
+            };
+          });
         }
       } catch(_) { /* 부모 조회 실패는 viewer 본 기능에 영향 없음 */ }
     }
@@ -2960,10 +2965,10 @@ function getRequisitionForViewer(token, urlIdxHint) {
         items:         items,
         approvers:     approvers,
         attachments:   attachments,
-        driveFolderUrl: String(driveFolderUrl || ''),
         myApproverIdx: myApproverIdx,
         parentDocNo:   parentDocNo,
         parentApprovers: parentApprovers,
+        parentAttachments: parentAttachments,
       }
     };
   } catch (err) {
@@ -3493,6 +3498,15 @@ function saveAttachmentsToFolder(folder, attachments) {
     var finalName = uniqueFileName(folder, att.name);
     var blob     = Utilities.newBlob(bytes, att.type || 'application/octet-stream', finalName);
     var file     = folder.createFile(blob);
+
+    // 폴더(구매팀 전용) 권한과 무관하게, 결재 라인의 타 부서 기안자/결재자가
+    // 링크로 열람할 수 있도록 파일 단위로 도메인 링크 공유(읽기)를 부여.
+    // 도메인 정책으로 막히면 조용히 무시(업로드 자체는 계속 진행).
+    try {
+      file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch(e) {
+      Logger.log('[첨부 공유 실패] ' + finalName + ' (id: ' + file.getId() + '): ' + e);
+    }
 
     saved.push({
       name: finalName,
@@ -4266,10 +4280,11 @@ function processQueueTrigger() {
       } else if (job.type === 'pdf_and_consolidate') {
         result = _processPdfAndConsolidateJob(job);
       } else if (job.type === 'insp_pdf') {
-        // [INSP Step 6] 검수보고서 PDF 생성 → FINAL/PO폴더 이동 → 사진 삭제
+        // [이관됨] INSP PDF는 로컬 파이썬(코워크)이 생성. 신규 enqueue는 없으며,
+        //  큐에 남은 과거 insp_pdf job은 _processInspPdfJob(무력화)이 조용히 배수한다.
         result = (typeof _processInspPdfJob === 'function')
           ? _processInspPdfJob(job)
-          : { ok: false, message: 'INSP 모듈(_processInspPdfJob) 미배포' };
+          : { ok: true, skipped: true, message: 'INSP PDF 이관됨 — 큐 처리 없음' };
       } else {
         result = { ok: false, message: '알 수 없는 job type: ' + job.type };
       }
