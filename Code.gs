@@ -3576,7 +3576,12 @@ function getOrCreateFolder(docNo, issueDate, type) {
 
 function getOrCreateSubFolder(parent, name) {
   var iter = parent.getFoldersByName(name);
-  if (iter.hasNext()) return iter.next();
+  // ⚠ getFoldersByName은 휴지통에 있는 폴더도 반환한다.
+  //   그대로 쓰면 삭제된 폴더를 재사용해 파일이 휴지통 안으로 들어간다 → 살아있는 것만 채택.
+  while (iter.hasNext()) {
+    var f = iter.next();
+    if (!f.isTrashed()) return f;
+  }
   return parent.createFolder(name);
 }
 

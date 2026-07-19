@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>{{ m.docNo }} 검수보고서</title>
+<style>
+  /* Playwright(Chromium) 렌더 전용 —
+     구글 문서 변환기용 제약(표 기반 레이아웃·flex 금지·고정폭 img)이 필요 없다.
+     표준 CSS를 그대로 쓴다. */
+  @page { size: A4; margin: 14mm 16mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Malgun Gothic', 'Segoe UI', 'NanumGothic', sans-serif;
+    color: #111; font-size: 11px; line-height: 1.45;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+
+  .pdf-title {
+    text-align: center; font-size: 24px; font-weight: 700; letter-spacing: 12px;
+    padding: 6px 0 8px; border-bottom: 2.5px solid #0e7d72; margin-bottom: 6px;
+  }
+  .pdf-sub {
+    text-align: center; font-size: 9px; color: #777; letter-spacing: 3px; margin-bottom: 12px;
+  }
+
+  /* 결재란 — 우측 정렬 (flex 정상 동작) */
+  .appr-wrap { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 10px; }
+  .appr-title { font-size: 10px; font-weight: 700; color: #0a5e56; margin-bottom: 5px; letter-spacing: 1px; }
+  table.appr { border-collapse: collapse; }
+  table.appr th {
+    border: 1px solid #0e7d72; background: #e4f4f2; color: #0a5e56;
+    font-size: 9px; padding: 4px 14px; font-weight: 700;
+  }
+  table.appr td {
+    border: 1px solid #0e7d72; width: 90px; height: 48px;
+    text-align: center; font-size: 10px; vertical-align: middle;
+  }
+  table.appr td .nm { font-weight: 700; font-size: 11px; }
+  table.appr td .dt { font-size: 7.5px; color: #888; margin-top: 2px; }
+  .ok { color: #1f8b4c; font-weight: 700; }
+  .no { color: #c0392b; font-weight: 700; }
+
+  table.meta { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+  table.meta th {
+    background: #e4f4f2; color: #0a5e56; border: 0.8px solid #b9ddd8;
+    width: 90px; font-size: 10px; padding: 7px 9px; text-align: center; font-weight: 700;
+  }
+  table.meta td { border: 0.8px solid #d6e3e1; padding: 7px 11px; font-size: 11px; }
+
+  .result-head {
+    background: #0e7d72; color: #fff; font-size: 11px; font-weight: 700;
+    padding: 6px 11px; letter-spacing: 1px;
+  }
+  .result-box { border: 0.8px solid #b9ddd8; border-top: none; padding: 11px; margin-bottom: 14px; }
+  .verdict {
+    display: inline-block; padding: 3px 14px; border-radius: 3px;
+    font-weight: 700; font-size: 12px; margin-bottom: 8px;
+  }
+  .verdict.pass { background: #e8f6ee; color: #1f8b4c; border: 1px solid #9bd5b1; }
+  .verdict.fail { background: #fdecec; color: #c0392b; border: 1px solid #e9a8a8; }
+  .comment { font-size: 11px; color: #333; white-space: pre-wrap; margin-bottom: 10px; }
+
+  /* 사진 그리드 — 2열, 이미지 비율 유지 (Chromium은 flex/grid·object-fit 모두 지원) */
+  .photos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ph { border: 0.8px solid #ccc; border-radius: 2px; overflow: hidden; break-inside: avoid; }
+  /* height는 A4 1페이지에 사진 4장(2행)까지 들어가도록 맞춘 값 — 함부로 키우지 말 것 */
+  .ph img { display: block; width: 100%; height: 175px; object-fit: contain; background: #fafafa; }
+  .ph .cap { font-size: 8.5px; color: #999; padding: 3px 5px; word-break: break-all; }
+  .no-photo { font-size: 10px; color: #aaa; }
+
+  .footer {
+    margin-top: 18px; text-align: center; font-size: 8.5px; color: #999;
+    border-top: 0.5px solid #ddd; padding-top: 8px;
+  }
+</style>
+</head>
+<body>
+  <div class="pdf-title">검 수 보 고 서</div>
+  <div class="pdf-sub">INLC TECHNOLOGY · INSPECTION REPORT</div>
+
+  <div class="appr-wrap">
+    <div class="appr-title">검 수 결 재</div>
+    <table class="appr">
+      <tr>
+        {% for a in m.approvers %}<th>{{ a.label }}</th>{% endfor %}
+      </tr>
+      <tr>
+        {% for a in m.approvers %}
+        <td>
+          <div class="nm">{{ a.name }}</div>
+          {% if a.status == '승인' %}
+            <div class="ok">✓ 승인</div><div class="dt">{{ a.processedAt }}</div>
+          {% elif a.status == '반려' %}
+            <div class="no">✕ 반려</div><div class="dt">{{ a.processedAt }}</div>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+    </table>
+  </div>
+
+  <table class="meta">
+    <tr>
+      <th>문 서 번 호</th><td>{{ m.docNo }}</td>
+      <th>회 차</th><td>{{ m.seq }}회차{% if m.isFinal %} · ★최종 검수{% endif %}</td>
+    </tr>
+    <tr>
+      <th>담 당 자</th><td>{{ m.drafterName }} ({{ m.dept }})</td>
+      <th>품의번호</th><td>{{ m.reqNo }}</td>
+    </tr>
+    <tr>
+      <th>PO 번 호</th><td>{{ m.poNo }}</td>
+      <th>업 체 명</th><td>{{ m.vendorName }}</td>
+    </tr>
+    <tr><th>품 명</th><td colspan="3">{{ m.subject }}</td></tr>
+    <tr>
+      <th>기안일자</th><td>{{ m.issueDate }}</td>
+      <th>입고일자</th><td>{{ m.receivedDate }}</td>
+    </tr>
+    <tr><th>입고내역</th><td colspan="3">{{ m.receivedNote }}</td></tr>
+  </table>
+
+  <div class="result-head">검 수 결 과</div>
+  <div class="result-box">
+    <span class="verdict {{ verdict_class }}">{{ m.verdict or '-' }}</span>
+    {% if m.comment %}<div class="comment">{{ m.comment }}</div>{% endif %}
+    {% if photos %}
+      <div class="photos">
+        {% for p in photos %}
+        <div class="ph">
+          <img src="{{ p.src }}">
+          <div class="cap">{{ p.name }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="no-photo">(첨부된 검수 사진 없음)</div>
+    {% endif %}
+  </div>
+
+  <div class="footer">
+    본 문서는 구매결재시스템에서 전자결재 완료 후 생성되었습니다. · {{ generated_at }}
+  </div>
+</body>
+</html>

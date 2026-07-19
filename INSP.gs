@@ -1295,7 +1295,8 @@ function _prepareInspPdfHandoff(token) {
  * INSP 행 → 파이썬 렌더러 입력 매니페스트 객체.
  *  - 파이썬이 시트 45컬럼 스키마를 몰라도 되도록 필요한 값을 이름표로 전부 담는다.
  *  - 사진은 파일명이 아니라 Drive 파일 id로 참조 (위치 독립·자족).
- *  - finalFolderId는 PRC 기안일 기준 PO 폴더 (REQ/PRC 파일과 동일 위치).
+ *  - finalFolderId는 REQ/PRC 파일이 들어 있는 FINAL PO 폴더 id.
+ *    PRC 행의 DRIVE_ID(통합 완료 시 FINAL 폴더 id) 우선, 없으면 경로로 폴백.
  * @param {Spreadsheet} ss 열린 스프레드시트
  * @param {Array} r INSP 행 배열
  * @returns {Object} manifest
@@ -1305,14 +1306,27 @@ function _buildInspManifest(ss, r) {
   var poNo  = String(r[INSP_COL.PO_NO] || '');
   var prcToken = String(r[INSP_COL.PRC_TOKEN] || '');
 
-  // PRC 기안일 기준 FINAL/{PO} 폴더 — consolidateToFinalByPrc와 동일 기준 (유령 폴더 방지)
-  var prcIssueDate = '';
+  // 업로드 대상 = REQ/PRC 파일이 실제로 들어 있는 FINAL PO 폴더.
+  //  1순위: PRC 행에 저장된 DRIVE_ID를 그대로 사용 (consolidateToFinalByPrc가 FINAL 폴더 ID로
+  //         갱신해 둔 값 — Code.gs). 이름·기안일 계산에 의존하지 않아 정확하다.
+  //  2순위: 아직 통합 전이면 경로(PO번호 + PRC 기안일)로 확보.
+  //  ⚠ 경로 방식은 이름이 안 맞으면 조용히 새 폴더를 만들어 버린다(유령 폴더). 그래서 1순위 우선.
+  var prc = null, prcIssueDate = '';
   try {
     var docSheet = ss.getSheetByName(CONFIG.SHEET_NAME);
-    var prc = _findRowByTokenInDoc(docSheet, prcToken);
+    prc = _findRowByTokenInDoc(docSheet, prcToken);
     if (prc) prcIssueDate = prc.row[COL.ISSUE_DATE];
   } catch (_) {}
-  var finalFolder = getOrCreateFolder(poNo, prcIssueDate || toDateStr(r[INSP_COL.ISSUE_DATE]), 'final');
+
+  var finalFolderId = '';
+  if (prc && String(prc.row[COL.MOVE_STATUS] || '') === 'FINAL') {
+    finalFolderId = String(prc.row[COL.DRIVE_ID] || '');
+  }
+  if (!finalFolderId) {
+    finalFolderId = getOrCreateFolder(
+      poNo, prcIssueDate || toDateStr(r[INSP_COL.ISSUE_DATE]), 'final'
+    ).getId();
+  }
 
   var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
   var approvers = [];
@@ -1351,7 +1365,7 @@ function _buildInspManifest(ss, r) {
     comment:      String(r[INSP_COL.COMMENT] || ''),
     approvers:    approvers,
     photos:       photos,
-    finalFolderId: finalFolder.getId(),
+    finalFolderId: finalFolderId,
     generatedAt:  toDateTimeStr(new Date()),
   };
 }

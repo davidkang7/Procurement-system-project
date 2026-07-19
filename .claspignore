@@ -1,0 +1,13 @@
+# clasp push 대상 지정 (없으면 clasp 기본값이 **/*.js 까지 포함해
+# insp-renderer/.venv 안의 Playwright 번들 JS를 GAS로 밀어올린다 → push 실패)
+#
+# 규칙: 전부 무시한 뒤, GAS에 올릴 최상위 파일만 다시 포함한다.
+
+**/**
+
+!appsscript.json
+!*.gs
+!*.html
+
+# 파이썬 렌더러는 GAS와 무관 — 절대 푸시 금지 (재확인용)
+insp-renderer/**

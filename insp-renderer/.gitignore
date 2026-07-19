@@ -1,0 +1,10 @@
+# 구글 OAuth 자격증명 — 절대 커밋 금지
+credentials.json
+token.json
+
+# 실행 산출물
+out/
+__pycache__/
+*.pyc
+.venv/
+venv/
