@@ -3,14 +3,24 @@ Final_ID : 1_dXx1O-jyKHa1mnJ48eLzTEhzGB1t9VE
 Sheet URL : 1Jg0BfLiMrI9MUDMqwU7DWIAA8loVU5XwfumiWHMqMTA
 web app : https://script.google.com/a/macros/inlct.com/s/AKfycbw-iL2l4m59rcZLuiBSgWkumFjBhg80QRm3Y2Kdz1_l9YJYqnWPDw_lhuTurXiCJ8Ip/exec
 
-구매팀 배열
+발신 주소 (MAIL_FROM) : admin-inlct@inlct.com
+  ※ David Gmail → 설정 → 계정 → '다른 주소에서 메일 보내기'에 별칭 등록·인증 필요
+  ※ 확인: GAS 에디터에서 sendTestMailFromAlias() 실행
+
+구매팀 배열 (권한)
 davidkang@inlct.com
 //mhpark@inlct.com
 //bret@inlct.com
 //kskim@inlct.com
-mujung@inlct.com
+admin-inlct@inlct.com   ← mujung@inlct.com 대체 (2026-07)
 
-관리팀 배열
+관리팀 배열 (권한)
 davidkang@inlct.com
+
+구매팀 알림 수신 (PROCUREMENT_NOTIFY_EMAILS)
+admin-inlct@inlct.com
+
+관리자 알림 수신 (ADMIN_NOTIFY_EMAILS)
+admin-inlct@inlct.com
 
 

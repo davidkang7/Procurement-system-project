@@ -1339,7 +1339,7 @@ function _buildInspManifest(ss, r) {
 
 /** INSP PDF 작업요청 메일 (David/관리자) — 매니페스트 준비 완료 통지 */
 function _sendInspPdfHandoffEmail(m, stagingFolderId) {
-  var toList = CONFIG.ADMIN_EMAILS || [];
+  var toList = CONFIG.ADMIN_NOTIFY_EMAILS || [];
   if (!toList.length) return;
   var stagingUrl = 'https://drive.google.com/drive/folders/' + stagingFolderId;
   var finalUrl   = 'https://drive.google.com/drive/folders/' + m.finalFolderId;

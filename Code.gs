@@ -16,6 +16,11 @@ var CONFIG = {
   SHEET_NAME:       '품의서목록',
   WEBAPP_URL:       'https://script.google.com/a/macros/inlct.com/s/AKfycbw-iL2l4m59rcZLuiBSgWkumFjBhg80QRm3Y2Kdz1_l9YJYqnWPDw_lhuTurXiCJ8Ip/exec',
   FROM_NAME:        '구매품의 시스템',
+  // 모든 발신 메일의 From 주소. 스크립트는 David 계정에서 실행되지만 메일은 이 주소로 나간다.
+  //  ⚠ 사전 준비: David Gmail → 설정 → 계정 → '다른 주소에서 메일 보내기'에 이 주소를
+  //    별칭(alias)으로 등록·인증해야 한다. 미등록 상태면 별칭 없이(=davidkang) 발송된다.
+  //    등록 여부는 GAS 에디터에서 sendTestMailFromAlias() 실행으로 확인.
+  MAIL_FROM:        'admin-inlct@inlct.com',
   USE_SHARED_DRIVE: true,
 
   // 파일 제약
@@ -31,16 +36,28 @@ var CONFIG = {
   EMAIL_RETRY_COUNT:     3,
   EMAIL_RETRY_DELAY_MS:  1000,
 
-  // 구매팀 그룹 (REQ 1차 승인 시 알림 수신 대상)
+  // ── 권한 판정용 계정 목록 (실제 로그인 계정만 — 메일 수신처와 별개) ──
+  //  ⚠ 여기서 계정을 빼면 해당 사용자의 구매팀/관리자 메뉴 권한이 사라진다.
+  //    알림 수신처만 바꾸려면 아래 *_NOTIFY_EMAILS 를 수정할 것.
   PROCUREMENT_TEAM_EMAILS: [
     'davidkang@inlct.com',
     //'mhpark@inlct.com',
     //'bret@inlct.com',
     //'kskim@inlct.com',
-    'mujung@inlct.com',
+    'admin-inlct@inlct.com',   // mujung@inlct.com 대체 (2026-07)
   ],
   ADMIN_EMAILS: [
     'davidkang@inlct.com',
+  ],
+
+  // ── 알림 수신처 (권한과 무관 — 순수 메일 수신 대상) ──
+  // 구매팀 알림 (REQ 1차 승인 시 픽업 요청)
+  PROCUREMENT_NOTIFY_EMAILS: [
+    'admin-inlct@inlct.com',
+  ],
+  // 관리자 알림 (시스템 오류, INSP PDF 작업요청 등)
+  ADMIN_NOTIFY_EMAILS: [
+    'admin-inlct@inlct.com',
   ],
   AUDIT_SHEET_NAME: '시스템로그',
   INSP_SHEET_NAME:  '검수보고서목록',   // [INSP Step 1] 검수보고서 시트 탭명
@@ -1831,11 +1848,8 @@ function _sendAdminDiscardNotifications(ctx) {
         '문의사항은 관리자에게 연락 바랍니다.\n\n' +
         'InLC 구매결재 시스템';
 
-      MailApp.sendEmail({
-        to: n.to,
-        subject: subject,
-        body: body,
-      });
+      // GmailApp 사용 — MailApp은 From 별칭(CONFIG.MAIL_FROM)을 지원하지 않는다
+      GmailApp.sendEmail(n.to, subject, body, _mailOptions());
     } catch (err) {
       console.error('[A-1] 알림 이메일 발송 실패 (' + n.to + '): ' + err.toString());
       // 실패해도 다른 수신자는 계속 발송
@@ -2142,11 +2156,8 @@ function _sendForceReleaseLockNotification(ctx) {
       '문의사항은 관리자에게 연락 바랍니다.\n\n' +
       'InLC 구매결재 시스템';
 
-    MailApp.sendEmail({
-      to: target,
-      subject: subject,
-      body: body,
-    });
+    // GmailApp 사용 — MailApp은 From 별칭(CONFIG.MAIL_FROM)을 지원하지 않는다
+    GmailApp.sendEmail(target, subject, body, _mailOptions());
   } catch (err) {
     console.error('[A-4] 점유자 알림 이메일 발송 실패 (' + target + '): ' + err.toString());
   }
@@ -3100,19 +3111,53 @@ function escapeHtml(str) {
 }
 
 /**
- * Gmail 발송 + 재시도 (3회)
+ * 발신 옵션 조립 — CONFIG.MAIL_FROM 이 있으면 From 별칭을 적용.
+ *  스크립트 실행 계정(David)과 무관하게 메일이 대표 주소로 나가게 한다.
+ * @param {Object=} extra 추가 옵션 (htmlBody 등)
+ * @returns {Object} GmailApp.sendEmail options
+ */
+function _mailOptions(extra) {
+  var opts = extra || {};
+  opts.name = CONFIG.FROM_NAME;
+  if (CONFIG.MAIL_FROM) opts.from = CONFIG.MAIL_FROM;
+  return opts;
+}
+
+/**
+ * 별칭(from) 없이 보내는 폴백 발송.
+ *  별칭 지정이 실패하는 원인은 여러 가지다 — 별칭 미등록/미인증, OAuth 스코프 부족
+ *  (gmail.settings.basic 누락 시 "Specified permissions are not sufficient") 등.
+ *  예외 메시지로 원인을 구분하려 들면 문구가 바뀔 때마다 폴백이 조용히 죽으므로,
+ *  from 을 쓴 발송이 실패하면 이유를 따지지 않고 한 번은 별칭 없이 재발송한다.
+ *  → 최악의 경우에도 발신자만 David로 표시될 뿐, 결재 알림이 유실되지 않는다.
+ * @returns {boolean} 폴백 발송 성공 여부
+ */
+function _sendWithoutAlias(toEmail, subject, plainBody, htmlBody, cause) {
+  if (!CONFIG.MAIL_FROM) return false;   // 별칭을 안 썼으면 폴백할 것도 없음
+  var opts = { name: CONFIG.FROM_NAME };
+  if (htmlBody) opts.htmlBody = htmlBody;
+  try {
+    GmailApp.sendEmail(toEmail, subject, plainBody, opts);
+    Logger.log('[메일] From 별칭(' + CONFIG.MAIL_FROM + ') 실패 → 기본 계정으로 발송함. 원인: ' + cause);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Gmail 발송 + 재시도 (3회). From 별칭(CONFIG.MAIL_FROM) 적용.
+ *  별칭 발송이 실패하면 별칭 없이 폴백 발송한다(_sendWithoutAlias 참고).
  */
 function sendEmailWithRetry(toEmail, subject, plainBody, htmlBody) {
   var lastErr;
   for (var i = 0; i < CONFIG.EMAIL_RETRY_COUNT; i++) {
     try {
-      GmailApp.sendEmail(toEmail, subject, plainBody, {
-        name: CONFIG.FROM_NAME,
-        htmlBody: htmlBody,
-      });
+      GmailApp.sendEmail(toEmail, subject, plainBody, _mailOptions({ htmlBody: htmlBody }));
       return true;
     } catch(e) {
       lastErr = e;
+      if (_sendWithoutAlias(toEmail, subject, plainBody, htmlBody, e)) return true;
       if (i < CONFIG.EMAIL_RETRY_COUNT - 1) {
         Utilities.sleep(CONFIG.EMAIL_RETRY_DELAY_MS);
       }
@@ -3122,19 +3167,49 @@ function sendEmailWithRetry(toEmail, subject, plainBody, htmlBody) {
 }
 
 function notifyAdminError(message) {
-  var admins = CONFIG.ADMIN_EMAILS || [];
+  var admins = CONFIG.ADMIN_NOTIFY_EMAILS || [];
   if (admins.length === 0) {
     try { console.error('[ADMIN ALERT] ' + message); } catch(_) { Logger.log('[ADMIN ALERT] ' + message); }
     return;
   }
   admins.forEach(function(adminEmail) {
+    var subj = '[구매시스템 오류] ' + message.substring(0, 80);
+    var body = message + '\n\n발생 시각: ' + toDateTimeStr(new Date());
     try {
-      GmailApp.sendEmail(adminEmail, '[구매시스템 오류] ' + message.substring(0, 80),
-        message + '\n\n발생 시각: ' + toDateTimeStr(new Date()), {
-        name: CONFIG.FROM_NAME,
-      });
-    } catch(_) {}
+      GmailApp.sendEmail(adminEmail, subj, body, _mailOptions());
+    } catch(e) {
+      // 오류 알림 경로는 재시도/throw 없음(재귀 방지) — 별칭 없이 1회만 폴백
+      _sendWithoutAlias(adminEmail, subj, body, null, e);
+    }
   });
+}
+
+/**
+ * [점검용] From 별칭이 실제로 동작하는지 확인. GAS 에디터에서 수동 실행.
+ *  수신자는 실행자 본인 — 어느 계정으로 실행하든 자기 수신함에서 발신자를 확인할 수 있다.
+ */
+function sendTestMailFromAlias() {
+  var to = getActiveUserEmail() || (CONFIG.ADMIN_NOTIFY_EMAILS || [])[0];
+  try {
+    GmailApp.sendEmail(to, '[구매시스템] 발신 별칭 테스트',
+      'CONFIG.MAIL_FROM = ' + CONFIG.MAIL_FROM + '\n이 메일의 발신자를 확인하세요.', _mailOptions());
+    console.log('✅ 별칭 발송 성공 → ' + to + ' 수신함에서 발신자가 ' + CONFIG.MAIL_FROM + ' 인지 확인하세요.');
+  } catch (e) {
+    var msg = String(e);
+    console.log('❌ 별칭 발송 실패: ' + msg);
+    if (/permission/i.test(msg)) {
+      console.log('→ OAuth 스코프 부족입니다. appsscript.json에 gmail.settings.basic 이 있는지 확인하고,'
+        + ' 스코프를 추가했다면 에디터에서 아무 함수나 한 번 실행해 재승인(권한 검토) 절차를 마치세요.');
+    } else {
+      console.log('→ David Gmail 설정 → 계정 → "다른 주소에서 메일 보내기"에 '
+        + CONFIG.MAIL_FROM + ' 등록·인증 여부를 확인하세요.');
+    }
+    // 실제 운영 경로가 유실 없이 폴백되는지도 함께 검증
+    if (_sendWithoutAlias(to, '[구매시스템] 별칭 폴백 테스트',
+        '별칭 실패 시 폴백 경로로 발송된 메일입니다.', null, e)) {
+      console.log('ℹ️ 폴백 발송은 정상 동작 — 별칭이 안 되어도 결재 메일은 유실되지 않습니다(발신자만 David).');
+    }
+  }
 }
 
 function sendApprovalEmailWithRetry(approver, data, token, rowNum, idx) {
@@ -3381,9 +3456,9 @@ function sendInspReadyNoticeWithRetry(toEmail, reqDrafter, reqDocNo, subject, po
  * REQ 1차 승인 완료 → 구매팀 전체 알림 (FR-50, REQ-07)
  */
 function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken) {
-  var emails = CONFIG.PROCUREMENT_TEAM_EMAILS || [];
+  var emails = CONFIG.PROCUREMENT_NOTIFY_EMAILS || [];
   if (emails.length === 0) {
-    Logger.log('[INFO] 구매팀 알림 대상이 설정되지 않음. CONFIG.PROCUREMENT_TEAM_EMAILS를 채워주세요.');
+    Logger.log('[INFO] 구매팀 알림 대상이 설정되지 않음. CONFIG.PROCUREMENT_NOTIFY_EMAILS를 채워주세요.');
     return;
   }
 
