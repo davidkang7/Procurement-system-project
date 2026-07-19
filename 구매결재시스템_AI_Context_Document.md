@@ -373,7 +373,7 @@ logId(UUID), timestamp(Date), actor(이메일), actorRole(admin/procurement/appr
 | getInspDecisionMetaForClient / getInspViewerDataForClient | 경량 결재 메타 / 전용 뷰어(본문·사진 base64·myApproverIdx) |
 | processInspDecisionFromClient | 승인/반려. 본인 단계 `_findMyInspIdx`로 재판정. 최종승인 시 status='최종승인(INSP)' + insp_pdf enqueue |
 | _processInspPdfJob / generateInspPdf / _cleanupInspPhotos | 큐 처리: PDF 생성(사진 base64) → FINAL/PO폴더 저장 → 사진·임시폴더 삭제. 멱등(MOVE_STATUS=FINAL이면 스킵) |
-| _getInspMenusForClient(ss, actor, isProc) | 홈: 내 검수 결재 대기 / 최종 완료(INSP) 목록 |
+| _getInspMenusForClient(ss, actor, isProc, isAdmin) | 홈: 내 검수 결재 대기 / 최종 완료(INSP) / 관리자 전사 대기 목록 |
 
 ## 9.4 화면·라우팅
 

@@ -117,6 +117,15 @@ var COL = {
 // 별칭 (오타 방지)
 COL._VERSION = 'v2.1';
 
+// 결재자 블록 접근자 — 블록 오프셋 하드코딩 금지 (INSP.gs의 inspApprCol과 대칭)
+//   stageIdx: 0-based 결재 단계 (0 = 기안자 블록)
+//   offset  : 0=label, 1=name, 2=email, 3=status, 4=processedAt, 5=comment
+function reqApprCol(stageIdx, offset) {
+  if (stageIdx < 0) throw new Error('잘못된 결재 단계: ' + stageIdx);
+  if (offset < 0 || offset >= COL.APPR_COLS) throw new Error('잘못된 블록 오프셋: ' + offset);
+  return COL.APPR_START + (stageIdx * COL.APPR_COLS) + offset;
+}
+
 // ================================================================
 // 1. Web App 진입점 (라우팅)
 // ================================================================
@@ -436,7 +445,11 @@ function isProcurementUser(email) {
 
 function isAdminUser(email) {
   if (!email) return false;
-  return (CONFIG.ADMIN_EMAILS || []).indexOf(email) >= 0;
+  var list = CONFIG.ADMIN_EMAILS || [];
+  // ⚠ isProcurementUser와 달리 '빈 목록 = 전원 허용' 폴백을 두지 않는다.
+  //   관리자는 미설정 시 '관리자 없음'이 안전한 기본값.
+  return list.indexOf(String(email).toLowerCase()) >= 0
+      || list.indexOf(email) >= 0;
 }
 
 
@@ -2597,6 +2610,7 @@ function getHomeDataForClient() {
         approvedInbox: [], myPrc: [],
         completedDocs: [],   // [INSP Step 2]
         myInspPending: [], finalDocs: [],   // [INSP Step 5]
+        allPending: [], allInspPending: [],   // [결재 메뉴 세분화] 관리자 전사 조회
       };
     }
 
@@ -2609,8 +2623,11 @@ function getHomeDataForClient() {
     var prcFinals = [];      // [INSP Step 2] 최종승인(PRC) 행 (결재 완료 메뉴 소스)
     var reqMap = {};         // [INSP Step 2] REQ token → 메타 (PRC와 조인용)
     var reqPrcFinals = [];   // [INSP Step 5] 최종완료 통합용: 최종승인 REQ + 최종승인(PRC)
+    var allPending = [];     // [결재 메뉴 세분화] 관리자 전용: 결재자가 누구든 모든 대기 문서
 
-    var isProc = isProcurementUser(actor);
+    var isProc  = isProcurementUser(actor);
+    var isAdmin = isAdminUser(actor);
+    var actorLc = String(actor || '').toLowerCase();
 
     // 부서 단위 가시성: 결재자목록 부서 열 기준으로 같은 부서 기안 문서를 공유
     // - deptMap: 이메일(소문자) → 부서
@@ -2676,14 +2693,25 @@ function getHomeDataForClient() {
         myDocs.push(Object.assign({}, meta, { mine: false }));
       }
 
-      // 2) 내가 결재 대기인 문서
-      if (curIdx < apprCount &&
+      // 2) 결재 대기 문서 — 내 건(myPending) + 관리자용 전사 건(allPending)
+      if (curIdx >= 0 && curIdx < apprCount &&
           (status.indexOf('결재') >= 0 || status === '검토중' || status === '재상신')) {
-        var curBase = COL.APPR_START + curIdx * COL.APPR_COLS;
-        var curApprEmail = String(r[curBase + 2] || '');
-        var curApprStatus = String(r[curBase + 3] || '');
-        if (curApprEmail === actor && curApprStatus === '대기') {
-          myPending.push(meta);
+        var curApprName   = String(r[reqApprCol(curIdx, 1)] || '');
+        var curApprEmail  = String(r[reqApprCol(curIdx, 2)] || '');
+        var curApprStatus = String(r[reqApprCol(curIdx, 3)] || '');
+        if (curApprStatus === '대기') {
+          // stageIdx 0 = 기안자(자기결재) 블록, 1+ = 결재자 N
+          var pendMeta = Object.assign({}, meta, {
+            stageIdx:     curIdx,
+            stageKind:    (curIdx === 0 ? 'drafter' : 'approver'),
+            curApprName:  curApprName,
+            curApprEmail: curApprEmail,
+            apprCount:    apprCount,
+          });
+          // ⚠ 이메일 비교는 반드시 소문자끼리 — 결재자목록 시트는 사람이 직접 입력하므로
+          //   대소문자가 섞일 수 있다. (아래 amParticipant 루프와 INSP 경로도 소문자 비교)
+          if (curApprEmail.toLowerCase() === actorLc) myPending.push(pendMeta);
+          if (isAdmin) allPending.push(pendMeta);
         }
       }
 
@@ -2730,6 +2758,14 @@ function getHomeDataForClient() {
     // 내 기안 문서 — 최신순
     myDocs.sort(function(a, b) {
       return (b.submitAt || '').localeCompare(a.submitAt || '');
+    });
+
+    // 결재 대기 — 오래된 순 (클라이언트가 sortByNewest로 재정렬하지만 페이로드는 결정적으로)
+    myPending.sort(function(a, b) {
+      return (a.submitAt || '').localeCompare(b.submitAt || '');
+    });
+    allPending.sort(function(a, b) {
+      return (a.submitAt || '').localeCompare(b.submitAt || '');
     });
 
     // [INSP Step 2] 결재 완료 목록 조립
@@ -2788,8 +2824,8 @@ function getHomeDataForClient() {
 
     // [INSP Step 5] 내 검수 결재 대기 + 최종 완료(통합)
     var inspMenus = (typeof _getInspMenusForClient === 'function')
-      ? _getInspMenusForClient(ss, actor, isProc)
-      : { myInspPending: [], inspFinals: [] };
+      ? _getInspMenusForClient(ss, actor, isProc, isAdmin)
+      : { myInspPending: [], inspFinals: [], allInspPending: [] };
 
     // 최종 완료 통합: REQ/PRC 최종 + INSP 최종(IS_FINAL) — 단일 리스트, docType으로 구분
     var finalDocs = [];
@@ -2821,7 +2857,7 @@ function getHomeDataForClient() {
       user: {
         email: actor,
         isProcurement: isProc,
-        isAdmin: isAdminUser(actor),
+        isAdmin: isAdmin,
         dept: myDept,
       },
       myDrafts:      myDrafts,
@@ -2832,6 +2868,10 @@ function getHomeDataForClient() {
       completedDocs: completedDocs,   // [INSP Step 2]
       myInspPending: inspMenus.myInspPending,   // [INSP Step 5]
       finalDocs:     finalDocs,                 // [INSP Step 5]
+      // [결재 메뉴 세분화] 관리자 전사 결재 현황.
+      // 누산 시점에 이미 isAdmin으로 걸렀지만, 삼항을 한 번 더 두어 서버측 권한 백스톱으로 삼는다.
+      allPending:     isAdmin ? allPending : [],
+      allInspPending: isAdmin ? (inspMenus.allInspPending || []) : [],
     };
   } catch(err) {
     return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };

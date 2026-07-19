@@ -1028,17 +1028,19 @@ function testInspStep4(token) {
 // ================================================================
 
 /**
- * 검수보고서 목록을 1회 read하여 두 가지 목록 생성
- *  - myPending: 내가 현재 결재할 차례인 검수보고서 (status가 진행중 + 내 단계 + 대기)
- *  - finalDocs: 최종 선택(IS_FINAL=Y)되어 최종승인(INSP)된 검수보고서
- * 가시성: isProc(구매팀)면 finalDocs 전체, 일반은 본인 관련(기안자 또는 결재 참여자)
+ * 검수보고서 목록을 1회 read하여 세 가지 목록 생성
+ *  - myInspPending:  내가 현재 결재할 차례인 검수보고서 (status가 진행중 + 내 단계 + 대기)
+ *  - inspFinals:     최종 선택(IS_FINAL=Y)되어 최종승인(INSP)된 검수보고서
+ *  - allInspPending: [결재 메뉴 세분화] 관리자 전용 — 결재자가 누구든 모든 대기 검수보고서
+ * 가시성: isProc(구매팀)면 inspFinals 전체, 일반은 본인 관련(기안자 또는 결재 참여자)
  * @param {Spreadsheet} ss 열린 스프레드시트
  * @param {string} actor 로그인 이메일(소문자)
  * @param {boolean} isProc 구매팀 여부
- * @returns {Object} { myInspPending: [], inspFinals: [] }
+ * @param {boolean} isAdmin 관리자 여부 (allInspPending 수집 게이트)
+ * @returns {Object} { myInspPending: [], inspFinals: [], allInspPending: [] }
  */
-function _getInspMenusForClient(ss, actor, isProc) {
-  var out = { myInspPending: [], inspFinals: [] };
+function _getInspMenusForClient(ss, actor, isProc, isAdmin) {
+  var out = { myInspPending: [], inspFinals: [], allInspPending: [] };
   try {
     var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
     if (!sheet || sheet.getLastRow() < 2) return out;
@@ -1050,7 +1052,11 @@ function _getInspMenusForClient(ss, actor, isProc) {
       var token = String(r[INSP_COL.TOKEN] || '');
       if (!token) continue;
       var status    = String(r[INSP_COL.STATUS] || '');
-      var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
+      // ⚠ apprCount는 반드시 MAX_APPROVERS로 클램프할 것.
+      //   inspApprCol은 범위 초과 시 throw하고 이 함수 전체가 try/catch로 감싸여 있어,
+      //   시트에 apprCount가 깨진 행이 하나만 있어도 아래 amParticipant 루프나
+      //   _findMyInspIdx에서 튕겨 모든 사용자의 검수 메뉴가 통째로 비어버린다.
+      var apprCount = Math.min(parseInt(r[INSP_COL.APPR_COUNT]) || 0, INSP_COL.MAX_APPROVERS);
       var curIdx    = parseInt(r[INSP_COL.APPR_IDX]) || 0;
       var isFinal   = String(r[INSP_COL.IS_FINAL] || '') === 'Y';
 
@@ -1080,11 +1086,23 @@ function _getInspMenusForClient(ss, actor, isProc) {
         if (String(r[inspApprCol(pa, 2)] || '').toLowerCase() === actor) { amParticipant = true; break; }
       }
 
-      // 내 검수 결재 대기: 진행중 + 내가 현재 차례 + 현재 차례 블록 status가 '대기'
-      if (myIdx >= 0 && myIdx === curIdx &&
-          (status === '검토중' || status.indexOf('결재중') >= 0)) {
-        var myStatus = String(r[inspApprCol(myIdx, 3)] || '');
-        if (myStatus === '대기') out.myInspPending.push(meta);
+      // 결재 대기 판정: 진행중 + 현재 차례 블록 status가 '대기'
+      //  - myInspPending  : 현재 차례가 '나' (동일인 다단계 대응은 _findMyInspIdx가 처리)
+      //  - allInspPending : 관리자용 — 현재 결재자가 누구든 수집 (반드시 curIdx 기준.
+      //                     myIdx는 '접속자의' 단계라 남의 문서에는 의미가 없다)
+      // curValid: apprCount는 위에서 이미 클램프됐으므로 curIdx 범위만 확인하면 된다.
+      var inProgress = (status === '검토중' || status.indexOf('결재중') >= 0);
+      var curValid   = (curIdx >= 0 && curIdx < apprCount);
+      if (inProgress && curValid && String(r[inspApprCol(curIdx, 3)] || '') === '대기') {
+        var pendMeta = Object.assign({}, meta, {
+          stageIdx:     curIdx,
+          stageKind:    (curIdx === 0 ? 'drafter' : 'approver'),
+          curApprName:  String(r[inspApprCol(curIdx, 1)] || ''),
+          curApprEmail: String(r[inspApprCol(curIdx, 2)] || ''),
+          apprCount:    apprCount,
+        });
+        if (myIdx >= 0 && myIdx === curIdx) out.myInspPending.push(pendMeta);
+        if (isAdmin) out.allInspPending.push(pendMeta);
       }
 
       // 최종 완료(INSP): IS_FINAL=Y && 최종승인(INSP)
@@ -1099,6 +1117,7 @@ function _getInspMenusForClient(ss, actor, isProc) {
     }
 
     out.myInspPending.sort(function (a, b) { return (a.submitAt || '').localeCompare(b.submitAt || ''); });
+    out.allInspPending.sort(function (a, b) { return (a.submitAt || '').localeCompare(b.submitAt || ''); });
     out.inspFinals.sort(function (a, b) { return (b.submitAt || '').localeCompare(a.submitAt || ''); });
   } catch (e) {
     console.error('[INSP] _getInspMenusForClient 실패: ' + e.toString());

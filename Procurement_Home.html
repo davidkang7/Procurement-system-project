@@ -89,6 +89,25 @@
   /* 카운트 배지: 수량 > 0 → 브랜드 그라데이션 / 0 → 회색 */
   .nav-count { background: var(--grad-brand); color: #fff; font-size: 10px; padding: 1px 7px; border-radius: var(--radius-pill); font-weight: 700; min-width: 18px; text-align: center; font-variant-numeric: tabular-nums; }
   .nav-count.zero { background: #C9C9C9; }
+  /* 결재 메뉴 2단 트리 */
+  .nav-item.nav-parent .nav-label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  /* 캐럿은 '▶' 한 글자를 회전시킨다 ('▶'/'▼' 교체는 자간이 달라 라벨이 흔들림) */
+  .nav-caret { display: inline-block; width: 9px; flex-shrink: 0; font-size: 9px; color: var(--ink-mute); transition: transform 0.15s; }
+  .nav-caret.open { transform: rotate(90deg); }
+  .nav-item.active .nav-caret { color: var(--brand); }
+  .nav-item.branch-on { color: var(--ink); font-weight: 700; }   /* 자식이 선택된 부모 */
+  .nav-item.nav-child { padding-left: 31px; font-size: 12px; }
+  .nav-item.nav-child .nav-count { font-size: 9.5px; padding: 1px 6px; min-width: 16px; }
+  /* 대기 건이 있는 메뉴 강조 (기존에 클래스만 붙고 규칙이 없던 .urgent를 실제로 동작시킴) */
+  .nav-item.urgent .nav-count { box-shadow: 0 0 0 2px rgba(131,22,26,0.14); }
+
+  /* 결재 조회 범위 토글 (관리자 전용) */
+  .scope-switch { display: flex; margin-bottom: 14px; }
+  .scope-btn { padding: 6px 15px; border: 1px solid var(--line); background: #fff; color: var(--ink-mute); font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  .scope-btn:first-child { border-radius: var(--radius-btn) 0 0 var(--radius-btn); }
+  .scope-btn:last-child { border-radius: 0 var(--radius-btn) var(--radius-btn) 0; border-left: none; }
+  .scope-btn:hover { background: var(--neutral-soft); }
+  .scope-btn.on { background: var(--grad-brand); color: #fff; border-color: transparent; }
 
   .content { padding: 22px 28px; }
   .page-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--hairline); }
@@ -326,10 +345,103 @@ var STATE = {
   loading: false,
   openCompleted: {},   // [INSP Step 2] 결재 완료 아코디언 열림 상태 (prcToken → bool)
   page: {},   // 메뉴별 현재 페이지 (menuKey → 1-based). 필터/메뉴 변경 시 1로 리셋
+  navOpen: {},         // [결재 메뉴 세분화] 결재 트리 부모 펼침 상태 (parentKey → bool)
+  apprScope: 'mine',   // [결재 메뉴 세분화] 결재 조회 범위: 'mine' | 'all' (관리자 전용)
 };
 
 // 리스트 페이지당 최대 표시 항목 수 (관리자 메뉴 제외 — home에서 처리되는 모든 리스트 공통)
 var PAGE_SIZE = 20;
+
+// ─── [결재 메뉴 세분화] 결재 트리 정의 ─────────────────────────────
+// 사이드바 / 페이지 / 딥링크 화이트리스트가 전부 여기서 파생된다.
+// 메뉴 키 문자열을 두 곳 이상에 쓰지 말 것.
+var APPROVAL_TREE = [
+  { key:'pending_req',  label:'품의 결재 대기',       src:'req',  docType:'REQ',
+    title:'품의 결재 대기',       panelTitle:'결재 대기 중인 품의',
+    sub:'내가 다음에 결재해야 할 구매품의서입니다.' },
+  { key:'pending_prc',  label:'구매 결재 대기',       src:'req',  docType:'PRC',
+    title:'구매 결재 대기',       panelTitle:'결재 대기 중인 구매 문서',
+    sub:'내가 다음에 결재해야 할 구매 문서입니다.' },
+  { key:'pending_insp', label:'검수보고서 결재 대기', src:'insp',
+    title:'검수보고서 결재 대기', panelTitle:'검수 결재 대기',
+    sub:'내가 다음에 결재해야 할 검수보고서입니다. 행을 클릭하면 본문·사진을 확인하고 결재할 수 있습니다.' },
+];
+// 자식 메뉴 = 부모의 KPI 세그먼트. 자식 메뉴키 = 부모키 + '_' + 세그먼트키
+//   drafter  : 내 결재 단계가 0 (결재선 블록 0 = 기안자 자기결재)
+//   approver : 내 결재 단계가 1 이상 (남이 나에게 요청한 결재)
+var APPROVAL_SEGS = [
+  { key:'all',      label:'전체' },
+  { key:'drafter',  label:'기안자 결재' },
+  { key:'approver', label:'결재자 결재' },
+];
+// 구 메뉴 키 호환 — 과거 북마크/방문기록의 ?menu= 값을 신규 키로 변환
+var MENU_ALIAS = { pending: 'pending_req', insp_pending: 'pending_insp' };
+
+// 메뉴 키(부모/자식 무관) → 트리 노드. 결재 메뉴가 아니면 null
+function apprNodeFor(key){
+  var base = String(key || '').replace(/_(drafter|approver)$/, '');
+  for(var i = 0; i < APPROVAL_TREE.length; i++){
+    if(APPROVAL_TREE[i].key === base) return APPROVAL_TREE[i];
+  }
+  return null;
+}
+function isApprMenu(key){ return !!apprNodeFor(key); }
+function isApprChild(key){ return /_(drafter|approver)$/.test(String(key || '')) && isApprMenu(key); }
+function apprChildSeg(key){
+  var m = String(key || '').match(/_(drafter|approver)$/);
+  return m ? m[1] : 'all';
+}
+// 필터/페이지/컬럼필터의 정규 키 — 자식 메뉴는 부모의 페이지 상태를 그대로 공유한다.
+// (자식 키는 '라우트'일 뿐이고 렌더되는 페이지는 부모 페이지 + 카드 선택 상태)
+function pageKeyFor(menu){
+  var n = apprNodeFor(menu);
+  return n ? n.key : menu;
+}
+// 결재 메뉴 키 전체 (부모 3 + 자식 6 = 9개) — 딥링크 화이트리스트용
+function apprAllMenuKeys(){
+  var out = [];
+  APPROVAL_TREE.forEach(function(n){
+    out.push(n.key, n.key + '_drafter', n.key + '_approver');
+  });
+  return out;
+}
+
+// ─── [결재 메뉴 세분화] 카운트 파생 ─────────────────────────────
+// 사이드바 배지와 페이지 KPI 카드가 이 체인을 공유한다.
+// 덕분에 관리자 범위 토글이 배지 숫자까지 한 번에 바꾼다(요구사항 9).
+function canUseApprScope(){ return !!(STATE.user || {}).isAdmin; }
+// ⚠ 관리자 확인은 토글 노출 여부가 아니라 여기에 둔다.
+//   STATE가 어떤 이유로든 'all'이 되어도 비관리자는 'mine'으로 안전하게 퇴화한다.
+function apprScopeIsAll(){ return STATE.apprScope === 'all' && canUseApprScope(); }
+
+// 현재 범위에 해당하는 원본 배열
+function apprSourceRows(src){
+  var d = STATE.data || {};
+  if(src === 'insp') return (apprScopeIsAll() ? d.allInspPending : d.myInspPending) || [];
+  return (apprScopeIsAll() ? d.allPending : d.myPending) || [];
+}
+
+// 부모 노드의 전체 행 (문서 종류 분기 포함, 최신순)
+function apprParentRows(node){
+  var rows = sortByNewest(apprSourceRows(node.src));
+  if(node.docType){
+    rows = rows.filter(function(x){ return x.docType === node.docType; });
+  }
+  return rows;
+}
+
+// 부모 노드 → [전체, 기안자 결재, 결재자 결재]
+// 분류는 stageKind 문자열이 아니라 숫자 stageIdx로 판정한다.
+// 구버전 서버 응답(stageIdx 없음)은 -1로 떨어져 전체에만 잡히고 자식 배지를 부풀리지 않는다.
+function apprSegments(node){
+  var rows = apprParentRows(node);
+  function stage(x){ return (typeof x.stageIdx === 'number') ? x.stageIdx : -1; }
+  return [
+    { key:'all',      label:APPROVAL_SEGS[0].label, rows: rows },
+    { key:'drafter',  label:APPROVAL_SEGS[1].label, rows: rows.filter(function(x){ return stage(x) === 0; }) },
+    { key:'approver', label:APPROVAL_SEGS[2].label, rows: rows.filter(function(x){ return stage(x) >= 1; }) },
+  ];
+}
 
 // [INSP Step 2] 검수보고서 작성 화면 활성 여부 — Step 3 배포 시 true로 변경
 var INSP_FORM_ENABLED = true;   // [INSP Step 3] 작성 화면 활성화
@@ -337,9 +449,17 @@ var INSP_FORM_ENABLED = true;   // [INSP Step 3] 작성 화면 활성화
 // ─── 부팅 ─────────────────────────────
 function boot(){
   // 메일 링크로 전달된 기본 메뉴가 유효하면 초기 선택 메뉴로 적용
-  var ALLOWED_INITIAL_MENUS = ['mydocs','completed','pending','insp_pending','final','inbox','myprc'];
-  if(INITIAL_MENU && ALLOWED_INITIAL_MENUS.indexOf(INITIAL_MENU) >= 0){
-    STATE.currentMenu = INITIAL_MENU;
+  var ALLOWED_INITIAL_MENUS = ['mydocs','completed','final','inbox','myprc'].concat(apprAllMenuKeys());
+  // 구 키(pending / insp_pending)를 신규 키로 먼저 치환 → 화이트리스트에는 정식 키만 등재
+  var menu = MENU_ALIAS[INITIAL_MENU] || INITIAL_MENU;
+  if(menu && ALLOWED_INITIAL_MENUS.indexOf(menu) >= 0){
+    STATE.currentMenu = menu;
+    var node = apprNodeFor(menu);
+    if(node){
+      // 결재 메뉴로 진입하면 해당 부모를 펼치고 대응 카드를 선택한 상태로 시작
+      STATE.navOpen[node.key] = true;
+      STATE.filters[node.key] = isApprChild(menu) ? apprChildSeg(menu) : 'all';
+    }
   }
   loadHome();
 }
@@ -425,10 +545,6 @@ function renderSidebar(){
     { key: 'mydocs',    label: '기안 문서', count: (d.myDocs || []).length },
     { key: 'completed', label: '결재 완료 + 검수보고서 제출', count: (d.completedDocs || []).length },   // [INSP Step 2/5]
   ];
-  var approvalMenu = [
-    { key: 'pending',      label: '결재 대기', count: (d.myPending || []).length, urgent: (d.myPending || []).length > 0 },
-    { key: 'insp_pending', label: '검수보고서 결재 대기', count: (d.myInspPending || []).length, urgent: (d.myInspPending || []).length > 0 },   // [INSP Step 5]
-  ];
   var lookupMenu = [
     { key: 'final', label: '최종 완료 문서 조회', count: (d.finalDocs || []).length },   // [INSP Step 5]
   ];
@@ -445,10 +561,19 @@ function renderSidebar(){
   html += '<div class="nav-item" data-menu="new" style="background:var(--grad-brand);color:#fff;margin-top:8px;font-weight:700;justify-content:center;box-shadow:var(--shadow-btn);">+ 신규 작성</div>';
   html += '</div>';
 
-  // ── 결재 메뉴 ──
+  // ── 결재 메뉴 (2단 트리) ──
+  // 부모: 문서 종류(품의/구매/검수보고서) · 자식: 결재 성격(기안자/결재자)
   html += '<div class="nav-section">';
   html += '<div class="nav-section-title">결재 메뉴</div>';
-  approvalMenu.forEach(function(m){ html += renderNavItem(m); });
+  APPROVAL_TREE.forEach(function(node){
+    var segs = apprSegments(node);
+    var open = !!STATE.navOpen[node.key];
+    html += renderNavParent(node, segs[0].rows.length, open);
+    if(open){
+      html += renderNavChild(node.key + '_drafter',  segs[1].label, segs[1].rows.length);
+      html += renderNavChild(node.key + '_approver', segs[2].label, segs[2].rows.length);
+    }
+  });
   html += '</div>';
 
   // ── 조회 메뉴 ──
@@ -501,6 +626,22 @@ function renderSidebar(){
         window.top.location.href = WEBAPP_URL + '?action=admin&fn=force_release_lock';
         return;
       }
+      // [결재 메뉴 세분화] 결재 트리: 펼침 토글 + 목록 이동을 함께 처리
+      if(isApprMenu(key)){
+        var node = apprNodeFor(key);
+        if(isApprChild(key)){
+          STATE.navOpen[node.key] = true;              // 자식 선택 시 부모는 항상 펼친 상태 유지
+          STATE.filters[node.key] = apprChildSeg(key);
+        } else {
+          // 부모: 이미 펼쳐져 있고 현재 보고 있는 메뉴면 접기, 그 외에는 펼치기 + 전체 목록
+          var collapse = (STATE.navOpen[node.key] && STATE.currentMenu === node.key);
+          STATE.navOpen[node.key] = !collapse;
+          STATE.filters[node.key] = 'all';
+        }
+        STATE.page[node.key] = 1;   // 필터가 바뀌므로 첫 페이지로
+        showMenu(key);
+        return;
+      }
       showMenu(key);
     });
   });
@@ -513,6 +654,29 @@ function renderNavItem(m){
     + '</div>';
 }
 
+// [결재 메뉴 세분화] 트리 부모 행 — 캐럿 + 라벨 + 배지
+//   캐럿은 '▶' 한 글자를 CSS로 회전시킨다. '▶'/'▼' 글자 교체는 자간이 달라
+//   토글할 때마다 라벨이 좌우로 흔들린다.
+function renderNavParent(node, count, open){
+  var selected = (STATE.currentMenu === node.key);
+  var childOn  = isApprChild(STATE.currentMenu) && apprNodeFor(STATE.currentMenu) === node;
+  return '<div class="nav-item nav-parent' + (selected ? ' active' : '') + (childOn ? ' branch-on' : '')
+       + (count > 0 ? ' urgent' : '') + '" data-menu="' + node.key + '">'
+    + '<span class="nav-label"><span class="nav-caret' + (open ? ' open' : '') + '">▶</span>'
+    + escHtml(node.label) + '</span>'
+    + '<span class="nav-count' + (count > 0 ? '' : ' zero') + '">' + count + '</span>'
+    + '</div>';
+}
+
+// [결재 메뉴 세분화] 트리 자식 행 — 배지 처리는 부모/기존 메뉴와 동일 규칙
+function renderNavChild(key, label, count){
+  return '<div class="nav-item nav-child' + (STATE.currentMenu === key ? ' active' : '')
+       + '" data-menu="' + key + '">'
+    + '<span>' + escHtml(label) + '</span>'
+    + '<span class="nav-count' + (count > 0 ? '' : ' zero') + '">' + count + '</span>'
+    + '</div>';
+}
+
 function showMenu(key){
   STATE.currentMenu = key;
   renderSidebar();
@@ -522,13 +686,13 @@ function showMenu(key){
 // ─── 콘텐츠 ─────────────────────────────
 function renderContent(){
   var key = STATE.currentMenu;
+  var apprNode = apprNodeFor(key);   // [결재 메뉴 세분화] 부모/자식 모두 같은 페이지 렌더러로
   var html;
-  if(key === 'mydocs')  html = renderMyDocs();
-  else if(key === 'pending') html = renderPending();
+  if(apprNode) html = renderApprPage(apprNode);
+  else if(key === 'mydocs')  html = renderMyDocs();
   else if(key === 'inbox')   html = renderInbox();
   else if(key === 'myprc')   html = renderMyPrc();
   else if(key === 'completed') html = renderCompleted();   // [INSP Step 2]
-  else if(key === 'insp_pending') html = renderInspPending();   // [INSP Step 5]
   else if(key === 'final') html = renderFinal();                // [INSP Step 5]
   else html = '<div class="empty">알 수 없는 메뉴입니다.</div>';
   document.getElementById('content').innerHTML = html;
@@ -536,11 +700,36 @@ function renderContent(){
 }
 
 function attachContentHandlers(){
+  // [결재 메뉴 세분화] 관리자 조회 범위 토글 (내 결재만 / 전체)
+  Array.from(document.querySelectorAll('[data-appr-scope]')).forEach(function(el){
+    el.addEventListener('click', function(){
+      var v = el.getAttribute('data-appr-scope');
+      if(!canUseApprScope() || STATE.apprScope === v) return;
+      STATE.apprScope = v;
+      // 행 집합과 컬럼 구성('현재 결재자' 열 유무)이 모두 바뀐다.
+      // ⚠ colFilters는 컬럼 '인덱스'로 키를 잡으므로, 열이 삽입되면 저장된 필터가
+      //   엉뚱한 컬럼에 걸린다. 반드시 초기화할 것.
+      APPROVAL_TREE.forEach(function(n){
+        STATE.page[n.key] = 1;
+        delete STATE.colFilters[n.key];
+      });
+      renderSidebar();   // 사이드바 배지 숫자도 선택 범위 기준으로 전환
+      renderContent();
+    });
+  });
   // KPI 카드 필터 (모든 메뉴 통일) — 카드를 누르면 현재 메뉴의 필터가 바뀜
   Array.from(document.querySelectorAll('[data-kpi]')).forEach(function(el){
     el.addEventListener('click', function(){
-      STATE.filters[STATE.currentMenu] = el.getAttribute('data-kpi');
-      STATE.page[STATE.currentMenu] = 1;   // 필터 변경 → 첫 페이지로
+      var pk  = pageKeyFor(STATE.currentMenu);   // 자식 메뉴여도 부모 키로 정규화
+      var seg = el.getAttribute('data-kpi');
+      STATE.filters[pk] = seg;
+      STATE.page[pk] = 1;   // 필터 변경 → 첫 페이지로
+      // [결재 메뉴 세분화] 카드 선택을 사이드바 트리 선택에도 반영 (양방향 동기화)
+      if(isApprMenu(pk)){
+        STATE.currentMenu = (seg === 'all') ? pk : (pk + '_' + seg);
+        STATE.navOpen[pk] = true;
+        renderSidebar();
+      }
       renderContent();
     });
   });
@@ -629,7 +818,10 @@ function attachColumnFilters(){
   closeColFilterPop();
   var content = document.getElementById('content');
   if(!content) return;
-  var menuKey = STATE.currentMenu;
+  // ⚠ 반드시 부모 키로 정규화. 결재 자식 메뉴(pending_req_drafter 등)는 부모 페이지를
+  //   렌더하므로 페이저 컨테이너 id도 부모 키(pager-pending_req)다.
+  //   currentMenu를 그대로 쓰면 renderPager가 DOM을 못 찾고 페이지네이션이 사라진다.
+  var menuKey = pageKeyFor(STATE.currentMenu);
   Array.from(content.querySelectorAll('table')).forEach(function(table){
     if(table.classList.contains('insp-sub-table')) return;   // 아코디언 하위 표는 제외
     if(!table.tHead || !table.tHead.rows.length) return;
@@ -921,19 +1113,44 @@ function renderMyDocs(){
       });
 }
 
-function renderPending(){
-  var d = STATE.data || {};
-  var rows = sortByNewest(d.myPending);   // 최신순 (서버 미정렬 → 클라이언트 정렬)
-  var segments = [
-    { key:'all', label:'전체', rows: rows },
-    { key:'REQ', label:'품의', rows: rows.filter(function(x){ return x.docType === 'REQ'; }) },
-    { key:'PRC', label:'구매', rows: rows.filter(function(x){ return x.docType === 'PRC'; }) },
-  ];
-  return pageHead('내 결재 대기함', '내가 다음에 결재해야 할 문서 목록입니다.')
-    + kpiFilterSection('pending', segments, {
-        panelTitle: '결재 대기 중인 문서',
-        renderTable: function(r){ return tableOfDocs(r, 'pending'); }
+// ─── [결재 메뉴 세분화] 결재 대기 3개 메뉴 공통 페이지 ─────────────────────────────
+// 품의/구매/검수보고서의 차이는 전부 APPROVAL_TREE 노드에 담겨 있으므로 렌더러는 하나면 된다.
+function renderApprPage(node){
+  var segs = apprSegments(node);
+  var showAll = apprScopeIsAll();
+  var sub = showAll ? '전체 사용자의 결재 대기 현황입니다. (관리자 조회)' : node.sub;
+  return pageHead(node.title, sub)
+    + apprScopeToggle()
+    + kpiFilterSection(node.key, segs, {
+        panelTitle:  node.panelTitle,
+        scopeSuffix: showAll ? ' · 전체' : '',
+        renderTable: function(rows){
+          return node.src === 'insp'
+            ? inspPendingTable(rows, showAll)
+            : tableOfDocs(rows, 'pending', showAll);
+        }
       });
+}
+
+// 관리자 전용 조회 범위 토글 — 비관리자에게는 렌더되지 않음
+function apprScopeToggle(){
+  if(!canUseApprScope()) return '';
+  var s = STATE.apprScope;
+  return '<div class="scope-switch">'
+    + '<button type="button" class="scope-btn' + (s === 'mine' ? ' on' : '') + '" data-appr-scope="mine">내 결재만</button>'
+    + '<button type="button" class="scope-btn' + (s === 'all'  ? ' on' : '') + '" data-appr-scope="all">전체</button>'
+    + '</div>';
+}
+
+// 현재 결재자 셀 (전체 모드 전용)
+// ⚠ 반드시 한 줄 텍스트. distinctColValues가 cell.textContent를 컬럼 필터 값으로 쓰므로
+//   개행이나 블록 요소가 들어가면 필터 목록이 깨진다.
+function apprCell(r){
+  var who   = r.curApprName || r.curApprEmail || '-';
+  // 단계 표기는 Procurement_Approval.html의 규칙과 동일 (0 = 기안자, 1+ = 결재자 N)
+  var stage = (r.stageIdx === 0) ? '기안자' : ('결재자 ' + r.stageIdx);
+  return '<span title="' + escAttr(r.curApprEmail || '') + '">'
+    + escHtml(who) + ' (' + escHtml(stage) + ')</span>';
 }
 
 function renderInbox(){
@@ -967,34 +1184,21 @@ function renderMyPrc(){
       });
 }
 
-// ─── [INSP Step 5] 내 검수보고서 결재 대기 ─────────────────────────────
-function renderInspPending(){
-  var d = STATE.data || {};
-  var rows = sortByNewest(d.myInspPending);   // 최신순 (서버는 오래된 순 → 최신순으로 재정렬)
-  var segments = [
-    { key:'all',    label:'전체',     rows: rows },
-    { key:'final',  label:'최종 검수', rows: rows.filter(function(x){ return !!x.isFinal; }) },
-    { key:'normal', label:'일반 검수', rows: rows.filter(function(x){ return !x.isFinal; }) },
-  ];
-  return pageHead('내 검수보고서 결재 대기', '내가 다음에 결재해야 할 검수보고서입니다. 행을 클릭하면 본문·사진을 확인하고 결재할 수 있습니다.')
-    + kpiFilterSection('insp_pending', segments, {
-        panelTitle: '검수 결재 대기',
-        renderTable: inspPendingTable
-      });
-}
-
-// 검수보고서 결재 대기 — 표 본문
-function inspPendingTable(rows){
+// 검수보고서 결재 대기 — 표 본문 (showAppr: 관리자 전체 모드에서 '현재 결재자' 열 추가)
+function inspPendingTable(rows, showAppr){
   if(!rows || rows.length === 0){
     return '<div class="empty"><div class="empty-icon">📭</div>결재할 검수보고서가 없습니다.</div>';
   }
-  var body = '<table><thead><tr><th>검수보고서 번호</th><th>PO 번호</th><th>품명</th><th>거래처</th><th>판정</th><th>입고일</th></tr></thead><tbody>';
+  var body = '<table><thead><tr><th>검수보고서 번호</th><th>PO 번호</th><th>품명</th><th>거래처</th>'
+    + (showAppr ? '<th>현재 결재자</th>' : '')
+    + '<th>판정</th><th>입고일</th></tr></thead><tbody>';
   rows.forEach(function(r){
     body += '<tr class="row-clickable" data-insp-view="' + escAttr(r.token) + '">'
       + '<td><span class="docno ir">' + escHtml(r.docNo) + '</span>' + (r.isFinal ? ' <span class="final-flag">★최종</span>' : '') + '</td>'
       + '<td><span class="docno prc">' + escHtml(r.poNo) + '</span></td>'
       + '<td>' + escHtml(r.subject) + '</td>'
       + '<td>' + escHtml(r.vendorName) + '</td>'
+      + (showAppr ? '<td>' + apprCell(r) + '</td>' : '')
       + '<td>' + escHtml(r.verdict || '-') + '</td>'
       + '<td>' + escHtml(r.receivedDate) + '</td>'
       + '</tr>';
@@ -1192,7 +1396,7 @@ function inspSubRows(x){
 }
 
 // ─── 표 렌더 ─────────────────────────────
-function tableOfDocs(rows, mode){
+function tableOfDocs(rows, mode, showAppr){
   if(!rows || rows.length === 0){
     return '<div class="empty"><div class="empty-icon">📭</div>표시할 문서가 없습니다.</div>';
   }
@@ -1204,8 +1408,10 @@ function tableOfDocs(rows, mode){
     html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>거래처</th><th class="num">금액</th><th>상태</th><th></th></tr></thead><tbody>';
     rows.forEach(function(r){ html += myPrcRow(r); });
   } else if(mode === 'pending'){
-    html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>기안자</th><th>거래처</th><th class="num">금액</th><th>상태</th></tr></thead><tbody>';
-    rows.forEach(function(r){ html += pendingRow(r); });
+    html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>기안자</th>'
+      + (showAppr ? '<th>현재 결재자</th>' : '')
+      + '<th>거래처</th><th class="num">금액</th><th>상태</th></tr></thead><tbody>';
+    rows.forEach(function(r){ html += pendingRow(r, showAppr); });
   } else {
     html += '<thead><tr><th>유형</th><th>품의번호</th><th>제목</th><th>기안자</th><th>거래처</th><th class="num">금액</th><th>상태</th><th>제출일</th></tr></thead><tbody>';
     rows.forEach(function(r){ html += docRow(r); });
@@ -1260,12 +1466,13 @@ function myPrcRow(r){
     + '</tr>';
 }
 
-function pendingRow(r){
+function pendingRow(r, showAppr){
   return '<tr class="row-clickable" data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '">'
     + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(docTypeText(r.docType)) + '</span></td>'
     + '<td><span class="' + (r.docType === 'PRC' ? 'docno prc' : 'docno') + '">' + escHtml(r.docNo) + '</span></td>'
     + '<td>' + escHtml(r.subject) + '</td>'
     + '<td>' + escHtml(r.drafter) + '</td>'
+    + (showAppr ? '<td>' + apprCell(r) + '</td>' : '')
     + '<td>' + escHtml(r.vendorName) + '</td>'
     + '<td class="num">' + fmtAmt(r.amount) + '</td>'
     + '<td>' + statusBadge(r.status) + '</td>'
