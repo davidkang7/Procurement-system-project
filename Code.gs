@@ -1124,6 +1124,13 @@ function _decisionCore(payload) {
       var nextIdx = idx + 1;
       sheet.getRange(rowNum, COL.APPR_IDX + 1).setValue(nextIdx);
 
+      // 결재 알림 메일 부가정보 — 락 안에서 이미 읽은 r만 사용 (추가 시트 조회 없음).
+      // 다음 결재자 메일 / 최종 승인 메일 / PRC 검수안내 메일이 공유한다.
+      var mailExtra = buildMailExtraInfo(
+        r[COL.PURPOSE], r[COL.VENDOR_NAME],
+        parseItemsSummary(String(r[COL.ITEMS] || '')),
+        r[COL.TOTAL_AMT], r[COL.REMARKS]);
+
       if (nextIdx < apprCount) {
         // 다음 결재자에게 이메일
         var nb = COL.APPR_START + nextIdx * COL.APPR_COLS;
@@ -1140,6 +1147,7 @@ function _decisionCore(payload) {
               subject: subject,
               drafter: drafter,
               issueDate: toDateStr(issueDate),
+              extra: mailExtra,
             },
             token: token,
             rowNum: rowNum,
@@ -1162,6 +1170,7 @@ function _decisionCore(payload) {
         issueDate: toDateStr(issueDate),
         token: token,
         docType: docType,
+        extra: mailExtra,
       };
 
       // PRC 최종 승인 → 원 REQ 기안자에게 '검수보고서 작성 가능' 안내를 위해
@@ -1202,7 +1211,7 @@ function _decisionCore(payload) {
     } else if (n.type === 'completion') {
       // 완료 알림 메일은 수신자 이메일이 있을 때만 발송 (없어도 PDF 생성·큐에는 영향 없음)
       if (n.toEmail) {
-        sendCompletionNoticeWithRetry(n.toEmail, n.drafter, n.docNo, n.subject, n.issueDate, n.token);
+        sendCompletionNoticeWithRetry(n.toEmail, n.drafter, n.docNo, n.subject, n.issueDate, n.token, n.extra);
       } else {
         // 수신자 누락은 조용히 넘기지 않고 관리자에게 알림 — PDF 생성은 계속 진행
         notifyAdminError('완료 알림 수신자 이메일 누락: ' + n.docNo + ' (' + n.docType + ') — 메일은 건너뛰고 PDF 생성은 진행');
@@ -1222,7 +1231,8 @@ function _decisionCore(payload) {
       if (n.docType === 'PRC') {
         if (n.reqDrafterEmail) {
           try {
-            sendInspReadyNoticeWithRetry(n.reqDrafterEmail, n.reqDrafter, n.reqDocNo, n.subject, n.docNo);
+            // extra는 PRC 행 기준 — 구매팀이 최종 확정한 업체명·품목·금액을 안내한다.
+            sendInspReadyNoticeWithRetry(n.reqDrafterEmail, n.reqDrafter, n.reqDocNo, n.subject, n.docNo, n.extra);
           } catch(e) {
             notifyAdminError('검수보고서 안내 메일 실패: ' + n.docNo + ' / ' + e.toString());
           }
@@ -3257,10 +3267,13 @@ function sendApprovalEmailWithRetry(approver, data, token, rowNum, idx) {
   var approverLabel = escapeHtml(approver.label);
   var approverEmail = approver.email;
 
-  var docNo     = escapeHtml(data.docNo || '-');
-  var docTitle  = escapeHtml(data.subject || '구매품의서');
-  var drafter   = escapeHtml(data.drafter || '-');
-  var issueDate = escapeHtml(toDateStr(data.issueDate) || '-');
+  // 정보 카드의 값 이스케이프는 _mailRow가 담당한다.
+
+  // 부가정보: 폼 payload 경로(최초제출/재상신/PRC제출)는 data에서 직접 만들고,
+  // 다음 결재자 경로(_decisionCore)는 시트 row로 미리 만들어 data.extra로 받는다.
+  var extra = data.extra || buildMailExtraInfo(
+    data.purpose, data.vendorName, data.items,
+    (data.totalAmt != null ? data.totalAmt : calcTotal(data.items)), data.remarks);
 
   var base = CONFIG.WEBAPP_URL +
     '?token=' + encodeURIComponent(token) +
@@ -3283,10 +3296,12 @@ function sendApprovalEmailWithRetry(approver, data, token, rowNum, idx) {
     + '아래 구매품의서에 대한 결재를 요청합니다.<br>내용을 확인하신 후 승인 또는 반려해 주세요.</p>'
     + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">'
     + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
-    + '<tr><td style="color:#888;padding:4px 0;width:80px;">품의번호</td><td style="color:#111;font-weight:600;">' + docNo + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">품의제목</td><td style="color:#111;font-weight:600;">' + docTitle + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">기안자</td><td style="color:#111;">' + drafter + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">발행일자</td><td style="color:#111;">' + issueDate + '</td></tr>'
+    + _mailRow('품의번호', data.docNo || '-', true)
+    + _mailRow('품의제목', data.subject || '구매품의서', true)
+    + (extra ? _mailRow('용도 / 공사내역', extra.purpose) : '')
+    + _mailRow('기안자', data.drafter || '-')
+    + _mailRow('발행일자', toDateStr(data.issueDate) || '-')
+    + _mailExtraRowsHtml(extra)
     + '</table></div>'
     + '<table role="presentation" align="center" style="margin:0 auto 20px auto;border-collapse:collapse;">'
     + '<tr><td align="center" bgcolor="#1a6fc4" style="border-radius:6px;">'
@@ -3306,15 +3321,22 @@ function sendApprovalEmailWithRetry(approver, data, token, rowNum, idx) {
   var plainBody = [
     approver.name + ' ' + approver.label + ' 님,', '',
     '아래 구매품의서에 대한 결재를 요청합니다.', '',
-    '■ 품의번호: ' + (data.docNo || '-'),
-    '■ 품의제목: ' + (data.subject || '-'),
-    '■ 기안자:   ' + (data.drafter || '-'),
-    '■ 발행일자: ' + (toDateStr(data.issueDate) || '-'), '',
+    '■ 품의번호:         ' + (data.docNo || '-'),
+    '■ 품의제목:         ' + (data.subject || '-'),
+  ].concat(
+    extra ? ['■ 용도/공사내역:    ' + extra.purpose] : []
+  ).concat([
+    '■ 기안자:           ' + (data.drafter || '-'),
+    '■ 발행일자:         ' + (toDateStr(data.issueDate) || '-'),
+  ]).concat(
+    _mailExtraLinesText(extra)
+  ).concat([
+    '',
     '▶ 구매품의서 확인: ' + viewUrl,
     '▶ 승인하기: ' + approveUrl,
     '▶ 반려하기: ' + rejectUrl, '',
     '— ' + CONFIG.FROM_NAME,
-  ].join('\n');
+  ]).join('\n');
 
   return sendEmailWithRetry(approverEmail, subject, plainBody, htmlBody);
 }
@@ -3375,11 +3397,8 @@ function sendRejectionNoticeWithRetry(toEmail, drafter, docNo, subject, approver
   return sendEmailWithRetry(toEmail, emailSubject, plainBody, htmlBody);
 }
 
-function sendCompletionNoticeWithRetry(toEmail, drafter, docNo, subject, issueDate, token) {
+function sendCompletionNoticeWithRetry(toEmail, drafter, docNo, subject, issueDate, token, extra) {
   var drafterName  = escapeHtml(drafter || '-');
-  var docNoEsc     = escapeHtml(docNo || '-');
-  var docTitle     = escapeHtml(subject || '구매품의서');
-  var issueDateEsc = escapeHtml(issueDate || '-');
 
   var viewUrl = token ?
     (CONFIG.WEBAPP_URL +
@@ -3399,10 +3418,12 @@ function sendCompletionNoticeWithRetry(toEmail, drafter, docNo, subject, issueDa
     + '아래 버튼을 통해 승인 완료된 구매품의서를 확인하실 수 있습니다.</p>'
     + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">'
     + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
-    + '<tr><td style="color:#888;padding:4px 0;width:80px;">품의번호</td><td style="color:#111;font-weight:600;">' + docNoEsc + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">품의제목</td><td style="color:#111;font-weight:600;">' + docTitle + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">기안자</td><td style="color:#111;">' + drafterName + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">발행일자</td><td style="color:#111;">' + issueDateEsc + '</td></tr>'
+    + _mailRow('품의번호', docNo || '-', true)
+    + _mailRow('품의제목', subject || '구매품의서', true)
+    + (extra ? _mailRow('용도 / 공사내역', extra.purpose) : '')
+    + _mailRow('기안자', drafter || '-')
+    + _mailRow('발행일자', issueDate || '-')
+    + _mailExtraRowsHtml(extra)
     + '</table></div>';
 
   if (viewUrl) {
@@ -3423,11 +3444,16 @@ function sendCompletionNoticeWithRetry(toEmail, drafter, docNo, subject, issueDa
   var plainBodyArr = [
     drafter + ' 님,', '',
     '제출하신 품의서가 최종 승인되었습니다.', '',
-    '■ 품의번호: ' + (docNo || '-'),
-    '■ 품의제목: ' + (subject || '구매품의서'),
-    '■ 기안자:   ' + (drafter || '-'),
-    '■ 발행일자: ' + (issueDate || '-'),
-  ];
+    '■ 품의번호:         ' + (docNo || '-'),
+    '■ 품의제목:         ' + (subject || '구매품의서'),
+  ].concat(
+    extra ? ['■ 용도/공사내역:    ' + extra.purpose] : []
+  ).concat([
+    '■ 기안자:           ' + (drafter || '-'),
+    '■ 발행일자:         ' + (issueDate || '-'),
+  ]).concat(
+    _mailExtraLinesText(extra)
+  );
   if (viewUrl) plainBodyArr.push('', '▶ 구매품의서 확인: ' + viewUrl);
   plainBodyArr.push('', '— ' + CONFIG.FROM_NAME);
 
@@ -3439,11 +3465,8 @@ function sendCompletionNoticeWithRetry(toEmail, drafter, docNo, subject, issueDa
  * '구매팀 결재 완료 & 검수보고서 작성 가능' 안내 메일.
  * 버튼('내 기안 확인')은 홈의 '결재 완료 + 검수보고서 제출' 메뉴가 기본 선택되도록 연결.
  */
-function sendInspReadyNoticeWithRetry(toEmail, reqDrafter, reqDocNo, subject, poNo) {
+function sendInspReadyNoticeWithRetry(toEmail, reqDrafter, reqDocNo, subject, poNo, extra) {
   var drafterName = escapeHtml(reqDrafter || '-');
-  var docNoEsc    = escapeHtml(reqDocNo || '-');
-  var docTitle    = escapeHtml(subject || '구매품의서');
-  var poNoEsc     = escapeHtml(poNo || '-');
 
   // 홈 화면 진입 시 '결재 완료 + 검수보고서 제출'(menu=completed) 메뉴 기본 선택
   var homeUrl = CONFIG.WEBAPP_URL + '?action=home&menu=completed';
@@ -3460,10 +3483,12 @@ function sendInspReadyNoticeWithRetry(toEmail, reqDrafter, reqDocNo, subject, po
     + '이제 아래 버튼을 통해 <b>검수보고서를 작성·제출</b>하실 수 있습니다.</p>'
     + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">'
     + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
-    + '<tr><td style="color:#888;padding:4px 0;width:80px;">품의번호</td><td style="color:#111;font-weight:600;">' + docNoEsc + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">품의제목</td><td style="color:#111;font-weight:600;">' + docTitle + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">구매문서번호</td><td style="color:#111;">' + poNoEsc + '</td></tr>'
-    + '<tr><td style="color:#888;padding:4px 0;">기안자</td><td style="color:#111;">' + drafterName + '</td></tr>'
+    + _mailRow('품의번호', reqDocNo || '-', true)
+    + _mailRow('품의제목', subject || '구매품의서', true)
+    + _mailRow('구매문서번호', poNo || '-')
+    + (extra ? _mailRow('용도 / 공사내역', extra.purpose) : '')
+    + _mailRow('기안자', reqDrafter || '-')
+    + _mailExtraRowsHtml(extra)
     + '</table></div>'
     + '<table role="presentation" align="center" style="margin:0 auto 20px auto;border-collapse:collapse;">'
     + '<tr><td align="center" bgcolor="#1a6fc4" style="border-radius:6px;">'
@@ -3481,13 +3506,20 @@ function sendInspReadyNoticeWithRetry(toEmail, reqDrafter, reqDocNo, subject, po
     (reqDrafter || '-') + ' 님,', '',
     '기안하신 구매품의서에 대한 구매팀 결재가 모두 완료되었습니다.',
     '이제 검수보고서를 작성·제출하실 수 있습니다.', '',
-    '■ 품의번호:     ' + (reqDocNo || '-'),
-    '■ 품의제목:     ' + (subject || '구매품의서'),
-    '■ 구매문서번호: ' + (poNo || '-'),
-    '■ 기안자:       ' + (reqDrafter || '-'), '',
+    '■ 품의번호:         ' + (reqDocNo || '-'),
+    '■ 품의제목:         ' + (subject || '구매품의서'),
+    '■ 구매문서번호:     ' + (poNo || '-'),
+  ].concat(
+    extra ? ['■ 용도/공사내역:    ' + extra.purpose] : []
+  ).concat([
+    '■ 기안자:           ' + (reqDrafter || '-'),
+  ]).concat(
+    _mailExtraLinesText(extra)
+  ).concat([
+    '',
     '▶ 내 기안 확인 (결재 완료 + 검수보고서 제출): ' + homeUrl, '',
     '— ' + CONFIG.FROM_NAME,
-  ].join('\n');
+  ]).join('\n');
 
   return sendEmailWithRetry(toEmail, emailSubject, plainBody, htmlBody);
 }
@@ -3864,6 +3896,71 @@ function calcTotal(items) {
   return (items || []).reduce(function(s, it) {
     return s + toNum(it.qty) * toNum(it.price);
   }, 0);
+}
+
+// ================================================================
+// 18-1. 결재 알림 메일 — 품의 부가정보 (용도/업체/품목/금액/비고)
+// ================================================================
+
+// 품목 요약 라벨: 첫 품목명 + '등 나머지 행 수'
+//   3행 → 'Washer 등 2건' / 2행 → 'Washer 등 1건' / 1행 → 'Washer' / 0행 → '-'
+function buildItemsLabel(items) {
+  if (!items || !items.length) return '-';
+  var first = String(items[0].name || '').trim() || '-';
+  var rest  = items.length - 1;
+  return rest > 0 ? (first + ' 등 ' + rest + '건') : first;
+}
+
+// 부가세 제외 금액 표기. 통화 판정은 getItemsCurrency(첫 품목) 규칙을 그대로 따른다.
+//   KRW → '1,250,000 원' / 외화 → 'USD 12,000 (외자 · 부가세 없음)'
+function formatSupplyAmount(totalAmt, items) {
+  var cur = getItemsCurrency(items);
+  var n   = Number(totalAmt || 0).toLocaleString();
+  return cur === 'KRW' ? (n + ' 원') : (cur + ' ' + n + ' (외자 · 부가세 없음)');
+}
+
+// 메일 3종([결재요청]/[승인완료]/[구매팀 결재 완료])이 공유하는 부가정보 묶음.
+// 폼 payload(items 배열)와 시트 row(parseItemsSummary 결과) 양쪽에서 동일하게 만들 수 있다.
+// _decisionCore 반환값에 실려 클라이언트까지 가므로 문자열만 담는다(직렬화 안전).
+function buildMailExtraInfo(purpose, vendorName, items, totalAmt, remarks) {
+  return {
+    purpose:    String(purpose || '').trim()    || '-',
+    vendorName: String(vendorName || '').trim() || '-',
+    itemsLabel: buildItemsLabel(items),
+    amountText: formatSupplyAmount(totalAmt, items),
+    remarks:    String(remarks || '').trim()    || '-',
+  };
+}
+
+// 정보 카드 1행(HTML).
+// 라벨 폭 132px — 가장 긴 라벨 '부가세 제외 금액'이 한 줄에 들어가는 최소 폭(80/96px에서는 '액'이 접힘).
+// white-space:nowrap 으로 이중 안전장치. padding-right:16px 은 값 컬럼과 붙어 보이지 않게 하는 간격.
+function _mailRow(label, value, bold) {
+  return '<tr><td style="color:#888;padding:4px 16px 4px 0;width:132px;vertical-align:top;white-space:nowrap;">' + label + '</td>'
+       + '<td style="color:#111;' + (bold ? 'font-weight:600;' : '') + '">'
+       + escapeHtml(String(value == null ? '-' : value)).replace(/\n/g, '<br>')
+       + '</td></tr>';
+}
+
+// 부가정보 5행 중 뒤쪽 4행(업체명~비고) — 3개 메일이 공통으로 붙인다.
+function _mailExtraRowsHtml(extra) {
+  if (!extra) return '';
+  return _mailRow('업체명', extra.vendorName)
+       + _mailRow('품목내역', extra.itemsLabel)
+       + _mailRow('부가세 제외 금액', extra.amountText)
+       + _mailRow('비고 / 특이사항', extra.remarks);
+}
+
+// 평문 본문용 부가정보 라인 (라벨 폭을 공백으로 맞춤)
+function _mailExtraLinesText(extra) {
+  if (!extra) return [];
+  return [
+    '■ 업체명:           ' + extra.vendorName,
+    '■ 품목내역:         ' + extra.itemsLabel,
+    '■ 부가세 제외 금액: ' + extra.amountText,
+    // 비고는 여러 줄일 수 있다 — 둘째 줄부터 라벨 폭만큼 들여써 정렬을 유지
+    '■ 비고/특이사항:    ' + String(extra.remarks).replace(/\n/g, '\n                    '),
+  ];
 }
 
 // ================================================================
