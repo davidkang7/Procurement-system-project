@@ -190,8 +190,8 @@ CONFIG나 코드를 고치고 저장만 하면 사용자에게는 이전 버전�
 4. **웹앱 [새 버전] 재배포**(executeAs: USER_DEPLOYING이라 필수).
 
 **재발방지/주의:**
-- 현재 매니페스트에는 `gmail.send`와 `script.send_mail`이 **둘 다** 들어 있다(GmailApp·MailApp 혼용 대비).
-- `MailApp.getRemainingDailyQuota()`(쿼터 읽기)는 **그대로 둬야** 한다. `GmailApp`에는 대응 메서드가 없다.
+- 현재 매니페스트에는 `gmail.send` · `gmail.settings.basic` · `script.send_mail`이 들어 있다. `gmail.settings.basic`은 **From 별칭(§10.1) 발송에 필요**하고, `script.send_mail`은 MailApp 전용이라 **지금은 미사용(레거시)** 이다 — MailApp 복귀 여지를 남겨 둔 것이니 지우지 말 것.
+- 발송 쿼터 조회는 **현재 구현돼 있지 않다.** 도입한다면 `MailApp.getRemainingDailyQuota()`가 유일한 수단이다(`GmailApp`에 대응 메서드가 없음). 이때 `script.send_mail` 스코프가 실제로 쓰이게 된다.
 - 코드가 GmailApp으로 라벨/스레드를 읽거나 수정하게 되면 `gmail.modify`/`mail.google.com`이 추가로 필요할 수 있다(현재는 발송만 하므로 `gmail.send`로 충분).
 
 ## 3.2 ★"새 배포" 반복 → 활성 배포 2개 갈라짐 → 검수 버튼 미표시 (2026-06 해결)
@@ -234,7 +234,7 @@ CONFIG나 코드를 고치고 저장만 하면 사용자에게는 이전 버전�
 | --- | --- | --- |
 | 단일 실행 시간 | 6분/실행 | 다첨부+PDF+이동이 겹치는 최종 트리거는 비동기 작업 큐로 분할 처리 |
 | 일일 트리거 시간 | **90분/계정/일** (※6시간 아님) | 트리거 누적 모니터링. 빈 큐는 즉시 종료되도록 유지. 큐 트리거 1분 간격이라 누적 ~12분/일 |
-| Gmail 발송 한도 | ~1,500통/일 (Workspace 계정) | `USER_DEPLOYING`이라 전 사용자가 배포자(David) 1풀 공유. 50명×다단계 알림이면 피크일 근접 가능 → `MailApp.getRemainingDailyQuota()` 모니터링 중요 |
+| Gmail 발송 한도 | ~1,500통/일 (Workspace 계정) | `USER_DEPLOYING`이라 전 사용자가 배포자(David) 1풀 공유. 50명×다단계 알림이면 피크일 근접 가능. **잔여 쿼터 모니터링은 아직 미구현** — 도입 시 `MailApp.getRemainingDailyQuota()` 사용(§3.1) |
 | 동시 사용자 | ~30명 (Business 기준) | LockService 30초. 50명 확장 시 락 경합 모니터링 |
 | IP 주소 취득 | 불가 | 시스템로그 ipAddress는 향후 확장용 빈값 유지 |
 
@@ -394,15 +394,31 @@ logId(UUID), timestamp(Date), actor(이메일), actorRole(admin/procurement/appr
 # 10. 이메일 아키텍처 — 이중 경로 (의도적 분리, 통합 금지)
 
 > 📌 *이 분리는 §3.1 스코프 사고를 겪은 뒤 David가 명시적으로 내린 설계 결정이다. **절대 단일 함수로 통합하지 말 것.***
+>
+> ⚠️ **2026-07-19 변경(d0b63e1)**: 발신 주소를 `admin-inlct@inlct.com`으로 통일하면서 관리자 알림 2종(A-1/A-4)도 **MailApp → GmailApp으로 교체**했다. `MailApp`이 From 별칭을 지원하지 않기 때문이다. **현재 코드에 `MailApp` 호출은 한 건도 없다**(주석에만 등장). 경로 분리 자체는 유지되며, 분리 축이 *라이브러리*에서 **호출 방식(재시도 유무)** 으로 바뀌었을 뿐이다.
 
-| 경로 | 함수 / 위치 | 라이브러리 | 용도 |
+| 경로 | 함수 / 위치 | 발송 방식 | 용도 |
 | --- | --- | --- | --- |
-| 일반 결재 알림 | `sendEmailWithRetry` (Code.gs §14) | GmailApp (gmail.send 필요) | 승인요청·반려·완료. 3회 재시도 후 throw. INSP도 재사용(`_sendInspApprovalEmail` 등) |
-| 관리자 강제폐기 알림 | `MailApp.sendEmail` 직접 (`[A-1]` 태그) | MailApp (script.send_mail) | 강제 폐기 관계자 통지 |
-| 관리자 락해제 알림 | `MailApp.sendEmail` 직접 (`[A-4]` 태그) | MailApp | 락 강제 해제 점유자 통지 |
-| 관리자 오류 알림 | `notifyAdminError` (Code.gs §14) | GmailApp 직접 | 오류 통지. **재시도/throw 없는 직접 호출**(재귀·연쇄 실패 방지) — sendEmailWithRetry로 라우팅 금지 |
+| 일반 결재 알림 | `sendEmailWithRetry` (Code.gs §14) | GmailApp + **3회 재시도**, 최종 실패 시 throw | 승인요청·반려·완료. INSP도 재사용(`_sendInspApprovalEmail` 등) |
+| 관리자 강제폐기 알림 | `GmailApp.sendEmail` 직접 (`[A-1]` 태그, Code.gs:1875) | GmailApp **직접**(재시도 없음). 실패는 `console.error`만 | 강제 폐기 관계자 통지 |
+| 관리자 락해제 알림 | `GmailApp.sendEmail` 직접 (`[A-4]` 태그, Code.gs:2183) | 〃 | 락 강제 해제 점유자 통지 |
+| 관리자 오류 알림 | `notifyAdminError` (Code.gs §14) | GmailApp **직접**(재시도/throw 없음) | 오류 통지 — sendEmailWithRetry로 라우팅 금지 |
 
-**분리 이유(fault isolation):** 단일 깔때기는 한 곳(예: 스코프)이 막히면 전 경로 메일이 동시에 죽고 "어느 메일이 죽었는지" 진단 단서가 사라진다. 분리하면 한쪽이 실패해도 다른 쪽이 살고, 로그 태그(`[A-1]`/`[A-4]`)로 즉시 구분된다. `MailApp.getRemainingDailyQuota()`는 쿼터 읽기용이라 GmailApp 대응 메서드가 없어 **MailApp으로 유지**한다.
+**분리 이유(fault isolation):** 단일 깔때기는 한 곳(예: 스코프)이 막히면 전 경로 메일이 동시에 죽고 "어느 메일이 죽었는지" 진단 단서가 사라진다. 특히 오류 알림이 재시도 경로를 타면 **발송 실패 → 오류 알림 발송 → 또 실패**의 재귀에 빠진다. 분리하면 한쪽이 실패해도 다른 쪽이 살고, 로그 태그(`[A-1]`/`[A-4]`)로 즉시 구분된다.
+
+## 10.1 From 별칭 (CONFIG.MAIL_FROM) — 2026-07 도입
+
+모든 발송은 `_mailOptions()`(Code.gs:3172)를 거쳐 `from: admin-inlct@inlct.com` + `name: '구매품의 시스템'`을 붙인다. 스크립트 실행 계정(David)과 무관하게 **대표 주소로 나가게** 하는 것이 목적이다.
+
+- **사전 조건:** David Gmail → 설정 → 계정 → '다른 주소에서 메일 보내기'에 별칭이 **등록·인증**돼 있어야 하고, 매니페스트에 `gmail.settings.basic` 스코프가 있어야 한다(누락 시 `Specified permissions are not sufficient`).
+- **폴백:** 별칭 발송이 실패하면 `_sendWithoutAlias()`(Code.gs:3188)가 **원인을 따지지 않고 1회는 별칭 없이 재발송**한다. 예외 문구로 원인을 분기하면 문구가 바뀔 때 폴백이 조용히 죽기 때문. 최악의 경우에도 발신자만 David로 표시될 뿐 알림은 유실되지 않는다.
+- **점검:** GAS 에디터에서 `sendTestMailFromAlias()` 수동 실행. 운영 중 **수신 메일의 발신자가 `davidkang@inlct.com`으로 보이면 폴백이 돌고 있다는 신호**다(별칭 인증·스코프 점검 필요).
+
+## 10.2 발송 기록(Sent)이 남는 위치 — 자주 오해하는 지점
+
+- `executeAs: USER_DEPLOYING`이라 GmailApp은 **항상 배포자(David) 사서함**으로 발송한다. 따라서 보낸편지함 기록도 `davidkang@inlct.com`에만 쌓인다.
+- `admin-inlct@inlct.com`은 **표시용 From 별칭일 뿐**이라 그 계정 보낸편지함은 **비어 있는 것이 정상**이다. 발송 감사 추적은 David 사서함에서 한다.
+- "MailApp은 보낸편지함에 기록이 안 남는다"는 흔한 통설은 **사실이 아니다.** MailApp 시절(~2026-07-19)에 나간 A-1/A-4 메일도 David 사서함에 `SENT` 라벨로 남아 있다(2026-05~06 실물 확인). MailApp과 GmailApp의 실질적 차이는 **Sent 기록 여부가 아니라 From 별칭 지원 여부**다.
 
 ---
 
@@ -497,8 +513,10 @@ logId(UUID), timestamp(Date), actor(이메일), actorRole(admin/procurement/appr
 | ☐ | 기안자 신원 비교를 APPR_START+2(이메일)+소문자로 했는가 (DRAFTER 성명 금지) |
 | ☐ | 결재 단계 idx를 서버가 actor로 재판정했는가 (동일인 다단계 = curIdx 우선) |
 | ☐ | enqueueJob을 완료 메일 조건 밖에 배치했는가 |
-| ☐ | GmailApp 신규 사용 시 gmail.send 스코프가 매니페스트에 있는가 |
-| ☐ | 이메일 이중 경로(일반/관리자)를 통합하지 않았는가 |
+| ☐ | GmailApp 신규 사용 시 gmail.send + gmail.settings.basic(별칭) 스코프가 매니페스트에 있는가 |
+| ☐ | 신규 발송 코드가 `_mailOptions()`를 거쳐 From 별칭을 적용했는가 (GmailApp.sendEmail 생짜 호출 금지) |
+| ☐ | 이메일 이중 경로(일반=재시도 / 관리자=직접)를 통합하지 않았는가 |
 | ☐ | 수정 후 [배포 관리→기존 배포 편집→새 버전]으로 재배포했는가 (새 배포 금지) |
 
-*── 구매결재시스템 AI Context Document v2.2 끝 (2026-06-20) ──*
+*── 구매결재시스템 AI Context Document v2.3 끝 (2026-07-22) ──*
+*v2.3 변경: §10 이메일 아키텍처를 현재 코드에 맞게 정정(MailApp→GmailApp 전환 반영), §10.1 From 별칭 / §10.2 Sent 기록 위치 신설, §3.1·§4의 MailApp 관련 서술 정정.*
