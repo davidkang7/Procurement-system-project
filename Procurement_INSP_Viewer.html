@@ -90,6 +90,16 @@
   .pm-reason:focus{outline:none;border-color:var(--insp);}
   .pm-actions{margin-top:22px;display:flex;gap:10px;justify-content:center;}
   .pm-actions .btn{padding:9px 28px;}
+
+  /* 인쇄 — 품의/구매 화면과 동일 (A4 세로, 화면 전용 요소 숨김) */
+  @media print{
+    body{background:#fff;padding:0;}
+    .topbar,.home-btn,.action-bar,.banner,.pm-backdrop{display:none!important;}
+    .wrap{max-width:none;margin:0;padding:0;}
+    .sheet{border:none;border-radius:0;padding:0;}
+    .photos a{break-inside:avoid;}
+    @page{size:A4 portrait;margin:10mm;}
+  }
 </style>
 </head>
 <body>
@@ -194,15 +204,14 @@ function render(){
   }
 
   // 상태/액션
+  var decideBtns='';
   if(d.status==='최종승인(INSP)'){
     html+='<div class="status-info done">✓ 최종 승인 완료된 검수보고서입니다.'+(d.isFinal?' (본 품의 검수 종결)':'')+'</div>';
   } else if(d.status==='반려'){
     html+='<div class="status-info reject">이 검수보고서는 반려 상태입니다. 기안자의 재상신을 기다리고 있습니다.</div>';
   } else if(MY_IDX>=0 && MY_IDX===cur){
-    html+='<div class="action-bar">'
-      + '<button class="btn danger" id="reject-btn" onclick="decide(\'reject\')">반려</button>'
-      + '<button class="btn ok" id="approve-btn" onclick="decide(\'approve\')">승인</button>'
-      + '</div>';
+    decideBtns='<button class="btn danger" id="reject-btn" onclick="decide(\'reject\')">반려</button>'
+      + '<button class="btn ok" id="approve-btn" onclick="decide(\'approve\')">승인</button>';
   } else if(MY_IDX>=0 && MY_IDX>cur){
     html+='<div class="status-info wait">앞 단계 결재자의 처리를 기다리고 있습니다. (내 차례: '+(MY_IDX+1)+'번째)</div>';
   } else if(MY_IDX>=0 && MY_IDX<cur){
@@ -210,6 +219,12 @@ function render(){
   } else {
     html+='<div class="status-info wait">결재 진행 중인 검수보고서입니다. (열람 전용)</div>';
   }
+
+  // 인쇄는 상태와 무관하게 항상 노출 (품의/구매 뷰어와 동일)
+  html+='<div class="action-bar">'
+    + '<button class="btn gray" onclick="window.print()">인쇄</button>'
+    + decideBtns
+    + '</div>';
 
   html+='<div class="banner" id="banner"></div></div>';
   document.getElementById('wrap').innerHTML=html;

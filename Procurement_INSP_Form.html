@@ -100,6 +100,16 @@
   .ok-icon{width:48px;height:48px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 14px;}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1d23;color:#fff;padding:11px 22px;border-radius:9px;font-size:12.5px;font-weight:600;display:none;z-index:200;}
   .toast.show{display:block;}
+
+  /* 인쇄 — 품의/구매 화면과 동일 (A4 세로, 화면 전용 요소 숨김) */
+  @media print{
+    body{background:#fff;padding:0;}
+    .topbar,.home-btn,.actions,.pz,.notice,.overlay,.toast,.addb,.delb,.pi .d{display:none!important;}
+    .wrap{max-width:none;margin:0;padding:0;}
+    .sec{break-inside:avoid;}
+    input,select,textarea{border:none!important;background:transparent!important;}
+    @page{size:A4 portrait;margin:10mm;}
+  }
 </style>
 </head>
 <body>
@@ -210,6 +220,7 @@ function render(){
 
   html+='<div class="actions">'
     + '<button class="btn gray" onclick="goHome()">취소</button>'
+    + '<button class="btn gray" onclick="window.print()">인쇄</button>'
     + '<button class="btn insp" id="submit-btn" onclick="submit()">'+(RESUB?'재상신':'검수보고서 제출')+'</button>'
     + '</div>';
 
