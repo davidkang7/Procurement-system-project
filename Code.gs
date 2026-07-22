@@ -2697,9 +2697,10 @@ function getHomeDataForClient() {
 
       // 1) 내가 작성한 문서 + 같은 부서 동료가 기안한 문서 (부서 단위 공유)
       //    mine 플래그로 클라이언트에서 '내 문서 / 부서 문서' 구분 표시
+      //    [관리자 조회 권한] 관리자는 부서와 무관하게 전사 기안 문서를 조회한다.
       if (drafterEmail === actor) {
         myDocs.push(Object.assign({}, meta, { mine: true }));
-      } else if (sameDeptAsMe(drafterEmail)) {
+      } else if (isAdmin || sameDeptAsMe(drafterEmail)) {
         myDocs.push(Object.assign({}, meta, { mine: false }));
       }
 
@@ -2731,7 +2732,7 @@ function getHomeDataForClient() {
       }
 
       // [INSP Step 5] 최종 완료(통합) 후보 수집: 최종승인 REQ + 최종승인(PRC)
-      //  가시성: 구매팀 전체 / 일반은 본인 관련(기안자 또는 결재 참여자) + 같은 부서 기안 문서
+      //  가시성: 관리자·구매팀 전체 / 일반은 본인 관련(기안자 또는 결재 참여자) + 같은 부서 기안 문서
       //  REQ는 PRC가 생성되면 status가 'PRC생성됨'으로 바뀌므로(결재 자체는 최종승인 완료)
       //  두 상태를 모두 최종 완료로 취급해야 구매까지 진행된 품의가 목록에서 사라지지 않음
       if ((docType === 'REQ' && (status === '최종승인' || status === 'PRC생성됨')) ||
@@ -2744,7 +2745,7 @@ function getHomeDataForClient() {
                 === String(actor || '').toLowerCase()) { amParticipant = true; break; }
           }
         }
-        if (isProc || amParticipant || sameDeptAsMe(drafterEmail)) {
+        if (isAdmin || isProc || amParticipant || sameDeptAsMe(drafterEmail)) {
           reqPrcFinals.push(Object.assign({}, meta, { drafterEmail: drafterEmail, mine: amMine }));
         }
       }
@@ -2792,8 +2793,10 @@ function getHomeDataForClient() {
         var req = reqMap[pf.parentToken] || null;
         var reqDrafter = req ? req.drafter : '';
         var completedMine = (String(reqDrafter).toLowerCase() === String(actor || '').toLowerCase());
-        // 가시성: 구매팀 전체 / 본인 기안 / 같은 부서 기안 (검수보고서 제출도 같은 부서 허용)
-        if (!isProc && !completedMine && !sameDeptAsMe(reqDrafter)) continue;
+        // 가시성: 관리자·구매팀 전체 / 본인 기안 / 같은 부서 기안 (검수보고서 제출도 같은 부서 허용)
+        // ⚠ 관리자는 '조회'만 확장한다 — canSubmit(검수보고서 제출권)은 아래에서 그대로 두어
+        //   서버 INSP 게이트(본인/같은 부서)와 기준을 어긋나게 하지 않는다.
+        if (!isAdmin && !isProc && !completedMine && !sameDeptAsMe(reqDrafter)) continue;
 
         var insps = inspGroups[pf.token] || [];
         // 종결(최종 승인 완료) / 잠금대기(최종 검수가 반려 외 상태로 진행중) 구분

@@ -1032,11 +1032,11 @@ function testInspStep4(token) {
  *  - myInspPending:  내가 현재 결재할 차례인 검수보고서 (status가 진행중 + 내 단계 + 대기)
  *  - inspFinals:     최종 선택(IS_FINAL=Y)되어 최종승인(INSP)된 검수보고서
  *  - allInspPending: [결재 메뉴 세분화] 관리자 전용 — 결재자가 누구든 모든 대기 검수보고서
- * 가시성: isProc(구매팀)면 inspFinals 전체, 일반은 본인 관련(기안자 또는 결재 참여자)
+ * 가시성: isAdmin(관리자)·isProc(구매팀)면 inspFinals 전체, 일반은 본인 관련(기안자 또는 결재 참여자)
  * @param {Spreadsheet} ss 열린 스프레드시트
  * @param {string} actor 로그인 이메일(소문자)
  * @param {boolean} isProc 구매팀 여부
- * @param {boolean} isAdmin 관리자 여부 (allInspPending 수집 게이트)
+ * @param {boolean} isAdmin 관리자 여부 (allInspPending 수집 + 전사 조회 게이트)
  * @returns {Object} { myInspPending: [], inspFinals: [], allInspPending: [] }
  */
 function _getInspMenusForClient(ss, actor, isProc, isAdmin) {
@@ -1106,9 +1106,9 @@ function _getInspMenusForClient(ss, actor, isProc, isAdmin) {
       }
 
       // 최종 완료(INSP): IS_FINAL=Y && 최종승인(INSP)
-      // 가시성: 구매팀 / 결재 참여자 / 본인 기안 / 같은 부서(부서 공유)
+      // 가시성: 관리자 / 구매팀 / 결재 참여자 / 본인 기안 / 같은 부서(부서 공유)
       if (isFinal && status === '최종승인(INSP)') {
-        if (isProc || amParticipant ||
+        if (isAdmin || isProc || amParticipant ||
             meta.drafter.toLowerCase() === actor ||
             _isSameDeptEmail(ss, meta.drafter, actor)) {
           out.inspFinals.push(meta);

@@ -140,6 +140,7 @@
   .panel-title { font-weight: 700; font-size: 13.5px; }
   .scope-tag { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: var(--radius-badge); font-size: 10px; font-weight: 700; background: var(--neutral-soft); color: var(--ink-mute); }
   .scope-tag.proc { background: var(--prc-soft); color: var(--prc); }
+  .scope-tag.admin { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
 
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; padding: 9px 16px; color: var(--ink-mute); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; background: #FAFAFA; border-bottom: 1px solid var(--line); }
@@ -1101,14 +1102,23 @@ function renderMyDocs(){
     { key:'rejected', label:'반려',   rows: docs.filter(function(x){ return x.status === '반려'; }) },
   ];
 
-  var myDept = ((STATE.user || {}).dept) || '';
-  var sub = myDept
-    ? ('내가 작성한 문서와 같은 부서(' + escHtml(myDept) + ') 동료가 기안한 구매품의서입니다. '
-       + '기안자 열에서 내 문서(나 배지)와 부서 문서를 구분할 수 있습니다.')
-    : '내가 작성한 구매품의서의 전체 진행 상태입니다.';
+  var myDept  = ((STATE.user || {}).dept) || '';
+  var isAdmin = !!(STATE.user || {}).isAdmin;
+  var sub;
+  if(isAdmin){
+    sub = '관리자 권한으로 부서와 무관하게 전사 기안 문서가 표시됩니다. '
+        + '기안자 열의 \'나\' 배지로 내 문서를 구분할 수 있습니다.';
+  } else {
+    sub = myDept
+      ? ('내가 작성한 문서와 같은 부서(' + escHtml(myDept) + ') 동료가 기안한 구매품의서입니다. '
+         + '기안자 열에서 내 문서(나 배지)와 부서 문서를 구분할 수 있습니다.')
+      : '내가 작성한 구매품의서의 전체 진행 상태입니다.';
+  }
   return pageHead('기안 문서', sub)
     + kpiFilterSection('mydocs', segments, {
-        panelTitle: myDept ? ('기안 문서 · ' + escHtml(myDept)) : '내 기안 문서',
+        panelTitle: isAdmin ? '기안 문서 · 전사' : (myDept ? ('기안 문서 · ' + escHtml(myDept)) : '내 기안 문서'),
+        scopeClass: isAdmin ? 'admin' : '',
+        scopeSuffix: isAdmin ? ' · 전사' : '',
         renderTable: function(rows){ return tableOfDocs(rows, 'mydocs'); }
       });
 }
@@ -1220,15 +1230,19 @@ function renderFinal(){
     { key:'INSP', label:'검수보고서', rows: rows.filter(function(x){ return x.docType === 'INSP'; }) },
   ];
 
-  var myDept = ((STATE.user || {}).dept) || '';
+  var myDept  = ((STATE.user || {}).dept) || '';
+  var isAdmin = !!(STATE.user || {}).isAdmin;
+  // 범위 안내/배지는 넓은 권한이 우선 — 관리자 > 구매팀 > 본인·부서
+  var scopeNote = isAdmin ? '관리자 권한으로 전사 문서가 표시됩니다.'
+                : isProc  ? '구매팀 권한으로 전체가 표시됩니다.'
+                : ('본인이 기안·결재에 참여했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 문서가 표시됩니다.');
   return pageHead('최종 완료', '최종 승인 처리된 품의·구매 및 최종 검수 완료된 검수보고서입니다. '
-      + (isProc ? '구매팀 권한으로 전체가 표시됩니다.'
-                : ('본인이 기안·결재에 참여했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 문서가 표시됩니다.'))
+      + scopeNote
       + ' 행을 클릭하면 처리된 문서를 열람할 수 있습니다.')
     + kpiFilterSection('final', segments, {
         panelTitle: '최종 완료 문서',
-        scopeClass: isProc ? 'proc' : '',
-        scopeSuffix: isProc ? ' · 전체' : '',
+        scopeClass: isAdmin ? 'admin' : (isProc ? 'proc' : ''),
+        scopeSuffix: isAdmin ? ' · 전사' : (isProc ? ' · 전체' : ''),
         renderTable: finalTable
       });
 }
@@ -1283,17 +1297,22 @@ function renderCompleted(){
     { key:'closed', label:'검수 종결',      rows: docs.filter(function(x){ return inspKey(x) === 'closed'; }) },
   ];
 
-  var myDept = (u.dept) || '';
+  var myDept  = (u.dept) || '';
+  var isAdmin = !!u.isAdmin;
+  // 관리자는 '조회'만 전사로 넓어진다 — 검수보고서 제출권(canSubmit)은 서버에서 여전히
+  // 본인/같은 부서로 제한되므로 안내 문구도 조회 범위만 확장해 적는다.
+  var scopeNote = isAdmin ? '관리자 권한으로 전사 문서가 조회됩니다(검수보고서 제출은 본인·같은 부서 건만 가능).'
+                : isProc  ? '구매팀 권한으로 전체 문서가 표시됩니다.'
+                : ('본인이 기안했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 품의가 표시되며, 같은 부서 건은 검수보고서도 제출할 수 있습니다.');
   var sub = '최종승인(구매)된 구매 품의의 최종 승인 확인 및 검수보고서 제출 메뉴입니다. '
-    + (isProc ? '구매팀 권한으로 전체 문서가 표시됩니다.'
-              : ('본인이 기안했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 품의가 표시되며, 같은 부서 건은 검수보고서도 제출할 수 있습니다.'))
+    + scopeNote
     + ' 행을 클릭하면 회차별 검수 이력이 펼쳐집니다.';
 
   return pageHead('결재 완료', sub)
     + kpiFilterSection('completed', segments, {
         panelTitle: '최종 승인 문서',
-        scopeClass: isProc ? 'proc' : '',
-        scopeSuffix: isProc ? ' · 전체' : '',
+        scopeClass: isAdmin ? 'admin' : (isProc ? 'proc' : ''),
+        scopeSuffix: isAdmin ? ' · 전사' : (isProc ? ' · 전체' : ''),
         renderTable: completedTable
       });
 }
