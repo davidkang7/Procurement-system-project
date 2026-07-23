@@ -264,13 +264,11 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
         var ic = getFileIconClass(f.name);
         var it = getFileIconText(f.name);
         var viewUrl = f.viewUrl || '';
-        var dlUrl = f.downloadUrl || '';
         return '<div class="attach-item">'
           +'<div class="attach-icon '+ic+'">'+escHtml(it)+'</div>'
           +'<span class="attach-name">'+escHtml(f.name)+(f.size ? '<span class="attach-size">('+fmtSize(f.size)+')</span>' : '')+'</span>'
           +'<div class="attach-btns">'
-          + (viewUrl ? '<a class="attach-btn" href="'+viewUrl+'" target="_blank" rel="noopener">미리보기</a>' : '')
-          + (dlUrl ? '<a class="attach-btn primary" href="'+dlUrl+'" target="_blank" rel="noopener">다운로드</a>' : '')
+          + (viewUrl ? '<a class="attach-btn primary" href="'+viewUrl+'" target="_blank" rel="noopener">첨부 파일 확인 및 다운로드</a>' : '')
           +'</div></div>';
       }).join('');
     }
