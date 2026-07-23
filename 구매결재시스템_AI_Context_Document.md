@@ -400,8 +400,8 @@ logId(UUID), timestamp(Date), actor(이메일), actorRole(admin/procurement/appr
 | 경로 | 함수 / 위치 | 발송 방식 | 용도 |
 | --- | --- | --- | --- |
 | 일반 결재 알림 | `sendEmailWithRetry` (Code.gs §14) | GmailApp + **3회 재시도**, 최종 실패 시 throw | 승인요청·반려·완료. INSP도 재사용(`_sendInspApprovalEmail` 등) |
-| 관리자 강제폐기 알림 | `GmailApp.sendEmail` 직접 (`[A-1]` 태그, Code.gs:1875) | GmailApp **직접**(재시도 없음). 실패는 `console.error`만 | 강제 폐기 관계자 통지 |
-| 관리자 락해제 알림 | `GmailApp.sendEmail` 직접 (`[A-4]` 태그, Code.gs:2183) | 〃 | 락 강제 해제 점유자 통지 |
+| 관리자 강제폐기 알림 | `GmailApp.sendEmail` 직접 (`[A-1]` 태그, Code.gs:1880) | GmailApp 직접 — **재시도·throw 없음**, 별칭 실패 시 `_sendWithoutAlias` **1회 폴백** | 강제 폐기 관계자 통지 |
+| 관리자 락해제 알림 | `GmailApp.sendEmail` 직접 (`[A-4]` 태그, Code.gs:2195) | 〃 | 락 강제 해제 점유자 통지 |
 | 관리자 오류 알림 | `notifyAdminError` (Code.gs §14) | GmailApp **직접**(재시도/throw 없음) | 오류 통지 — sendEmailWithRetry로 라우팅 금지 |
 
 **분리 이유(fault isolation):** 단일 깔때기는 한 곳(예: 스코프)이 막히면 전 경로 메일이 동시에 죽고 "어느 메일이 죽었는지" 진단 단서가 사라진다. 특히 오류 알림이 재시도 경로를 타면 **발송 실패 → 오류 알림 발송 → 또 실패**의 재귀에 빠진다. 분리하면 한쪽이 실패해도 다른 쪽이 살고, 로그 태그(`[A-1]`/`[A-4]`)로 즉시 구분된다.
@@ -412,12 +412,15 @@ logId(UUID), timestamp(Date), actor(이메일), actorRole(admin/procurement/appr
 
 - **사전 조건:** David Gmail → 설정 → 계정 → '다른 주소에서 메일 보내기'에 별칭이 **등록·인증**돼 있어야 하고, 매니페스트에 `gmail.settings.basic` 스코프가 있어야 한다(누락 시 `Specified permissions are not sufficient`).
 - **폴백:** 별칭 발송이 실패하면 `_sendWithoutAlias()`(Code.gs:3188)가 **원인을 따지지 않고 1회는 별칭 없이 재발송**한다. 예외 문구로 원인을 분기하면 문구가 바뀔 때 폴백이 조용히 죽기 때문. 최악의 경우에도 발신자만 David로 표시될 뿐 알림은 유실되지 않는다.
-- **점검:** GAS 에디터에서 `sendTestMailFromAlias()` 수동 실행. 운영 중 **수신 메일의 발신자가 `davidkang@inlct.com`으로 보이면 폴백이 돌고 있다는 신호**다(별칭 인증·스코프 점검 필요).
+- **점검:** GAS 에디터에서 `sendTestMailFromAlias()` 수동 실행. 운영 중 **수신 메일의 발신자가 `davidkang@inlct.com`으로 보이면 폴백이 돌고 있다는 신호**다(별칭 인증·스코프 점검 필요). 별칭 장애를 **자동으로 알려주는 경보는 아직 없다** — 발신자 육안 확인이 사실상 유일한 조기 신호다.
+- **폴백 적용 범위:** 4개 발송 경로 **전부**. 2026-07-22에 A-1/A-4에 누락돼 있던 폴백을 보강했다(그 전까지는 별칭이 죽으면 관리자 통지 2종만 조용히 전멸했다).
+- **경보 순환 의존 차단:** `ADMIN_NOTIFY_EMAILS`에 `admin-inlct` 외에 **`davidkang@inlct.com`을 함께 둔다**(Code.gs:61). 두 주소가 같으면 "admin-inlct 계정 장애"가 원인일 때 경보 메일까지 함께 죽는다. **admin-inlct를 배열 첫 번째로 유지**할 것 — `sendTestMailFromAlias()`가 `[0]`을 쓴다.
 
 ## 10.2 발송 기록(Sent)이 남는 위치 — 자주 오해하는 지점
 
 - `executeAs: USER_DEPLOYING`이라 GmailApp은 **항상 배포자(David) 사서함**으로 발송한다. 따라서 보낸편지함 기록도 `davidkang@inlct.com`에만 쌓인다.
 - `admin-inlct@inlct.com`은 **표시용 From 별칭일 뿐**이라 그 계정 보낸편지함은 **비어 있는 것이 정상**이다. 발송 감사 추적은 David 사서함에서 한다.
+- 관리자 통지(A-1/A-4)가 **폴백까지 실패**하면 `_recordAdminNotifyFailure()`가 ① 시스템로그 시트에 `EMAIL_SEND_FAIL` 행을 남기고 ② `notifyAdminError()`로 관리자 메일을 시도한다. **시트 기록이 먼저**인 이유는 메일 경로가 통째로 죽은 상황에서도 살아남는 유일한 흔적이기 때문이다. A-1은 수신자별로 부르지 않고 **루프 밖에서 1회 집계 통보**한다(메일 폭풍 방지).
 - "MailApp은 보낸편지함에 기록이 안 남는다"는 흔한 통설은 **사실이 아니다.** MailApp 시절(~2026-07-19)에 나간 A-1/A-4 메일도 David 사서함에 `SENT` 라벨로 남아 있다(2026-05~06 실물 확인). MailApp과 GmailApp의 실질적 차이는 **Sent 기록 여부가 아니라 From 별칭 지원 여부**다.
 
 ---

@@ -56,8 +56,11 @@ var CONFIG = {
     'admin-inlct@inlct.com',
   ],
   // 관리자 알림 (시스템 오류, INSP PDF 작업요청 등)
+  //  ⚠ admin-inlct 는 MAIL_FROM 과 같은 주소다. 그 계정이 죽어서 장애가 났다면
+  //    경보 메일도 같이 죽으므로, 별개 계정인 davidkang 을 반드시 함께 둔다(순환 의존 차단).
   ADMIN_NOTIFY_EMAILS: [
     'admin-inlct@inlct.com',
+    'davidkang@inlct.com',
   ],
   AUDIT_SHEET_NAME: '시스템로그',
   INSP_SHEET_NAME:  '검수보고서목록',   // [INSP Step 1] 검수보고서 시트 탭명
@@ -490,6 +493,9 @@ var AUDIT_EVENT = {
   // 권한 거부 (보안 기록)
   ADMIN_ACCESS_DENIED:        'ADMIN_ACCESS_DENIED',
 
+  // 발송 실패 (메일 경로가 죽어도 흔적을 남기기 위한 기록) — §10.2
+  EMAIL_SEND_FAIL:            'EMAIL_SEND_FAIL',
+
   // 검수보고서(INSP) 라이프사이클 — [INSP Step 1]
   INSP_SUBMIT:    'INSP_SUBMIT',     // 검수보고서 제출
   INSP_APPROVE:   'INSP_APPROVE',    // 검수 결재 승인 (단계별)
@@ -500,8 +506,7 @@ var AUDIT_EVENT = {
   // 추후 확장 자리 (Step 3 이후 추가):
   // DOC_SUBMIT, DOC_APPROVE, DOC_REJECT, DOC_DISCARD,
   // PRC_CLAIM, PRC_RELEASE, PRC_SUBMIT,
-  // EMAIL_SEND_FAIL, DRIVE_SAVE_FAIL,
-  // LINK_INVALID_ACCESS
+  // DRIVE_SAVE_FAIL, LINK_INVALID_ACCESS
 };
 
 /**
@@ -1853,31 +1858,46 @@ function _sendAdminDiscardNotifications(ctx) {
       '진행 중이던 구매 문서가 폐기되어 부모 품의(' + ctx.parentInfo.docNo + ') 락이 자동 해제되고 인박스로 복귀됨');
   }
 
-  var tsStr = toDateTimeStr(new Date());
+  var tsStr    = toDateTimeStr(new Date());
+  var failedTo = [];   // 폴백까지 실패해 통지가 유실된 수신자
+  var lastErr  = null;
 
   Object.keys(notifyMap).forEach(function(email) {
     var n = notifyMap[email];
-    try {
-      var reasonsBlock = n.reasons.map(function(r, i) { return '  ' + (i + 1) + ') ' + r; }).join('\n');
-      var subject = '[구매결재] ' + ctx.docNo + ' 문서가 관리자에 의해 강제 폐기되었습니다';
-      var body =
-        '안녕하세요.\n\n' +
-        '아래 문서가 관리자에 의해 강제 폐기되었음을 알려드립니다.\n\n' +
-        '▶ 문서번호: ' + ctx.docNo + ' (' + ctx.docType + ')\n' +
-        '▶ 처리자: ' + ctx.actor + '\n' +
-        '▶ 처리 일시: ' + tsStr + '\n' +
-        '▶ 폐기 사유: ' + ctx.reason + '\n\n' +
-        '▶ 귀하와 관련된 영향:\n' + reasonsBlock + '\n\n' +
-        '문의사항은 관리자에게 연락 바랍니다.\n\n' +
-        'InLC 구매결재 시스템';
 
+    // 본문 조립은 try 밖 — 조립 중 예외가 나면 폴백이 빈 제목/본문으로 발송해 버린다
+    var reasonsBlock = n.reasons.map(function(r, i) { return '  ' + (i + 1) + ') ' + r; }).join('\n');
+    var subject = '[구매결재] ' + ctx.docNo + ' 문서가 관리자에 의해 강제 폐기되었습니다';
+    var body =
+      '안녕하세요.\n\n' +
+      '아래 문서가 관리자에 의해 강제 폐기되었음을 알려드립니다.\n\n' +
+      '▶ 문서번호: ' + ctx.docNo + ' (' + ctx.docType + ')\n' +
+      '▶ 처리자: ' + ctx.actor + '\n' +
+      '▶ 처리 일시: ' + tsStr + '\n' +
+      '▶ 폐기 사유: ' + ctx.reason + '\n\n' +
+      '▶ 귀하와 관련된 영향:\n' + reasonsBlock + '\n\n' +
+      '문의사항은 관리자에게 연락 바랍니다.\n\n' +
+      'InLC 구매결재 시스템';
+
+    try {
       // GmailApp 사용 — MailApp은 From 별칭(CONFIG.MAIL_FROM)을 지원하지 않는다
       GmailApp.sendEmail(n.to, subject, body, _mailOptions());
     } catch (err) {
-      console.error('[A-1] 알림 이메일 발송 실패 (' + n.to + '): ' + err.toString());
+      // 별칭 발송 실패 → 별칭 없이 1회 폴백. 발신자만 David로 보일 뿐 통지는 유실되지 않는다.
+      //  재시도/throw는 두지 않는다 — 관리자 통지는 best-effort (§10 이중 경로 분리 유지)
+      if (_sendWithoutAlias(n.to, subject, body, null, err)) {
+        console.log('[A-1] 별칭 발송 실패 → 기본 계정으로 폴백 (' + n.to + '): ' + err.toString());
+      } else {
+        console.error('[A-1] 알림 이메일 발송 실패 (' + n.to + '): ' + err.toString());
+        failedTo.push(n.to);
+        lastErr = err;
+      }
       // 실패해도 다른 수신자는 계속 발송
     }
   });
+
+  // 집계 통보는 루프 밖에서 1회만 — 수신자마다 부르면 전면 장애 시 관리자 메일 폭풍이 된다
+  if (failedTo.length) _recordAdminNotifyFailure('[A-1]', ctx, failedTo, lastErr);
 }
 
 
@@ -2161,28 +2181,36 @@ function _sendForceReleaseLockNotification(ctx) {
 
   var tsStr = toDateTimeStr(new Date());
 
-  try {
-    var subject = '[구매결재] 작업 중이던 ' + ctx.docNo + '의 구매 문서 작성 락이 해제되었습니다';
-    var body =
-      '안녕하세요.\n\n' +
-      '귀하가 구매 문서 작성을 위해 점유 중이던 아래 품의 문서의 락이\n' +
-      '관리자에 의해 해제되었음을 알려드립니다.\n\n' +
-      '▶ 문서번호: ' + ctx.docNo + '\n' +
-      '▶ 처리자: ' + ctx.actor + '\n' +
-      '▶ 처리 일시: ' + tsStr + '\n' +
-      '▶ 해제 사유: ' + ctx.reason + '\n\n' +
-      '⚠️ 주의사항\n' +
-      '  - 현재 작성 중이던 구매 문서 내용이 있다면 저장되지 않을 수 있습니다.\n' +
-      '  - 이 품의는 다시 구매팀 인박스에 노출되어 다른 담당자가\n' +
-      '    픽업할 수 있는 상태가 되었습니다.\n' +
-      '  - 계속 작업이 필요하시면 인박스에서 다시 픽업해 주세요.\n\n' +
-      '문의사항은 관리자에게 연락 바랍니다.\n\n' +
-      'InLC 구매결재 시스템';
+  // 본문 조립은 try 밖 — 조립 중 예외가 나면 폴백이 빈 제목/본문으로 발송해 버린다
+  var subject = '[구매결재] 작업 중이던 ' + ctx.docNo + '의 구매 문서 작성 락이 해제되었습니다';
+  var body =
+    '안녕하세요.\n\n' +
+    '귀하가 구매 문서 작성을 위해 점유 중이던 아래 품의 문서의 락이\n' +
+    '관리자에 의해 해제되었음을 알려드립니다.\n\n' +
+    '▶ 문서번호: ' + ctx.docNo + '\n' +
+    '▶ 처리자: ' + ctx.actor + '\n' +
+    '▶ 처리 일시: ' + tsStr + '\n' +
+    '▶ 해제 사유: ' + ctx.reason + '\n\n' +
+    '⚠️ 주의사항\n' +
+    '  - 현재 작성 중이던 구매 문서 내용이 있다면 저장되지 않을 수 있습니다.\n' +
+    '  - 이 품의는 다시 구매팀 인박스에 노출되어 다른 담당자가\n' +
+    '    픽업할 수 있는 상태가 되었습니다.\n' +
+    '  - 계속 작업이 필요하시면 인박스에서 다시 픽업해 주세요.\n\n' +
+    '문의사항은 관리자에게 연락 바랍니다.\n\n' +
+    'InLC 구매결재 시스템';
 
+  try {
     // GmailApp 사용 — MailApp은 From 별칭(CONFIG.MAIL_FROM)을 지원하지 않는다
     GmailApp.sendEmail(target, subject, body, _mailOptions());
   } catch (err) {
-    console.error('[A-4] 점유자 알림 이메일 발송 실패 (' + target + '): ' + err.toString());
+    // 별칭 발송 실패 → 별칭 없이 1회 폴백. 발신자만 David로 보일 뿐 통지는 유실되지 않는다.
+    //  재시도/throw는 두지 않는다 — 관리자 통지는 best-effort (§10 이중 경로 분리 유지)
+    if (_sendWithoutAlias(target, subject, body, null, err)) {
+      console.log('[A-4] 별칭 발송 실패 → 기본 계정으로 폴백 (' + target + '): ' + err.toString());
+    } else {
+      console.error('[A-4] 점유자 알림 이메일 발송 실패 (' + target + '): ' + err.toString());
+      _recordAdminNotifyFailure('[A-4]', ctx, [target], err);
+    }
   }
 }
 
@@ -3196,6 +3224,41 @@ function _sendWithoutAlias(toEmail, subject, plainBody, htmlBody, cause) {
   } catch (_) {
     return false;
   }
+}
+
+/**
+ * 관리자 통지(A-1/A-4) 발송 실패 기록 — 별칭 폴백까지 실패했을 때만 호출한다.
+ *
+ *  ① 시스템로그 시트에 먼저 남긴다. 메일 경로가 통째로 죽은 상황에서도 살아남는 유일한 흔적이라
+ *     기록 순서를 메일보다 앞에 둔다("메일 장애를 메일로만 알린다"는 모순 회피).
+ *  ② 그다음 관리자 메일을 시도한다. 같은 이유로 실패할 수 있으나 성공하면 즉시 인지할 수 있다.
+ *
+ *  writeAuditLog·notifyAdminError 모두 자체 fail-safe라 여기서 throw는 나지 않는다.
+ *  ⚠ notifyAdminError 실패 경로에서 이 함수를 호출하면 재귀가 되므로 절대 연결하지 말 것.
+ *
+ * @param {string} tag                '[A-1]' | '[A-4]'
+ * @param {Object} ctx                액션 컨텍스트 (actor/docNo/docType/token)
+ * @param {Array<string>} failedTo    통지가 유실된 수신자 목록
+ * @param {*} lastErr                 마지막 예외
+ */
+function _recordAdminNotifyFailure(tag, ctx, failedTo, lastErr) {
+  var summary = tag + ' 관리자 통지 유실 — 문서 ' + (ctx.docNo || '(불명)')
+              + ' / 통지 실패 수신자: ' + failedTo.join(', ');
+
+  writeAuditLog({
+    eventType:  AUDIT_EVENT.EMAIL_SEND_FAIL,
+    actor:      ctx.actor,
+    actorRole:  'admin',
+    docNo:      ctx.docNo || '',
+    docToken:   ctx.token || '',
+    // A-4 ctx에는 docType이 없다 — 락 해제는 항상 REQ 대상이라 REQ로 채운다
+    docType:    ctx.docType || 'REQ',
+    targetUser: failedTo.join(', '),
+    reason:     summary,
+    payload:    { tag: tag, failedTo: failedTo, error: String(lastErr) },
+  });
+
+  notifyAdminError(summary + '\n\n마지막 오류: ' + String(lastErr));
 }
 
 /**
