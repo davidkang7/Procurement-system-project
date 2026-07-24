@@ -320,7 +320,12 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
       +'<div class="field"><label>연락처</label><div class="val">'+escHtml(d.vendorPhone)+'</div></div>'
       +'<div class="field"><label>납기일</label><div class="val">'+escHtml(d.deliveryDate)+'</div></div>'
       +'<div class="field"><label>납품장소 / 배송지</label><div class="val">'+escHtml(d.deliveryAddr)+'</div></div>'
-      +'</div></div></div>'
+      +'</div>'
+      +(isPrc ? '<div class="row c2">'
+        +'<div class="field"><label>구매 방법 <span style="font-size:10px;color:#7c4dff;">구매</span></label><div class="val">'+escHtml(d.purchaseMethod || '—')+'</div></div>'
+        +'<div class="field"><label>지급 정보 / 결제 조건 <span style="font-size:10px;color:#7c4dff;">구매</span></label><div class="val">'+escHtml(d.paymentInfo || '—')+'</div></div>'
+        +'</div>' : '')
+      +'</div></div>'
 
       +'<div class="section"><div class="sec-header"><span>품목 내역</span></div><div class="sec-body">'
       +'<div class="tbl-wrap"><table class="items">'

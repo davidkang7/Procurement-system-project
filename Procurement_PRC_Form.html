@@ -251,7 +251,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
       </div>
       <div class="row c2">
         <div class="field">
-          <label>구매 방법 <span class="prc-tag">구매</span></label>
+          <label>구매 방법 <span class="req">*</span><span class="prc-tag">구매</span></label>
           <select id="purchase-method">
             <option value="">선택</option>
             <option value="계좌이체">계좌이체 (선입금)</option>
@@ -262,7 +262,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
           </select>
         </div>
         <div class="field">
-          <label>지급 정보 / 결제 조건 <span class="prc-tag">구매</span></label>
+          <label>지급 정보 / 결제 조건 <span class="req">*</span><span class="prc-tag">구매</span></label>
           <input type="text" id="payment-info" placeholder="예: 납품 후 30일 내 / 계좌번호 등">
         </div>
       </div>
@@ -514,9 +514,8 @@ function applyPrefill(d){
   // 부모 REQ 결재 완료 내역 렌더
   renderParentApprovers(d.parentApprovers || []);
 
-  // PO No. 추천값
-  var pono = 'PO-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-4);
-  document.getElementById('doc-no').value = pono;
+  // PO No. 기본값 (수정 가능)
+  document.getElementById('doc-no').value = 'TO-PO-26-000';
   setTimeout(checkDocNo, 100);
 
   // 구매팀 결재선: REQ 형식과 동일하게 기안자/결재자1·2·3
@@ -1088,6 +1087,11 @@ function submitForm(){
     showBanner('error','담당자 이메일 형식이 올바르지 않습니다.');
     return;
   }
+  // 구매 방법 / 결제 조건 필수
+  var pMethod = document.getElementById('purchase-method').value.trim();
+  var pInfo = document.getElementById('payment-info').value.trim();
+  if(!pMethod){ showBanner('error','구매 방법을 선택해 주세요.'); return; }
+  if(!pInfo){ showBanner('error','지급 정보 / 결제 조건을 입력해 주세요.'); return; }
   // 기안자 본인 검증 (서버에서도 재검증)
   if(currentUser && currentUser.email){
     var d0 = apprIds[0];
