@@ -3046,6 +3046,8 @@ function getRequisitionForViewer(token, urlIdxHint) {
         vendorPhone:   String(r[COL.VENDOR_PHONE] || ''),
         deliveryDate:  toDateStr(r[COL.DELIVERY_DATE]),
         deliveryAddr:  String(r[COL.DELIVERY_ADDR] || ''),
+        purchaseMethod: String(r[COL.PURCHASE_METHOD] || ''),  // AE 구매방법 (PRC)
+        paymentInfo:    String(r[COL.PAYMENT_INFO] || ''),     // AF 지급/결제조건 (PRC)
         remarks:       String(r[COL.REMARKS] || ''),
         status:        String(r[COL.STATUS] || ''),
         // 반려 상태에서 기안자 본인에게만 재상신/폐기 진입 버튼을 노출하기 위한 플래그
