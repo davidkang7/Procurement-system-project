@@ -1,0 +1,4 @@
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.1
+google-auth-httplib2>=0.2
+# openpyxl는 런타임에 필요 없음(zip/XML 직접 편집). 템플릿 점검/디버깅용으로만 선택 설치.

@@ -337,11 +337,11 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
     <div class="sec-header prc">⑥ 구매팀 메모 / 비고</div>
     <div class="sec-body">
       <div class="field">
-        <label>비고 (원본 품의에서 복사 — 수정 가능)</label>
-        <textarea id="remarks" rows="2" data-original="" oninput="trackChange('remarks','비고')"></textarea>
+        <label>원본 품의 비고 (REQ) <span style="font-weight:400;color:#999;font-size:10px;margin-left:6px;">읽기 전용 — 참고용</span></label>
+        <textarea id="req-remarks-ref" rows="2" readonly style="background:#f7f7f7;color:#555;"></textarea>
       </div>
       <div class="field" style="margin-top:8px;">
-        <label>구매팀 메모 <span class="prc-tag">구매</span></label>
+        <label>구매팀 메모 (PRC 비고) <span class="prc-tag">구매</span></label>
         <textarea id="prc-memo" rows="3" placeholder="가격 협상 내용, 발주 시 유의사항, 대체 업체 검토 결과 등"></textarea>
       </div>
     </div>
@@ -497,7 +497,8 @@ function applyPrefill(d){
   // 구매 조건: 부모 REQ에는 없고 PRC 재편집 시에만 값이 존재
   if (d.purchaseMethod != null) document.getElementById('purchase-method').value = d.purchaseMethod;
   if (d.paymentInfo    != null) document.getElementById('payment-info').value    = d.paymentInfo;
-  setFieldWithOriginal('remarks',       d.remarks);
+  // 원본 REQ의 비고는 읽기전용 참고칸에만 표시 (PRC 레코드 비고는 '구매팀 메모' 입력값으로 채운다)
+  document.getElementById('req-remarks-ref').value = d.remarks || '';
 
   // 문서 통화 상속 (부모 REQ 첫 품목 기준, 단일통화)
   if(d.items && d.items.length && d.items[0] && d.items[0].currency){
@@ -600,7 +601,7 @@ function trackChange(key, label){
   var idMap = {
     subject: 'subject', purpose: 'purpose', vendorName: 'vendor-name',
     vendorEmail: 'vendor-email', vendorContact: 'vendor-contact', vendorPhone: 'vendor-phone',
-    deliveryDate: 'delivery-date', deliveryAddr: 'delivery-addr', remarks: 'remarks',
+    deliveryDate: 'delivery-date', deliveryAddr: 'delivery-addr',
   };
   var elId = idMap[key];
   var el = document.getElementById(elId);
@@ -1200,7 +1201,7 @@ function submitForm(){
       deliveryAddr: document.getElementById('delivery-addr').value,
       purchaseMethod: document.getElementById('purchase-method').value,
       paymentInfo: document.getElementById('payment-info').value,
-      remarks: document.getElementById('remarks').value,
+      remarks: document.getElementById('prc-memo').value,   // PRC 레코드 비고(Q열) = 구매팀 메모 입력값
       items: items,
       approvers: approvers,
       attachments: attaches,
@@ -1209,7 +1210,6 @@ function submitForm(){
       prcFields: {
         purchaseMethod: document.getElementById('purchase-method').value,
         paymentInfo:    document.getElementById('payment-info').value,
-        prcMemo:        document.getElementById('prc-memo').value,
       },
       fieldChanges: getFieldChanges(),
     };

@@ -346,7 +346,10 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
       +'<div class="section"><div class="sec-header"><span>'+(isPrc ? '구매팀 첨부자료' : '첨부자료')+'</span></div><div class="sec-body">'+attachRows+'</div></div>'
 
       +'<div class="section"><div class="sec-header"><span>비고 / 특이사항</span></div><div class="sec-body">'
-      +'<div class="field"><div class="val" style="min-height:40px;white-space:pre-wrap;">'+escHtml(d.remarks || '—')+'</div></div>'
+      +(isPrc
+        ? '<div class="field"><label>원본 품의 비고 (REQ)</label><div class="val" style="min-height:40px;white-space:pre-wrap;">'+escHtml(d.parentRemarks || '—')+'</div></div>'
+          +'<div class="field" style="margin-top:8px;"><label>구매팀 비고 (PRC)</label><div class="val" style="min-height:40px;white-space:pre-wrap;">'+escHtml(d.remarks || '—')+'</div></div>'
+        : '<div class="field"><div class="val" style="min-height:40px;white-space:pre-wrap;">'+escHtml(d.remarks || '—')+'</div></div>')
       +'</div></div>'
 
       + parentApprSection

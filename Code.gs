@@ -2969,6 +2969,7 @@ function getRequisitionForViewer(token, urlIdxHint) {
     var parentApprovers = [];
     var parentDocNo = '';
     var parentAttachments = [];
+    var parentRemarks = '';
     var docType = String(r[COL.DOC_TYPE] || 'REQ');
     var parentToken = String(r[COL.PARENT_DOC_ID] || '');
     if (docType === 'PRC' && parentToken) {
@@ -2978,6 +2979,7 @@ function getRequisitionForViewer(token, urlIdxHint) {
           var pr = readRow(sheet, parentRowNum);
           var pCount = parseInt(pr[COL.APPR_COUNT]) || 0;
           parentDocNo = String(pr[COL.DOC_NO] || '');
+          parentRemarks = String(pr[COL.REMARKS] || '');  // 원본 REQ의 Q열(비고)
           for (var pi = 0; pi < pCount; pi++) {
             var pb = COL.APPR_START + pi * COL.APPR_COLS;
             parentApprovers.push({
@@ -3068,6 +3070,7 @@ function getRequisitionForViewer(token, urlIdxHint) {
         parentDocNo:   parentDocNo,
         parentApprovers: parentApprovers,
         parentAttachments: parentAttachments,
+        parentRemarks: parentRemarks,   // 원본 REQ의 비고 (PRC viewer에서 함께 표시)
       }
     };
   } catch (err) {
