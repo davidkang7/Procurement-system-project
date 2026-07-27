@@ -267,6 +267,14 @@
   .pickup-btn:hover { background: var(--grad-prc-hover); }
   .pickup-btn:disabled { background: #aaa; cursor: not-allowed; box-shadow: none; }
 
+  /* PDF 재생성 버튼 — 유형 색 반영(REQ=와인레드 / PRC=딥블루). 관리자 전용 조회 리스트에서만 렌더 */
+  .regen-btn { background: var(--grad-brand); color: #fff; border: none; padding: 5px 11px; border-radius: var(--radius-btn); font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit; box-shadow: var(--shadow-btn); white-space: nowrap; }
+  .regen-btn:hover { background: var(--grad-brand-hover); }
+  .regen-btn.prc { background: var(--grad-prc); box-shadow: var(--shadow-btn-prc); }
+  .regen-btn.prc:hover { background: var(--grad-prc-hover); }
+  .regen-btn:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
+  .regen-na { color: var(--ink-mute); }
+
   .role-empty-state { padding: 60px 24px; text-align: center; color: var(--ink-mute); }
   .role-empty-state h3 { font-size: 16px; color: var(--ink); margin-bottom: 6px; font-weight: 700; }
   /* ─── [INSP Step 2] 결재 완료 / 검수보고서 아코디언 (틸 계열 유지) ─── */
@@ -741,6 +749,13 @@ function attachContentHandlers(){
       pickupReq(el.getAttribute('data-pickup'));
     });
   });
+  // [PDF 재생성] 조회 리스트 '생성' 버튼 (관리자 전용, REQ/PRC) — 행 클릭 뷰어 이동을 막아야 함
+  Array.from(document.querySelectorAll('[data-regen-token]')).forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      regeneratePdf(el.getAttribute('data-regen-token'), el.getAttribute('data-regen-docno') || '', el);
+    });
+  });
   // 행 클릭 → 뷰어 (REQ/PRC)
   Array.from(document.querySelectorAll('[data-view-token]')).forEach(function(el){
     el.addEventListener('click', function(){
@@ -829,6 +844,7 @@ function attachColumnFilters(){
     Array.from(table.tHead.rows[0].cells).forEach(function(th, ci){
       var label = th.textContent.trim();
       if(!label) return;   // 액션/빈 헤더에는 필터 미부착
+      if(th.classList.contains('no-filter')) return;   // 액션 열(예: '문서 생성')은 라벨이 있어도 필터 미부착
       th.classList.add('th-filter');
       var btn = document.createElement('span');
       btn.className = 'col-filter-btn';
@@ -1252,7 +1268,11 @@ function finalTable(rows){
   if(!rows || rows.length === 0){
     return '<div class="empty"><div class="empty-icon">📭</div>최종 완료된 문서가 없습니다.</div>';
   }
-  var body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>기안자</th><th>거래처</th><th>상태</th><th>일자</th></tr></thead><tbody>';
+  // 관리자 전용: PDF 재생성 열(빈 헤더 → 컬럼 필터 미부착). REQ/PRC만 버튼, INSP는 로컬 렌더라 '—'.
+  var isAdmin = !!(STATE.user || {}).isAdmin;
+  var body = '<table><thead><tr><th>유형</th><th>문서번호</th><th>제목</th><th>기안자</th><th>거래처</th><th>상태</th><th>일자</th>'
+    + (isAdmin ? '<th class="no-filter">문서 생성</th>' : '')
+    + '</tr></thead><tbody>';
   rows.forEach(function(r){
     var typeLabel = docTypeText(r.docType);
     var typeCls   = r.docType==='PRC' ? 'docno prc' : (r.docType==='INSP' ? 'docno ir' : 'docno');
@@ -1269,10 +1289,22 @@ function finalTable(rows){
       + (r.prcCreated ? ' <span class="status prc_made">구매 진행</span>' : '')
       + '</td>'
       + '<td>' + escHtml(r.issueDate || r.submitAt || '') + '</td>'
+      + (isAdmin ? '<td>' + regenCell(r) + '</td>' : '')
       + '</tr>';
   });
   body += '</tbody></table>';
   return body;
+}
+
+// PDF 재생성 셀 — REQ/PRC는 유형 색 '생성' 버튼, INSP는 로컬 파이썬 렌더라 버튼 없이 '—'.
+//   (버튼은 관리자 세션에서만 렌더된다: finalTable에서 isAdmin일 때만 열을 추가)
+function regenCell(r){
+  if(r.docType === 'REQ' || r.docType === 'PRC'){
+    var cls = r.docType === 'PRC' ? 'regen-btn prc' : 'regen-btn';
+    return '<button class="' + cls + '" data-regen-token="' + escAttr(r.token) + '"'
+      + ' data-regen-docno="' + escAttr(r.docNo) + '" data-regen-doctype="' + escAttr(r.docType) + '">생성</button>';
+  }
+  return '<span class="regen-na">—</span>';
 }
 
 // ─── [INSP Step 2] 결재 완료 메뉴 ─────────────────────────────
@@ -1458,7 +1490,7 @@ function inboxRow(r){
     + '<td>' + escHtml(r.subject) + '</td>'
     + '<td>' + escHtml(r.drafter) + ' <span style="color:var(--ink-mute);font-size:11px;">(' + escHtml(r.dept) + ')</span></td>'
     + '<td>' + escHtml(r.vendorName) + '</td>'
-    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount, r.currency) + '</td>'
     + '<td>' + escHtml(r.submitAt) + '</td>'
     + '<td>' + claimDisplay + '</td>'
     + '<td>' + (canPickup ?
@@ -1479,7 +1511,7 @@ function myPrcRow(r){
     + '<td><span class="docno' + (r._type !== 'claimed_req' ? ' prc' : '') + '">' + escHtml(r.docNo) + '</span></td>'
     + '<td>' + escHtml(r.subject) + '</td>'
     + '<td>' + escHtml(r.vendorName) + '</td>'
-    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount, r.currency) + '</td>'
     + '<td>' + statusBadge(r.status) + '</td>'
     + '<td>' + actionBtn + '</td>'
     + '</tr>';
@@ -1493,7 +1525,7 @@ function pendingRow(r, showAppr){
     + '<td>' + escHtml(r.drafter) + '</td>'
     + (showAppr ? '<td>' + apprCell(r) + '</td>' : '')
     + '<td>' + escHtml(r.vendorName) + '</td>'
-    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount, r.currency) + '</td>'
     + '<td>' + statusBadge(r.status) + '</td>'
     + '</tr>';
 }
@@ -1505,7 +1537,7 @@ function docRow(r){
     + '<td>' + escHtml(r.subject) + '</td>'
     + '<td>' + drafterCell(r) + '</td>'
     + '<td>' + escHtml(r.vendorName) + '</td>'
-    + '<td class="num">' + fmtAmt(r.amount) + '</td>'
+    + '<td class="num">' + fmtAmt(r.amount, r.currency) + '</td>'
     + '<td>' + statusBadge(r.status) + rejectActionBtn(r) + '</td>'
     + '<td>' + escHtml(r.submitAt) + '</td>'
     + '</tr>';
@@ -1706,6 +1738,105 @@ function pickupCancel(){
   PKMODAL.parentToken = null;
 }
 
+// [PDF 재생성] 조회 리스트에서 관리자가 REQ/PRC PDF를 다시 생성한다.
+//   기존 파일은 그대로 두고 rev 번호를 올린 새 PDF가 해당 문서의 DRICE 폴더에 추가된다.
+//   결재 완료 시 자동 생성되는 PDF와 동일한 양식(buildPdfPayload + PDF_Template 재사용).
+//   문의·처리·완료 안내를 모두 모달(pkmodal 인프라 재사용)로 처리한다. (토스트/브라우저 confirm 미사용)
+var REGEN = { token: null, docNo: null, btnEl: null };
+
+function regeneratePdf(token, docNo, btnEl){
+  if(!token) return;
+  REGEN.token = token;
+  REGEN.docNo = docNo || '';
+  REGEN.btnEl = btnEl || null;
+  pkmodalOpen();
+  pkmodalClearStepTimers();
+  regenRenderConfirm();
+}
+
+// ① 생성 문의 모달
+function regenRenderConfirm(){
+  pkmodalSetTitle('문서 생성');
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-confirm">📄</div>'
+    + '<p class="pkmodal-message">이 문서의 PDF를 새로 생성할까요?</p>'
+    + (REGEN.docNo
+        ? '<div class="pkmodal-info"><div class="pkmodal-info-row"><span class="lbl">문서번호</span><span class="val">' + escHtml(REGEN.docNo) + '</span></div></div>'
+        : '')
+    + '<p class="pkmodal-detail">기존 파일은 그대로 두고 새 버전(rev)이 추가됩니다.</p>';
+  pkmodalSetFooter(
+    '<button type="button" class="pkmodal-btn secondary" onclick="regenCancel()">취소</button>'
+    + '<button type="button" class="pkmodal-btn primary" onclick="regenConfirm()">생성</button>'
+  );
+}
+
+// 모달 닫기(취소/완료 공통) — 상태 초기화
+function regenCancel(){
+  pkmodalClose();
+  REGEN.token = null; REGEN.docNo = null; REGEN.btnEl = null;
+}
+
+// ② [생성] 확인 → 백그라운드 처리 시작 (행 버튼은 '생성 중...'으로 유지)
+function regenConfirm(){
+  var token = REGEN.token, btnEl = REGEN.btnEl;
+  if(!token) return;
+
+  // 요구사항: 행의 '생성' 버튼 → '생성 중...' 변경 유지
+  var prevLabel = '';
+  if(btnEl){ prevLabel = btnEl.textContent; btnEl.disabled = true; btnEl.textContent = '생성 중...'; }
+  var restore = function(){ if(btnEl){ btnEl.disabled = false; btnEl.textContent = prevLabel || '생성'; } };
+
+  regenRenderProcessing();
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      restore();
+      if(res && res.ok){ regenRenderSuccess(res); }
+      else { regenRenderError((res && res.message) ? res.message : 'PDF 생성 실패'); }
+    })
+    .withFailureHandler(function(err){
+      restore();
+      var emsg = (err && err.message) ? err.message : String(err);
+      regenRenderError('PDF 생성 오류: ' + emsg);
+    })
+    .regeneratePdfForClient({ token: token });
+}
+
+// ③ 처리 중 모달 (스피너)
+function regenRenderProcessing(){
+  pkmodalSetTitle('문서 생성 중');
+  pkmodalSetFooter('');   // 처리 중엔 버튼 없음
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-spinner"></div>'
+    + '<p class="pkmodal-message">PDF 생성 중...</p>'
+    + '<p class="pkmodal-detail">잠시만 기다려 주세요. 완료되면 안내가 표시됩니다.</p>';
+}
+
+// ④ 완료 안내 모달
+function regenRenderSuccess(res){
+  pkmodalSetTitle('문서 생성 완료');
+  var fileName = (res && res.fileName) ? res.fileName : '';
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-success"><svg viewBox="0 0 24 24"><polyline points="5 12 10 17 19 8"/></svg></div>'
+    + '<p class="pkmodal-message ok">PDF 생성 완료</p>'
+    + '<div class="pkmodal-info">'
+      + (REGEN.docNo ? '<div class="pkmodal-info-row"><span class="lbl">문서번호</span><span class="val">' + escHtml(REGEN.docNo) + '</span></div>' : '')
+      + (fileName ? '<div class="pkmodal-info-row"><span class="lbl">파일명</span><span class="val">' + escHtml(fileName) + '</span></div>' : '')
+    + '</div>'
+    + '<p class="pkmodal-detail">기존 파일은 그대로 유지되고 새 버전이 추가되었습니다.</p>';
+  pkmodalSetFooter('<button type="button" class="pkmodal-btn primary" onclick="regenCancel()">닫기</button>');
+}
+
+// 실패 안내 모달
+function regenRenderError(msg){
+  pkmodalSetTitle('문서 생성 실패');
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-error">!</div>'
+    + '<p class="pkmodal-message err">PDF 생성 실패</p>'
+    + '<p class="pkmodal-detail">' + escHtml(msg) + '</p>';
+  pkmodalSetFooter('<button type="button" class="pkmodal-btn secondary" onclick="regenCancel()">닫기</button>');
+}
+
 // 픽업 진입점 — 확인 모달을 띄운다 (실제 요청은 [픽업] 버튼 → pickupConfirm)
 function pickupReq(parentToken){
   PKMODAL.parentToken = parentToken;
@@ -1837,9 +1968,10 @@ function statusBadge(status){
   else if(status === 'PRC생성됨') cls = 'prc_made';
   return '<span class="status ' + cls + '">' + escHtml(statusLabel(status)) + '</span>';
 }
-function fmtAmt(n){
+function fmtAmt(n, cur){
   if(!n) return '-';
-  return Number(n).toLocaleString('ko-KR') + ' 원';
+  var sym = (!cur || cur === 'KRW') ? '원' : cur;
+  return Number(n).toLocaleString('ko-KR') + ' ' + sym;
 }
 function escHtml(s){
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

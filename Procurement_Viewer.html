@@ -165,7 +165,7 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
       + '&docNo=' + encodeURIComponent(DOC_NO);
   }
 
-  function fmt(n){return Math.round(parseFloat(n)||0).toLocaleString('ko-KR');}
+  function fmt(n){return (parseFloat(n)||0).toLocaleString('ko-KR',{maximumFractionDigits:2});}
   function escHtml(s){return(s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   function fmtSize(bytes){
     if(!bytes) return '';

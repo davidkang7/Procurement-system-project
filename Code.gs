@@ -1571,6 +1571,7 @@ function _adminListDiscardableCore(payload) {
         requesterEmail:  String(r[COL.APPR_START + 2] || ''),
         vendor:          String(r[COL.VENDOR_NAME] || ''),
         amount:          Number(r[COL.TOTAL_AMT] || 0),
+        currency:        getRowCurrency(r[COL.ITEMS]),
         status:          rowStatus,
         claimedBy:       String(r[COL.CLAIMED_BY] || ''),
         claimedAt:       r[COL.CLAIMED_AT] ? toDateTimeStr(r[COL.CLAIMED_AT]) : '',
@@ -2007,6 +2008,7 @@ function _adminListClaimedLocksCore(payload) {
         drafter:      String(r[COL.DRAFTER] || ''),
         vendor:       String(r[COL.VENDOR_NAME] || ''),
         amount:       Number(r[COL.TOTAL_AMT] || 0),
+        currency:     getRowCurrency(r[COL.ITEMS]),
         claimedBy:    claimedBy,
         claimedAt:    claimedAt ? toDateTimeStr(claimedAt) : '',
         claimedAtMs:  claimedMs || 0,
@@ -2465,13 +2467,15 @@ function parseItemsSummary(s) {
   lines.forEach(function(line) {
     // 신규 포맷(품목명·규격 '/' 구분): "1. 품목 명 / 규격 / 100개 / 1,000 KRW"
     // qty(\d+개)를 우측 앵커로 삼아 품목명에 공백/슬래시가 있어도 규격과 정확히 분리
-    var mNew = line.match(/^\d+\.\s*(.+?)\s*\/\s*(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+)\s*([A-Z]{3})$/);
+    // 단가는 소수점 허용([\d,]+(?:\.\d+)?): 소수 단가가 있으면 정규식이 라인 전체 매칭에 실패해
+    // 품목이 통째로 누락되고 합계에서도 빠지므로 반드시 소수부를 포함시킨다.
+    var mNew = line.match(/^\d+\.\s*(.+?)\s*\/\s*(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+(?:\.\d+)?)\s*([A-Z]{3})$/);
     if (mNew) { items.push({ name: mNew[1].trim(), spec: mNew[2].trim(), qty: mNew[3], price: mNew[4].replace(/,/g,''), currency: mNew[5] }); return; }
     // 구 포맷(품목명·규격 공백 구분): "1. 품목 규격 / 100개 / 1,000 KRW"
-    var m = line.match(/^\d+\.\s*(.+?)\s+(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+)\s*([A-Z]{3})$/);
+    var m = line.match(/^\d+\.\s*(.+?)\s+(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+(?:\.\d+)?)\s*([A-Z]{3})$/);
     if (m) { items.push({ name: m[1], spec: m[2], qty: m[3], price: m[4].replace(/,/g,''), currency: m[5] }); return; }
     // 하위호환 포맷: "... / 1,000원" → KRW (마이그레이션 없이 기존 행 호환)
-    var m2 = line.match(/^\d+\.\s*(.+?)\s+(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+)원$/);
+    var m2 = line.match(/^\d+\.\s*(.+?)\s+(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+(?:\.\d+)?)원$/);
     if (m2) { items.push({ name: m2[1], spec: m2[2], qty: m2[3], price: m2[4].replace(/,/g,''), currency: 'KRW' }); }
   });
   return items;
@@ -2693,6 +2697,7 @@ function getHomeDataForClient() {
         dept:       String(r[COL.DEPT] || ''),
         vendorName: String(r[COL.VENDOR_NAME] || ''),
         amount:     Number(r[COL.TOTAL_AMT]) || 0,
+        currency:   getRowCurrency(r[COL.ITEMS]),
         status:     status,
         docType:    docType,
         issueDate:  toDateStr(r[COL.ISSUE_DATE]),
@@ -3949,6 +3954,14 @@ function buildItemsSummary(items) {
   }).join('\n');
 }
 
+// 목록 표시용: 시트 행의 품목 문자열에서 통화만 저비용으로 추출.
+// 각 품목 라인은 "... / 1,000 KRW"처럼 통화코드로 끝나므로 줄 끝의 3자리 대문자를 통화로 본다.
+// (하위호환 '원' 포맷 등 미매칭 시 KRW 기본값)
+function getRowCurrency(itemsStr) {
+  var m = String(itemsStr || '').match(/([A-Z]{3})\s*$/m);
+  return m ? m[1] : 'KRW';
+}
+
 // 통화 판정: 첫 품목의 통화 (단일통화 폼 전제, 미지정 시 KRW)
 function getItemsCurrency(items) {
   if (items && items.length && items[0] && items[0].currency) return String(items[0].currency);
@@ -4349,9 +4362,12 @@ function _attachParentApprovers(payload, parentRow) {
  * @param token — 문서의 token (REQ 또는 PRC)
  * @returns {{ok: bool, message: string, fileId?: string, fileName?: string}}
  */
-function generatePdfForDocument(token) {
+function generatePdfForDocument(token, opts) {
   try {
     if (!token) return { ok: false, message: 'token이 필요합니다.' };
+    // keepPrevious: 수동 재생성 경로. 기존 파일을 지우지 않고 rev 번호를 올린 새 파일을 추가한다.
+    //   (기본값=false → 자동/큐 경로는 기존 동작 그대로: 이전 버전 휴지통 정리)
+    var keepPrevious = !!(opts && opts.keepPrevious);
 
     var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
@@ -4360,7 +4376,9 @@ function generatePdfForDocument(token) {
 
     var row = readRow(sheet, rowNum);
     var status = String(row[COL.STATUS] || '');
-    if (status.indexOf('최종승인') < 0) {
+    // 최종승인(REQ 1차/PRC 최종) 또는 'PRC생성됨'(PRC가 생성된 부모 REQ — 이미 1차 승인 완료 건)만 허용.
+    //   'PRC생성됨' REQ는 조회 리스트에 '최종승인'으로 표기되지만 시트 상태는 별개이므로 명시적으로 허용한다.
+    if (status.indexOf('최종승인') < 0 && status !== 'PRC생성됨') {
       return { ok: false, message: '최종승인 상태에서만 PDF 생성 가능. 현재: ' + status };
     }
 
@@ -4390,40 +4408,49 @@ function generatePdfForDocument(token) {
     var blob = Utilities.newBlob(html, 'text/html', payload.docNo + '.html')
                         .getAs(MimeType.PDF);
 
-    // 파일명 규칙: {docType}_{docNo}_v{생성일}.pdf
-    var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm');
-    var fileName = (payload.isPrc ? 'PRC_' : 'REQ_') + payload.docNo + '_' + ts + '.pdf';
-    blob.setName(fileName);
-
     // 현재 Drive 폴더에 저장 (FINAL 이동 전에 호출되면 STAGING 폴더에, 이후라면 FINAL 폴더에 저장됨)
     var folderId = String(row[COL.DRIVE_ID] || '');
     if (!folderId) {
       return { ok: false, message: '폴더 ID가 없습니다.' };
     }
     var folder = DriveApp.getFolderById(folderId);
+    var prefix = payload.isPrc ? 'PRC_' : 'REQ_';
 
-    // 같은 이름의 이전 PDF가 있으면 휴지통으로 (중복 방지)
-    var existing = folder.getFilesByName(fileName);
-    while (existing.hasNext()) {
-      try { existing.next().setTrashed(true); } catch(_) {}
-    }
+    var fileName;
+    if (keepPrevious) {
+      // 수동 재생성: 기존 파일을 지우지 않고 rev 번호를 올린 새 파일을 추가.
+      //   예: PRC_TH-P-26-011_rev1.pdf → rev2 → rev3 ...
+      var rev = _nextPdfRev(folder, prefix, payload.docNo);
+      fileName = prefix + payload.docNo + '_rev' + rev + '.pdf';
+    } else {
+      // 자동/큐 경로: {docType}_{docNo}_{yyyyMMdd_HHmm}.pdf + 이전 버전 휴지통 정리(중복 방지)
+      var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm');
+      fileName = prefix + payload.docNo + '_' + ts + '.pdf';
 
-    // 동일 docType+docNo의 이전 버전들도 정리 (타임스탬프만 다른 것들)
-    var pattern = (payload.isPrc ? 'PRC_' : 'REQ_') + payload.docNo + '_';
-    var allFiles = folder.getFiles();
-    while (allFiles.hasNext()) {
-      var f = allFiles.next();
-      var fname = f.getName();
-      if (fname.indexOf(pattern) === 0 && fname.indexOf('.pdf') > 0 && fname !== fileName) {
-        try { f.setTrashed(true); } catch(_) {}
+      // 같은 이름의 이전 PDF가 있으면 휴지통으로 (중복 방지)
+      var existing = folder.getFilesByName(fileName);
+      while (existing.hasNext()) {
+        try { existing.next().setTrashed(true); } catch(_) {}
+      }
+
+      // 동일 docType+docNo의 이전 버전들도 정리 (타임스탬프만 다른 것들)
+      var pattern = prefix + payload.docNo + '_';
+      var allFiles = folder.getFiles();
+      while (allFiles.hasNext()) {
+        var f = allFiles.next();
+        var fname = f.getName();
+        if (fname.indexOf(pattern) === 0 && fname.indexOf('.pdf') > 0 && fname !== fileName) {
+          try { f.setTrashed(true); } catch(_) {}
+        }
       }
     }
+    blob.setName(fileName);
 
     var file = folder.createFile(blob);
 
     return {
       ok: true,
-      message: 'PDF 생성 완료',
+      message: 'PDF 생성 완료: ' + fileName,
       fileId: file.getId(),
       fileName: fileName,
       docType: payload.docType,
@@ -4435,8 +4462,34 @@ function generatePdfForDocument(token) {
 }
 
 /**
+ * 수동 재생성 파일명의 다음 rev 번호를 계산한다.
+ *   폴더 내 '{prefix}{docNo}_rev{정수}.pdf' 파일들의 rev 최댓값 + 1을 반환(없으면 1).
+ *   파일이 삭제돼 있어도 최댓값 기준으로 이어서 증가한다.
+ *   문자열 파싱으로 처리해 docNo의 정규식 특수문자(하이픈 등) 이스케이프 문제를 피한다.
+ * @param folder — DriveApp 폴더
+ * @param prefix — 'REQ_' | 'PRC_'
+ * @param docNo  — 문서번호
+ * @returns {number} 다음 rev 번호
+ */
+function _nextPdfRev(folder, prefix, docNo) {
+  var base = prefix + docNo + '_rev';   // 예: 'PRC_TH-P-26-011_rev'
+  var maxRev = 0;
+  var it = folder.getFiles();
+  while (it.hasNext()) {
+    var name = it.next().getName();
+    if (name.indexOf(base) === 0 && name.slice(-4) === '.pdf') {
+      var mid = name.slice(base.length, name.length - 4);   // rev와 .pdf 사이의 숫자
+      var n = parseInt(mid, 10);
+      if (!isNaN(n) && String(n) === mid && n > maxRev) maxRev = n;
+    }
+  }
+  return maxRev + 1;
+}
+
+/**
  * 수동 재생성용 진입점 (대시보드나 관리자 콘솔에서 호출 가능)
- * @param token — 문서 token
+ *   기존 파일을 지우지 않고 rev 번호를 올린 새 PDF를 추가한다(keepPrevious).
+ * @param payload — { token }
  */
 function regeneratePdfForClient(payload) {
   if (!payload || !payload.token) return { ok: false, message: 'token이 필요합니다.' };
@@ -4444,7 +4497,7 @@ function regeneratePdfForClient(payload) {
   if (!isAdminUser(actor)) {
     return { ok: false, message: '관리자만 PDF 재생성이 가능합니다.' };
   }
-  return generatePdfForDocument(payload.token);
+  return generatePdfForDocument(payload.token, { keepPrevious: true });
 }
 
 // ================================================================
@@ -4696,6 +4749,18 @@ function _processPdfAndConsolidateJob(job) {
   var moveResult = consolidateToFinalByPrc(job.token);
   if (!moveResult.ok && !moveResult.skipped) {
     return { ok: false, message: 'FINAL 이동 실패: ' + moveResult.message };
+  }
+
+  // 3) 주문서(PO) xlsx 생성 핸드오프 — 로컬 파이썬(po-renderer)으로 이관.
+  //    FINAL/{PO} 폴더에 po_manifest.json 기록 + David 메일. 비치명적(실패해도 job 성공).
+  //    ※ 통합 이동 뒤라 PRC.DRIVE_ID가 FINAL 폴더 id로 갱신돼 있어 정확하다.
+  try {
+    var po = _preparePoHandoff(job.token);
+    if (po && !po.ok) {
+      notifyAdminError('[PO] 핸드오프 미완료: ' + job.docNo + ' / ' + po.message);
+    }
+  } catch (e) {
+    try { notifyAdminError('[PO] 핸드오프 실패: ' + job.docNo + ' / ' + e.toString()); } catch (_) {}
   }
 
   return {
