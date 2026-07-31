@@ -49,6 +49,14 @@ var CONFIG = {
   ADMIN_EMAILS: [
     'davidkang@inlct.com',
   ],
+  // 전사조회 권한 (읽기 전용 오버사이트). 부서 '경영총괄팀'과는 별개 개념 — 배지·명칭 모두 '전사조회'.
+  //  기안 문서·완료 목록을 전사로 조회(관리자와 동일 깊이)하되, 액션(락 점유·PRC 작성)·구매팀 메뉴는 없음.
+  GLOBAL_VIEW_EMAILS: [
+    'bret@inlct.com',    // 강범석 경영총괄팀 부장
+    'mhpark@inlct.com',  // 박민하 경영총괄팀 대리
+    'kskim@inlct.com',   // 김광식 경영총괄팀 차장
+    'david@inlct.com',   // 염선민 개발팀 상무 (유일 크로스팀 결재자)
+  ],
 
   // ── 알림 수신처 (권한과 무관 — 순수 메일 수신 대상) ──
   // 구매팀 알림 (REQ 1차 승인 시 픽업 요청)
@@ -248,9 +256,15 @@ function doGet(e) {
       }, '관리자 — 강제 락 해제');
     }
 
-    // 향후 A-2 ~ A-5 추가 자리:
+    // A-3: 결재자 변경
+    if (fn === 'change_approver') {
+      return _renderTemplate('Procurement_Admin_ChangeApprover', {
+        webappUrl: CONFIG.WEBAPP_URL,
+      }, '관리자 — 결재자 변경');
+    }
+
+    // 향후 A-2 / A-5 추가 자리:
     // if (fn === 'proxy_approve') { ... }
-    // if (fn === 'change_approver') { ... }
     // if (fn === 'change_status') { ... }
 
     // 알 수 없는 fn
@@ -451,6 +465,14 @@ function isAdminUser(email) {
   var list = CONFIG.ADMIN_EMAILS || [];
   // ⚠ isProcurementUser와 달리 '빈 목록 = 전원 허용' 폴백을 두지 않는다.
   //   관리자는 미설정 시 '관리자 없음'이 안전한 기본값.
+  return list.indexOf(String(email).toLowerCase()) >= 0
+      || list.indexOf(email) >= 0;
+}
+
+// 전사조회(읽기 전용) 권한 판정 — isAdminUser와 동일 패턴(빈 목록 폴백 없음 = 미설정 시 아무도 아님)
+function isGlobalViewer(email) {
+  if (!email) return false;
+  var list = CONFIG.GLOBAL_VIEW_EMAILS || [];
   return list.indexOf(String(email).toLowerCase()) >= 0
       || list.indexOf(email) >= 0;
 }
@@ -1623,6 +1645,281 @@ function _adminListDiscardableCore(payload) {
   }
 }
 
+// ================================================================
+// A-3: 결재자 변경 (관리자)
+//   - REQ/PRC는 이 파일(Code.gs), INSP는 INSP.gs가 담당(디스패처로 위임)
+//   - 진행 중 문서의 '미결재 단계(status=대기, stageIdx>=1)' 결재자를 교체
+//   - 정책: 감사 우선(락 안 감사기록, 실패 시 원복) · 신규 결재자 canonical 강제 · 메일 결과 별도 로그
+// ================================================================
+
+/** 변경 가능 문서 목록 조회 (관리자 화면 로딩/검색용) */
+function adminListChangeableForClient(payload) {
+  return _adminListChangeableCore(payload || {});
+}
+
+function _adminListChangeableCore(payload) {
+  try {
+    // 직접 호출 방어 — 첫 줄 권한 검증 (실패 시 ADMIN_ACCESS_DENIED 자동 로그 후 throw)
+    assertAdminWithLog('admin_list_changeable', payload);
+
+    var docTypeFilter = String(payload.docType || '').trim().toUpperCase();  // ''|'REQ'|'PRC'|'INSP'
+    var drafterLike   = String(payload.drafter || '').trim().toLowerCase();
+    var docNoLike     = String(payload.docNoLike || payload.docNo || '').trim().toLowerCase();
+    var statusLike    = String(payload.status || '').trim();
+
+    var docs = [];
+
+    // ── REQ/PRC (품의서목록) ──
+    if (docTypeFilter !== 'INSP') {
+      var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+      ensureHeaders(sheet);
+      var lastRow = sheet.getLastRow();
+      if (lastRow >= 2) {
+        var rows = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          var status  = String(r[COL.STATUS] || '');
+          var docType = String(r[COL.DOC_TYPE] || 'REQ');
+
+          // 진행 중 문서만
+          if (!(status.indexOf('결재') >= 0 || status === '검토중' || status === '재상신')) continue;
+          if (docTypeFilter && docType !== docTypeFilter) continue;
+
+          var docNo        = String(r[COL.DOC_NO] || '');
+          var drafter      = String(r[COL.DRAFTER] || '');
+          var drafterEmail = String(r[reqApprCol(0, 2)] || '');
+          if (docNoLike && docNo.toLowerCase().indexOf(docNoLike) < 0) continue;
+          if (drafterLike && drafter.toLowerCase().indexOf(drafterLike) < 0 &&
+              drafterEmail.toLowerCase().indexOf(drafterLike) < 0) continue;
+          if (statusLike && status.indexOf(statusLike) < 0) continue;
+
+          var apprCount = parseInt(r[COL.APPR_COUNT]) || 0;
+          var curIdx    = parseInt(r[COL.APPR_IDX]) || 0;
+          var chain = [];
+          for (var s = 0; s < apprCount; s++) {
+            var st = String(r[reqApprCol(s, 3)] || '대기');
+            chain.push({
+              stageIdx:   s,
+              label:      String(r[reqApprCol(s, 0)] || ''),
+              name:       String(r[reqApprCol(s, 1)] || ''),
+              email:      String(r[reqApprCol(s, 2)] || ''),
+              status:     st,
+              changeable: (s >= 1 && st === '대기'),
+              isCurrent:  (s === curIdx),
+            });
+          }
+          docs.push({
+            token:    String(r[COL.TOKEN] || ''),
+            docNo:    docNo,
+            docType:  docType,
+            drafter:  drafter,
+            vendor:   String(r[COL.VENDOR_NAME] || ''),
+            status:   status,
+            curIdx:   curIdx,
+            submitAt: toDateTimeStr(r[COL.SUBMIT_AT]),
+            chain:    chain,
+          });
+        }
+      }
+    }
+
+    // ── INSP (검수보고서목록) — INSP.gs에 위임 ──
+    if ((docTypeFilter === '' || docTypeFilter === 'INSP') &&
+        typeof inspListChangeableForAdmin === 'function') {
+      try {
+        var inspRes = inspListChangeableForAdmin({ drafter: drafterLike, docNoLike: docNoLike, status: statusLike });
+        if (inspRes && inspRes.ok && inspRes.docs) docs = docs.concat(inspRes.docs);
+      } catch (e) { /* INSP 미배포 등 — REQ/PRC 목록은 유지 */ }
+    }
+
+    docs.sort(function(a, b) { return (a.submitAt || '').localeCompare(b.submitAt || ''); });
+    return { ok: true, docs: docs, total: docs.length };
+  } catch (err) {
+    return { ok: false, message: err.toString() };
+  }
+}
+
+/** 결재자 변경 실행 (REQ/PRC는 여기서, INSP는 INSP.gs로 위임) */
+function adminChangeApproverForClient(payload) {
+  payload = payload || {};
+  if (String(payload.docType || '').toUpperCase() === 'INSP') {
+    if (typeof adminChangeInspApprover === 'function') return adminChangeInspApprover(payload);
+    return { ok: false, message: '검수보고서 결재자 변경 모듈이 배포되지 않았습니다.' };
+  }
+  return _adminChangeReqPrcApproverCore(payload);
+}
+
+function _adminChangeReqPrcApproverCore(payload) {
+  var opId = Utilities.getUuid();
+  var token, stageIdx, reason, canonical;
+
+  // 락 밖 1차: 권한 + 사유 + 신규 결재자 canonical 검증 (선택적 방어 아님)
+  try {
+    assertAdminWithLog(AUDIT_EVENT.ADMIN_CHANGE_APPROVER, { token: payload.token, stageIdx: payload.stageIdx, opId: opId });
+    requireAdminReason(payload.reason);
+
+    token    = String(payload.token || '').trim();
+    stageIdx = parseInt(payload.stageIdx, 10);
+    reason   = String(payload.reason || '').trim();
+    if (!token) return { ok: false, message: '문서 토큰이 필요합니다.' };
+    if (isNaN(stageIdx) || stageIdx < 1) return { ok: false, message: '변경할 수 없는 단계입니다. (기안자 슬롯은 변경 불가)' };
+
+    canonical = findActiveApproverByEmail(payload.newEmail);
+    if (!canonical) return { ok: false, message: '활성 결재자 명단에 없는 사용자입니다.' };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+
+  var newName  = canonical.name;
+  var newEmail = canonical.email;
+
+  // 락 안: 재확인 + 시트 변경 + 동일 락 내 감사기록(실패 시 원복)
+  var lockResult = withLock(function() {
+    try {
+      var actor = getActiveUserEmail();
+      if (!isAdminUser(actor)) return { ok: false, message: '관리자 권한이 필요합니다.' };
+
+      var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+      ensureHeaders(sheet);
+
+      var rowNum = findRowNumByToken(sheet, token);
+      if (rowNum < 0) return { ok: false, message: '대상 문서를 찾을 수 없습니다.' };
+
+      var r         = readRow(sheet, rowNum);
+      var status    = String(r[COL.STATUS] || '');
+      var docType   = String(r[COL.DOC_TYPE] || 'REQ');
+      var docNo     = String(r[COL.DOC_NO] || '');
+      var apprCount = parseInt(r[COL.APPR_COUNT]) || 0;
+      var curIdx    = parseInt(r[COL.APPR_IDX]) || 0;
+
+      if (!(status.indexOf('결재') >= 0 || status === '검토중' || status === '재상신'))
+        return { ok: false, message: '진행 중 문서만 결재자를 변경할 수 있습니다. (현재 상태: ' + status + ')' };
+      if (stageIdx >= apprCount) return { ok: false, message: '존재하지 않는 결재 단계입니다.' };
+
+      var stageStatus = String(r[reqApprCol(stageIdx, 3)] || '');
+      if (stageStatus !== '대기') return { ok: false, message: '이미 처리된 단계는 변경할 수 없습니다. (단계 상태: ' + stageStatus + ')' };
+
+      var oldName    = String(r[reqApprCol(stageIdx, 1)] || '');
+      var oldEmail   = String(r[reqApprCol(stageIdx, 2)] || '');
+      var stageLabel = String(r[reqApprCol(stageIdx, 0)] || ('결재자 ' + stageIdx));
+
+      // 동일인 no-op 차단
+      if (oldEmail.toLowerCase() === newEmail.toLowerCase())
+        return { ok: false, message: '현재 결재자와 동일한 사람으로는 변경할 수 없습니다.' };
+
+      var isCurrentStage = (stageIdx === curIdx);
+
+      // 블록 쓰기 (name/email만; label/status/processedAt/comment 유지)
+      sheet.getRange(rowNum, reqApprCol(stageIdx, 1) + 1, 1, 2).setValues([[newName, newEmail]]);
+      // 현재 차례면 문서 상태 라벨 갱신
+      if (isCurrentStage && status.indexOf('결재중') >= 0)
+        sheet.getRange(rowNum, COL.STATUS + 1).setValue('결재중 (' + newName + ')');
+
+      // ── 동일 락 안에서 감사기록(변경 사실) 보장 (감사 우선) ──
+      var logged = writeAuditLog({
+        eventType: AUDIT_EVENT.ADMIN_CHANGE_APPROVER,
+        actor: actor, actorRole: 'admin',
+        docNo: docNo, docToken: token, docType: docType,
+        targetUser: newEmail, reason: reason,
+        payload: {
+          opId: opId, stageIdx: stageIdx, stageLabel: stageLabel,
+          oldName: oldName, oldEmail: oldEmail, newName: newName, newEmail: newEmail,
+          wasCurrentStage: isCurrentStage,
+          newApproverNotify: isCurrentStage ? 'pending' : 'not_required',
+          oldApproverNotify: 'pending',
+        },
+      });
+
+      if (logged !== true) {
+        // 감사 우선 — 원복
+        try {
+          sheet.getRange(rowNum, reqApprCol(stageIdx, 1) + 1, 1, 2).setValues([[oldName, oldEmail]]);
+          if (isCurrentStage && status.indexOf('결재중') >= 0)
+            sheet.getRange(rowNum, COL.STATUS + 1).setValue(status);
+          return { ok: false, message: '감사로그 기록 실패 — 변경을 취소했습니다.' };
+        } catch (revErr) {
+          return { ok: false, _revertFailed: true, message: '감사로그 기록 실패 + 원복 실패. 관리자에게 통지합니다.',
+            _ctx: { opId: opId, docNo: docNo, token: token, stageIdx: stageIdx,
+                    oldName: oldName, oldEmail: oldEmail, newName: newName, newEmail: newEmail } };
+        }
+      }
+
+      // 락 밖 메일용 부가정보 (락 안에서 읽은 r만 사용 — _decisionCore와 동일 패턴)
+      var mailExtra = buildMailExtraInfo(
+        r[COL.PURPOSE], r[COL.VENDOR_NAME],
+        parseItemsSummary(String(r[COL.ITEMS] || '')),
+        r[COL.TOTAL_AMT], r[COL.REMARKS]);
+
+      return {
+        ok: true, message: '결재자가 변경되었습니다.',
+        _ctx: {
+          opId: opId, docNo: docNo, docType: docType, token: token, rowNum: rowNum,
+          stageIdx: stageIdx, stageLabel: stageLabel, isCurrentStage: isCurrentStage,
+          oldName: oldName, oldEmail: oldEmail, newName: newName, newEmail: newEmail, reason: reason,
+          data: {
+            docNo: docNo, subject: String(r[COL.SUBJECT] || ''),
+            drafter: String(r[COL.DRAFTER] || ''), issueDate: toDateStr(r[COL.ISSUE_DATE]),
+            extra: mailExtra,
+          },
+        },
+      };
+    } catch (err) {
+      return { ok: false, message: err.toString() };
+    }
+  });
+
+  if (!lockResult) return { ok: false, message: '시스템이 바쁩니다. 잠시 후 다시 시도해주세요.' };
+
+  // 원복 실패 → 긴급 통지
+  if (lockResult._revertFailed) {
+    try { notifyAdminError('[A-3] 결재자 변경 감사로그 실패+원복 실패 opId=' + opId + ' / ' + JSON.stringify(lockResult._ctx)); } catch (_) {}
+    return { ok: false, message: lockResult.message };
+  }
+  if (!lockResult.ok) return lockResult;
+
+  // ── 락 밖: 메일 발송 + 결과 로그 ──
+  var ctx = lockResult._ctx;
+
+  // 1) 새 결재자 결재요청 (현재 차례일 때만)
+  if (ctx.isCurrentStage) {
+    _changeApproverSendAndLog('approve_request', ctx.newEmail, ctx, function() {
+      return sendApprovalEmailWithRetry(
+        { label: ctx.stageLabel, name: ctx.newName, email: ctx.newEmail },
+        ctx.data, ctx.token, ctx.rowNum, ctx.stageIdx);
+    });
+  }
+
+  // 2) 제거자 통지 (항상)
+  _changeApproverSendAndLog('removed_notice', ctx.oldEmail, ctx, function() {
+    return _sendApproverChangedNotice(ctx.oldEmail, {
+      docNo: ctx.docNo, docType: ctx.docType, oldName: ctx.oldName, newName: ctx.newName,
+      stageLabel: ctx.stageLabel, reason: ctx.reason, opId: ctx.opId,
+    });
+  });
+
+  return { ok: true, message: '결재자가 변경되었습니다.',
+    changed: { stageIdx: ctx.stageIdx, oldName: ctx.oldName, newName: ctx.newName, isCurrentStage: ctx.isCurrentStage } };
+}
+
+/** 결재자 변경 후 메일 1건 발송 + 실패 시 EMAIL_SEND_FAIL 로그 (opId로 변경기록과 연결) */
+function _changeApproverSendAndLog(mailKind, recipient, ctx, sendFn) {
+  var okSent = false, errMsg = '';
+  try { okSent = (sendFn() === true); }
+  catch (e) { okSent = false; errMsg = String(e).slice(0, 300); }
+  if (!okSent) {
+    try {
+      writeAuditLog({
+        eventType: AUDIT_EVENT.EMAIL_SEND_FAIL,
+        docNo: ctx.docNo, docToken: ctx.token, docType: ctx.docType, targetUser: recipient,
+        payload: { opId: ctx.opId, mailKind: mailKind, error: errMsg || 'send returned false' },
+      });
+    } catch (_) {}
+  }
+  return okSent;
+}
+
 /**
  * 강제 폐기 실행
  * @param {Object} payload
@@ -2647,7 +2944,7 @@ function getHomeDataForClient() {
     if (sheet.getLastRow() < 2) {
       return {
         ok: true,
-        user: { email: actor, isProcurement: isProcurementUser(actor), isAdmin: isAdminUser(actor) },
+        user: { email: actor, isProcurement: isProcurementUser(actor), isAdmin: isAdminUser(actor), isGlobalViewer: isGlobalViewer(actor) },
         myDrafts: [], myPending: [], myDocs: [],
         approvedInbox: [], myPrc: [],
         completedDocs: [],   // [INSP Step 2]
@@ -2669,6 +2966,7 @@ function getHomeDataForClient() {
 
     var isProc  = isProcurementUser(actor);
     var isAdmin = isAdminUser(actor);
+    var isGView = isGlobalViewer(actor);   // 전사조회(읽기 전용) — 조회 게이트에만 반영
     var actorLc = String(actor || '').toLowerCase();
 
     // 부서 단위 가시성: 결재자목록 부서 열 기준으로 같은 부서 기안 문서를 공유
@@ -2733,7 +3031,7 @@ function getHomeDataForClient() {
       //    [관리자 조회 권한] 관리자는 부서와 무관하게 전사 기안 문서를 조회한다.
       if (drafterEmail === actor) {
         myDocs.push(Object.assign({}, meta, { mine: true }));
-      } else if (isAdmin || sameDeptAsMe(drafterEmail)) {
+      } else if (isAdmin || isGView || sameDeptAsMe(drafterEmail)) {
         myDocs.push(Object.assign({}, meta, { mine: false }));
       }
 
@@ -2778,7 +3076,7 @@ function getHomeDataForClient() {
                 === String(actor || '').toLowerCase()) { amParticipant = true; break; }
           }
         }
-        if (isAdmin || isProc || amParticipant || sameDeptAsMe(drafterEmail)) {
+        if (isAdmin || isProc || isGView || amParticipant || sameDeptAsMe(drafterEmail)) {
           reqPrcFinals.push(Object.assign({}, meta, { drafterEmail: drafterEmail, mine: amMine }));
         }
       }
@@ -2829,7 +3127,7 @@ function getHomeDataForClient() {
         // 가시성: 관리자·구매팀 전체 / 본인 기안 / 같은 부서 기안 (검수보고서 제출도 같은 부서 허용)
         // ⚠ 관리자는 '조회'만 확장한다 — canSubmit(검수보고서 제출권)은 아래에서 그대로 두어
         //   서버 INSP 게이트(본인/같은 부서)와 기준을 어긋나게 하지 않는다.
-        if (!isAdmin && !isProc && !completedMine && !sameDeptAsMe(reqDrafter)) continue;
+        if (!isAdmin && !isProc && !isGView && !completedMine && !sameDeptAsMe(reqDrafter)) continue;
 
         var insps = inspGroups[pf.token] || [];
         // 종결(최종 승인 완료) / 잠금대기(최종 검수가 반려 외 상태로 진행중) 구분
@@ -2870,7 +3168,7 @@ function getHomeDataForClient() {
 
     // [INSP Step 5] 내 검수 결재 대기 + 최종 완료(통합)
     var inspMenus = (typeof _getInspMenusForClient === 'function')
-      ? _getInspMenusForClient(ss, actor, isProc, isAdmin)
+      ? _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView)
       : { myInspPending: [], inspFinals: [], allInspPending: [] };
 
     // 최종 완료 통합: REQ/PRC 최종 + INSP 최종(IS_FINAL) — 단일 리스트, docType으로 구분
@@ -2904,6 +3202,7 @@ function getHomeDataForClient() {
         email: actor,
         isProcurement: isProc,
         isAdmin: isAdmin,
+        isGlobalViewer: isGView,
         dept: myDept,
       },
       myDrafts:      myDrafts,
@@ -3417,6 +3716,84 @@ function sendApprovalEmailWithRetry(approver, data, token, rowNum, idx) {
   return sendEmailWithRetry(approverEmail, subject, plainBody, htmlBody);
 }
 
+/**
+ * [A-3] 결재자 변경(제거) 안내 메일 — 교체로 결재 대상에서 빠진 기존 결재자에게 발송
+ * 기존 결재요청·반려 메일 폼을 따르되 주색은 오렌지 계열. 발송 인프라는 sendEmailWithRetry 재사용.
+ * @param {string} toEmail  제거되는 기존 결재자 이메일
+ * @param {Object} info  { docNo, docType, oldName, newName, stageLabel, reason, opId }
+ * @returns {boolean} 발송 성공 여부
+ */
+function _sendApproverChangedNotice(toEmail, info) {
+  if (!toEmail) return false;
+  info = info || {};
+  var admin      = getActiveUserEmail() || '';
+  var docNo      = String(info.docNo || '-');
+  var oldName    = String(info.oldName || '');
+  var stageLabel = String(info.stageLabel || '결재자');
+  var reason     = String(info.reason || '-');
+  var typeLabel  = ({ REQ: 'REQ (구매요청)', PRC: 'PRC (구매품의)', INSP: 'INSP (검수)' })[String(info.docType || '')] || String(info.docType || '');
+  var processedAt = toDateTimeStr(new Date());
+  var homeUrl    = CONFIG.WEBAPP_URL;
+
+  var docNoEsc  = escapeHtml(docNo);
+  var oldEsc    = escapeHtml(oldName);
+  var stageEsc  = escapeHtml(stageLabel);
+  var reasonEsc = escapeHtml(reason).replace(/\n/g, '<br>');
+  var typeEsc   = escapeHtml(typeLabel);
+  var adminEsc  = escapeHtml(admin);
+
+  var subject = '[결재자 변경 안내] ' + docNo + ' — 결재 대상에서 제외되었습니다';
+
+  var htmlBody =
+    '<div style="font-family:\'Malgun Gothic\',Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;">'
+    + '<div style="background:#e0710a;padding:24px 32px;">'
+    + '<div style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:2px;">구매품의 시스템</div>'
+    + '<div style="color:#ffe4c9;font-size:12px;font-weight:600;letter-spacing:1px;margin-top:4px;">결재자 변경 안내</div>'
+    + '</div>'
+    + '<div style="padding:28px 32px;">'
+    + '<p style="font-size:15px;color:#111;margin:0 0 8px;"><b>' + oldEsc + '</b> ' + stageEsc + ' 님,</p>'
+    + '<p style="font-size:14px;color:#444;margin:0 0 24px;line-height:1.75;">'
+    + '귀하가 결재자로 지정되어 있던 아래 문서의 <b style="color:#c15600;">결재 대상에서 제외</b>되었습니다.<br>'
+    + '관리자에 의한 결재선 변경이며, <b>별도의 조치는 필요하지 않습니다.</b></p>'
+    + '<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:20px;">'
+    + '<table role="presentation" style="width:100%;border-collapse:collapse;font-size:13px;">'
+    + '<tr><td style="color:#888;padding:5px 0;width:92px;">문서번호</td><td style="color:#111;font-weight:600;">' + docNoEsc + ' <span style="color:#c15600;font-size:11px;font-weight:700;">' + typeEsc + '</span></td></tr>'
+    + '<tr><td style="color:#888;padding:5px 0;">제외된 단계</td><td style="color:#111;font-weight:600;">' + stageEsc + '</td></tr>'
+    + '<tr><td style="color:#888;padding:5px 0;">처리자</td><td style="color:#111;">' + adminEsc + '</td></tr>'
+    + '<tr><td style="color:#888;padding:5px 0;">처리일시</td><td style="color:#111;">' + escapeHtml(processedAt) + '</td></tr>'
+    + '</table></div>'
+    + '<div style="background:#fff5e8;border:1px solid #f6d9ad;border-radius:8px;padding:14px 20px;margin-bottom:24px;">'
+    + '<div style="font-size:12px;color:#b45309;font-weight:800;margin-bottom:6px;letter-spacing:.5px;">변경 사유</div>'
+    + '<div style="font-size:13px;color:#333;line-height:1.7;">' + reasonEsc + '</div></div>'
+    + '<table role="presentation" align="center" style="margin:0 auto 20px auto;border-collapse:collapse;">'
+    + '<tr><td align="center" bgcolor="#e0710a" style="border-radius:6px;">'
+    + '<a href="' + homeUrl + '" style="display:inline-block;background:#e0710a;color:#fff;font-size:14px;font-weight:700;padding:12px 30px;border-radius:6px;text-decoration:none;letter-spacing:1px;">구매 시스템 홈 열기</a>'
+    + '</td></tr></table>'
+    + '<div style="border-top:1px solid #e0e0e0;margin:20px 0;"></div>'
+    + '<p style="font-size:12px;color:#888;text-align:center;margin:0;line-height:1.7;">'
+    + '이 문서에 대한 결재 권한이 더 이상 없으며, 홈 <b>결재 대기함</b>에서 자동으로 사라집니다.<br>'
+    + '문의 사항은 시스템 관리자에게 연락해 주세요.</p>'
+    + '</div>'
+    + '<div style="background:#f0f0f0;padding:16px 32px;text-align:center;">'
+    + '<p style="font-size:11px;color:#888;margin:0;">— ' + escapeHtml(CONFIG.FROM_NAME) + ' · 이 메일은 자동 발송되었습니다.</p>'
+    + '</div></div>';
+
+  var plainBody = [
+    oldName + ' ' + stageLabel + ' 님,', '',
+    '귀하가 결재자로 지정되어 있던 아래 문서의 결재 대상에서 제외되었습니다.',
+    '관리자에 의한 결재선 변경이며, 별도의 조치는 필요하지 않습니다.', '',
+    '■ 문서번호:    ' + docNo + ' (' + typeLabel + ')',
+    '■ 제외된 단계: ' + stageLabel,
+    '■ 처리자:      ' + admin,
+    '■ 처리일시:    ' + processedAt,
+    '■ 변경 사유:   ' + reason, '',
+    '홈: ' + homeUrl, '',
+    '— ' + CONFIG.FROM_NAME,
+  ].join('\n');
+
+  return sendEmailWithRetry(toEmail, subject, plainBody, htmlBody);
+}
+
 function sendRejectionNoticeWithRetry(toEmail, drafter, docNo, subject, approverName, comment, token) {
   var drafterName = escapeHtml(drafter || '-');
   var docNoEsc    = escapeHtml(docNo || '-');
@@ -3863,6 +4240,28 @@ function getApproverListForClient() {
   } catch(err) {
     return { ok: false, message: err.toString(), approvers: [] };
   }
+}
+
+/**
+ * 결재자 마스터에서 이메일로 '활성' 결재자 1명을 canonical 조회
+ * - A-3 결재자 변경: 클라가 보낸 이름을 신뢰하지 않고, 서버가 이메일로 마스터를 조회해
+ *   정규(canonical) 이름/이메일을 강제하기 위한 단일 지점 (이름·이메일 불일치 저장 방지)
+ * - 비교는 항상 소문자 (결재자목록은 사람이 직접 입력)
+ * @param {string} email
+ * @returns {{name:string,email:string,dept:string,rank:string}|null} 없거나 비활성이면 null
+ */
+function findActiveApproverByEmail(email) {
+  var norm = String(email || '').trim().toLowerCase();
+  if (!norm) return null;
+  var res = getApproverListForClient();
+  if (!res || !res.ok || !res.approvers) return null;
+  for (var i = 0; i < res.approvers.length; i++) {
+    var a = res.approvers[i];
+    if (a.active && String(a.email || '').trim().toLowerCase() === norm) {
+      return { name: a.name, email: String(a.email || '').trim(), dept: a.dept, rank: a.rank };
+    }
+  }
+  return null;
 }
 
 /**

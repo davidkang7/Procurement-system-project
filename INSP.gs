@@ -1039,7 +1039,7 @@ function testInspStep4(token) {
  * @param {boolean} isAdmin 관리자 여부 (allInspPending 수집 + 전사 조회 게이트)
  * @returns {Object} { myInspPending: [], inspFinals: [], allInspPending: [] }
  */
-function _getInspMenusForClient(ss, actor, isProc, isAdmin) {
+function _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView) {
   var out = { myInspPending: [], inspFinals: [], allInspPending: [] };
   try {
     var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
@@ -1108,7 +1108,7 @@ function _getInspMenusForClient(ss, actor, isProc, isAdmin) {
       // 최종 완료(INSP): IS_FINAL=Y && 최종승인(INSP)
       // 가시성: 관리자 / 구매팀 / 결재 참여자 / 본인 기안 / 같은 부서(부서 공유)
       if (isFinal && status === '최종승인(INSP)') {
-        if (isAdmin || isProc || amParticipant ||
+        if (isAdmin || isProc || isGView || amParticipant ||
             meta.drafter.toLowerCase() === actor ||
             _isSameDeptEmail(ss, meta.drafter, actor)) {
           out.inspFinals.push(meta);
@@ -1123,6 +1123,214 @@ function _getInspMenusForClient(ss, actor, isProc, isAdmin) {
     console.error('[INSP] _getInspMenusForClient 실패: ' + e.toString());
   }
   return out;
+}
+
+// ================================================================
+// [A-3] 검수보고서(INSP) 결재자 변경 — Code.gs 디스패처가 위임
+//   REQ/PRC 코어와 동일 정책: 권한검증 · canonical 결재자 · 감사우선+원복 · 메일결과 로그
+//   (assertAdminWithLog / findActiveApproverByEmail / _changeApproverSendAndLog /
+//    _sendApproverChangedNotice / writeAuditLog 등은 Code.gs의 전역 함수 재사용)
+// ================================================================
+
+/** 변경 가능 INSP 목록 (Code.gs _adminListChangeableCore가 호출; 단독 호출 방어 위해 자체 권한검증) */
+function inspListChangeableForAdmin(payload) {
+  try {
+    assertAdminWithLog('insp_list_changeable', payload || {});
+    payload = payload || {};
+    var drafterLike = String(payload.drafter || '').trim().toLowerCase();
+    var docNoLike   = String(payload.docNoLike || '').trim().toLowerCase();
+    var statusLike  = String(payload.status || '').trim();
+
+    var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+    var docs = [];
+    if (sheet && sheet.getLastRow() >= 2) {
+      var rows = sheet.getDataRange().getValues();
+      for (var i = 1; i < rows.length; i++) {
+        var r = rows[i];
+        var token = String(r[INSP_COL.TOKEN] || '');
+        if (!token) continue;
+        var status = String(r[INSP_COL.STATUS] || '');
+        // 진행 중만: 검토중 / 결재중 (반려·최종승인 제외)
+        if (!(status === '검토중' || status.indexOf('결재중') >= 0)) continue;
+
+        var docNo        = String(r[INSP_COL.DOC_NO] || '');
+        var drafter      = String(r[INSP_COL.DRAFTER_NAME] || '');
+        var drafterEmail = String(r[INSP_COL.DRAFTER] || '');
+        if (docNoLike && docNo.toLowerCase().indexOf(docNoLike) < 0) continue;
+        if (drafterLike && drafter.toLowerCase().indexOf(drafterLike) < 0 &&
+            drafterEmail.toLowerCase().indexOf(drafterLike) < 0) continue;
+        if (statusLike && status.indexOf(statusLike) < 0) continue;
+
+        var apprCount = Math.min(parseInt(r[INSP_COL.APPR_COUNT]) || 0, INSP_COL.MAX_APPROVERS);
+        var curIdx    = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+        var chain = [];
+        for (var s = 0; s < apprCount; s++) {
+          var st = String(r[inspApprCol(s, 3)] || '대기');
+          chain.push({
+            stageIdx:   s,
+            label:      String(r[inspApprCol(s, 0)] || ''),
+            name:       String(r[inspApprCol(s, 1)] || ''),
+            email:      String(r[inspApprCol(s, 2)] || ''),
+            status:     st,
+            changeable: (s >= 1 && st === '대기'),
+            isCurrent:  (s === curIdx),
+          });
+        }
+        docs.push({
+          token:    token,
+          docNo:    docNo,
+          docType:  'INSP',
+          drafter:  drafter,
+          vendor:   String(r[INSP_COL.VENDOR_NAME] || ''),
+          status:   status,
+          curIdx:   curIdx,
+          submitAt: toDateTimeStr(r[INSP_COL.SUBMIT_AT]),
+          chain:    chain,
+        });
+      }
+    }
+    return { ok: true, docs: docs };
+  } catch (err) {
+    return { ok: false, message: err.toString(), docs: [] };
+  }
+}
+
+/** INSP 결재자 변경 실행 (Code.gs adminChangeApproverForClient가 docType==='INSP'일 때 위임) */
+function adminChangeInspApprover(payload) {
+  payload = payload || {};
+  var opId = Utilities.getUuid();
+  var token, stageIdx, reason, canonical;
+
+  try {
+    assertAdminWithLog(AUDIT_EVENT.ADMIN_CHANGE_APPROVER, { token: payload.token, stageIdx: payload.stageIdx, opId: opId, docType: 'INSP' });
+    requireAdminReason(payload.reason);
+
+    token    = String(payload.token || '').trim();
+    stageIdx = parseInt(payload.stageIdx, 10);
+    reason   = String(payload.reason || '').trim();
+    if (!token) return { ok: false, message: '문서 토큰이 필요합니다.' };
+    if (isNaN(stageIdx) || stageIdx < 1) return { ok: false, message: '변경할 수 없는 단계입니다. (기안자 슬롯은 변경 불가)' };
+    if (stageIdx >= INSP_COL.MAX_APPROVERS) return { ok: false, message: '존재하지 않는 결재 단계입니다.' };
+
+    canonical = findActiveApproverByEmail(payload.newEmail);
+    if (!canonical) return { ok: false, message: '활성 결재자 명단에 없는 사용자입니다.' };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+
+  var newName  = canonical.name;
+  var newEmail = canonical.email;
+
+  var lockResult = withLock(function() {
+    try {
+      var actor = getActiveUserEmail();
+      if (!isAdminUser(actor)) return { ok: false, message: '관리자 권한이 필요합니다.' };
+
+      var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+      if (!sheet) return { ok: false, message: '검수보고서 시트가 없습니다.' };
+
+      var info = _readInspRowByToken(ss, token);
+      if (!info) return { ok: false, message: '대상 검수보고서를 찾을 수 없습니다.' };
+      var rowNum = info.rowNum, r = info.row;
+
+      var status    = String(r[INSP_COL.STATUS] || '');
+      var docNo     = String(r[INSP_COL.DOC_NO] || '');
+      var apprCount = Math.min(parseInt(r[INSP_COL.APPR_COUNT]) || 0, INSP_COL.MAX_APPROVERS);
+      var curIdx    = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+
+      if (!(status === '검토중' || status.indexOf('결재중') >= 0))
+        return { ok: false, message: '진행 중 문서만 결재자를 변경할 수 있습니다. (현재 상태: ' + status + ')' };
+      if (stageIdx >= apprCount) return { ok: false, message: '존재하지 않는 결재 단계입니다.' };
+
+      var stageStatus = String(r[inspApprCol(stageIdx, 3)] || '');
+      if (stageStatus !== '대기') return { ok: false, message: '이미 처리된 단계는 변경할 수 없습니다. (단계 상태: ' + stageStatus + ')' };
+
+      var oldName    = String(r[inspApprCol(stageIdx, 1)] || '');
+      var oldEmail   = String(r[inspApprCol(stageIdx, 2)] || '');
+      var stageLabel = String(r[inspApprCol(stageIdx, 0)] || ('결재자 ' + stageIdx));
+
+      if (oldEmail.toLowerCase() === newEmail.toLowerCase())
+        return { ok: false, message: '현재 결재자와 동일한 사람으로는 변경할 수 없습니다.' };
+
+      var isCurrentStage = (stageIdx === curIdx);
+
+      sheet.getRange(rowNum, inspApprCol(stageIdx, 1) + 1, 1, 2).setValues([[newName, newEmail]]);
+      if (isCurrentStage && status.indexOf('결재중') >= 0)
+        sheet.getRange(rowNum, INSP_COL.STATUS + 1).setValue('결재중 (' + newName + ')');
+
+      var logged = writeAuditLog({
+        eventType: AUDIT_EVENT.ADMIN_CHANGE_APPROVER,
+        actor: actor, actorRole: 'admin',
+        docNo: docNo, docToken: token, docType: 'INSP',
+        targetUser: newEmail, reason: reason,
+        payload: {
+          opId: opId, stageIdx: stageIdx, stageLabel: stageLabel,
+          oldName: oldName, oldEmail: oldEmail, newName: newName, newEmail: newEmail,
+          wasCurrentStage: isCurrentStage,
+          newApproverNotify: isCurrentStage ? 'pending' : 'not_required',
+          oldApproverNotify: 'pending',
+        },
+      });
+
+      if (logged !== true) {
+        try {
+          sheet.getRange(rowNum, inspApprCol(stageIdx, 1) + 1, 1, 2).setValues([[oldName, oldEmail]]);
+          if (isCurrentStage && status.indexOf('결재중') >= 0)
+            sheet.getRange(rowNum, INSP_COL.STATUS + 1).setValue(status);
+          return { ok: false, message: '감사로그 기록 실패 — 변경을 취소했습니다.' };
+        } catch (revErr) {
+          return { ok: false, _revertFailed: true, message: '감사로그 기록 실패 + 원복 실패. 관리자에게 통지합니다.',
+            _ctx: { opId: opId, docNo: docNo, token: token, stageIdx: stageIdx, oldEmail: oldEmail, newEmail: newEmail } };
+        }
+      }
+
+      return {
+        ok: true, message: '결재자가 변경되었습니다.',
+        _ctx: {
+          opId: opId, docNo: docNo, token: token, rowNum: rowNum,
+          stageIdx: stageIdx, stageLabel: stageLabel, isCurrentStage: isCurrentStage,
+          oldName: oldName, oldEmail: oldEmail, newName: newName, newEmail: newEmail, reason: reason,
+          subject: String(r[INSP_COL.SUBJECT] || ''), drafter: String(r[INSP_COL.DRAFTER_NAME] || ''),
+          vendorName: String(r[INSP_COL.VENDOR_NAME] || ''),
+        },
+      };
+    } catch (err) {
+      return { ok: false, message: err.toString() };
+    }
+  });
+
+  if (!lockResult) return { ok: false, message: '시스템이 바쁩니다. 잠시 후 다시 시도해주세요.' };
+  if (lockResult._revertFailed) {
+    try { notifyAdminError('[A-3/INSP] 결재자 변경 감사로그 실패+원복 실패 opId=' + opId + ' / ' + JSON.stringify(lockResult._ctx)); } catch (_) {}
+    return { ok: false, message: lockResult.message };
+  }
+  if (!lockResult.ok) return lockResult;
+
+  var ctx = lockResult._ctx;
+  var logCtx = { opId: ctx.opId, docNo: ctx.docNo, token: ctx.token, docType: 'INSP' };
+
+  // 1) 새 결재자 결재요청 (현재 차례)
+  if (ctx.isCurrentStage) {
+    _changeApproverSendAndLog('approve_request', ctx.newEmail, logCtx, function() {
+      return _sendInspApprovalEmail(
+        { label: ctx.stageLabel, name: ctx.newName, email: ctx.newEmail },
+        { docNo: ctx.docNo, subject: ctx.subject, drafter: ctx.drafter, vendorName: ctx.vendorName },
+        ctx.token, ctx.rowNum, ctx.stageIdx);
+    });
+  }
+
+  // 2) 제거자 통지 (항상)
+  _changeApproverSendAndLog('removed_notice', ctx.oldEmail, logCtx, function() {
+    return _sendApproverChangedNotice(ctx.oldEmail, {
+      docNo: ctx.docNo, docType: 'INSP', oldName: ctx.oldName, newName: ctx.newName,
+      stageLabel: ctx.stageLabel, reason: ctx.reason, opId: ctx.opId,
+    });
+  });
+
+  return { ok: true, message: '결재자가 변경되었습니다.',
+    changed: { stageIdx: ctx.stageIdx, oldName: ctx.oldName, newName: ctx.newName, isCurrentStage: ctx.isCurrentStage } };
 }
 
 // ================================================================
@@ -1447,6 +1655,22 @@ function markInspPdfDone(token, pdfFileId) {
   } catch (_) {}
   Logger.log('[INSP] PDF 마감(FINAL): ' + docNo);
   return { ok: true, message: 'FINAL 마감 완료: ' + docNo };
+}
+
+/**
+ * [임시] LC-2026-001-01 PDF 마감 — 편집기 Run 전용(무인자).
+ *  GAS 편집기는 인자 있는 함수를 직접 실행할 수 없어, 이번 건 값을 박아둔 래퍼.
+ *  실행 후 대기목록(listInspAwaitingPdf)에서 빠지면 이 함수는 삭제해도 됨.
+ *  - token : a960ffe9-196c-4a75-a846-f500fd91de51
+ *  - PDF   : INSP_LC-2026-001-01_20260728_0926.pdf (id=1KAdpLIfhLQOmEVszppllJubxfJyUEBl8)
+ */
+function _tmp_markDone_LC_2026_001_01() {
+  var res = markInspPdfDone(
+    'a960ffe9-196c-4a75-a846-f500fd91de51',
+    '1KAdpLIfhLQOmEVszppllJubxfJyUEBl8'
+  );
+  Logger.log(JSON.stringify(res, null, 2));
+  return res;
 }
 
 /**

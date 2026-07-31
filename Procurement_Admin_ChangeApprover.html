@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base target="_top">
+<title>관리자 — 결재자 변경</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1a1d23; --ink-soft: #4a5260; --ink-mute: #8b94a3;
+    --line: #e3e6eb; --line-soft: #eef0f3;
+    --accent: #1a6fc4; --accent-soft: #e8f1fb;
+    --procurement: #6a3eb5; --procurement-soft: #f0eafa;
+    --admin: #b91c1c; --admin-soft: #fdecec;
+    --warn: #d97706; --warn-soft: #fef3e2;
+    --danger: #d64541; --danger-soft: #fdecec;
+    --ok: #27ae60; --ok-soft: #e8f6ee;
+    --neutral-soft: #f0f2f5;
+    --mono: 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--ink); font-size: 13px; line-height: 1.55; min-height: 100vh; padding: 20px 28px; }
+
+  .page-head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .page-title { font-size: 18px; font-weight: 700; }
+  .page-title .url-hint { font-size: 13px; color: var(--ink-mute); font-weight: 500; font-family: var(--mono); }
+  .page-sub { color: var(--ink-mute); font-size: 12px; margin-top: 3px; }
+  .back-link { color: var(--accent); text-decoration: none; font-size: 12px; font-weight: 600; }
+  .back-link:hover { text-decoration: underline; }
+
+  .btn { padding: 7px 14px; border-radius: 5px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn:hover:not(:disabled) { background: var(--neutral-soft); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover:not(:disabled) { background: #1559a3; }
+  .btn-admin { background: var(--admin); color: #fff; border-color: var(--admin); }
+  .btn-admin:hover:not(:disabled) { background: #991616; }
+  .btn-ghost { background: transparent; border-color: var(--line); color: var(--ink-soft); }
+
+  .filter-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
+  .filter-row { display: grid; grid-template-columns: 130px repeat(3, 1fr) auto auto; gap: 10px; align-items: end; }
+  .filter-field label { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .filter-field input, .filter-field select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px; background: #fff; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 14px; overflow: hidden; }
+  .panel-head { padding: 11px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; background: #fbfbfc; }
+  .panel-title { font-weight: 700; font-size: 13.5px; }
+  .panel-sub { color: var(--ink-mute); font-size: 11.5px; font-weight: 500; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 9px 14px; color: var(--ink-mute); font-size: 11px; font-weight: 700; text-transform: uppercase; background: #fbfbfc; border-bottom: 1px solid var(--line); }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.row-clickable { cursor: pointer; }
+  tr.row-clickable:hover { background: var(--accent-soft); }
+  tr.row-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 0 var(--accent); }
+  .docno { color: var(--accent); font-weight: 700; font-family: var(--mono); font-size: 11.5px; }
+  .docno.prc { color: var(--procurement); }
+  .docno.insp { color: #0d7a6f; }
+  .type-tag { display:inline-block; font-size:10px; font-weight:800; padding:2px 6px; border-radius:3px; letter-spacing:.4px; }
+  .type-tag.REQ { background: var(--accent-soft); color: var(--accent); }
+  .type-tag.PRC { background: var(--procurement-soft); color: var(--procurement); }
+  .type-tag.INSP { background: #d9f2ee; color: #0d7a6f; }
+
+  .status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+  .status.review { background: var(--accent-soft); color: var(--accent); }
+  .status.in_appr { background: var(--warn-soft); color: var(--warn); }
+  .status.resubmit { background: var(--warn-soft); color: var(--warn); }
+  .status.unknown { background: var(--neutral-soft); color: var(--ink-mute); }
+
+  /* 결재 체인 */
+  .chain-wrap { padding: 6px 16px 16px; }
+  .chain-meta { display:flex; gap:18px; flex-wrap:wrap; padding: 12px 2px; color: var(--ink-soft); font-size:12px; }
+  .chain-meta b { color: var(--ink); }
+  .stage { display: grid; grid-template-columns: 30px 92px 1fr 78px 130px; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; margin-top: 8px; background:#fff; }
+  .stage.locked { background: var(--neutral-soft); color: var(--ink-mute); }
+  .stage.current { border-color: var(--warn); box-shadow: inset 3px 0 0 0 var(--warn); }
+  .stage.picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .stage-idx { width: 26px; height: 26px; border-radius: 50%; display:flex; align-items:center; justify-content:center; font-size: 11px; font-weight: 800; background: var(--neutral-soft); color: var(--ink-soft); }
+  .stage.current .stage-idx { background: var(--warn); color:#fff; }
+  .stage-label { font-weight: 700; font-size: 12px; }
+  .stage-who .nm { font-weight: 700; }
+  .stage-who .em { color: var(--ink-mute); font-family: var(--mono); font-size: 11px; }
+  .st-badge { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 3px; text-align:center; }
+  .st-badge.wait { background: var(--warn-soft); color: var(--warn); }
+  .st-badge.appr { background: var(--ok-soft); color: var(--ok); }
+  .st-badge.rej { background: var(--danger-soft); color: var(--danger); }
+  .st-badge.self { background: var(--neutral-soft); color: var(--ink-mute); }
+  .stage-act { text-align: right; }
+  .lock-note { font-size: 10.5px; color: var(--ink-mute); font-weight:600; }
+  .pick-btn { font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 5px; border:1px solid var(--accent); background:#fff; color: var(--accent); cursor:pointer; }
+  .pick-btn:hover { background: var(--accent-soft); }
+  .pick-btn.active { background: var(--accent); color:#fff; }
+
+  /* 변경 폼 */
+  .change-form { margin-top: 14px; border-top: 2px dashed var(--line); padding-top: 14px; display:none; }
+  .change-form.show { display:block; }
+  .cf-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .cf-field label { display:block; font-size:10.5px; font-weight:700; color:var(--ink-mute); text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px; }
+  .cf-field label .req { color: var(--danger); }
+  .cf-field select, .cf-field textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:5px; font-family:inherit; font-size:12.5px; background:#fff; }
+  .cf-field textarea { resize: vertical; min-height: 62px; }
+  .cf-arrow { display:flex; align-items:center; gap:10px; margin-top:12px; font-size:12.5px; flex-wrap:wrap; }
+  .who-chip { padding:5px 10px; border-radius:5px; font-size:12px; font-weight:600; }
+  .who-chip.old { background: var(--admin-soft); color: var(--admin); text-decoration: line-through; }
+  .who-chip.new { background: var(--ok-soft); color: #1c7a44; }
+  .cf-actions { display:flex; align-items:center; gap:10px; margin-top:14px; }
+  .cf-hint { font-size:11.5px; color:var(--ink-mute); }
+
+  /* 모달 */
+  .modal-overlay { display:none; position: fixed; inset:0; background: rgba(0,0,0,.55); z-index: 9000; align-items:center; justify-content:center; padding: 20px; }
+  .modal-overlay.show { display:flex; }
+  .modal { background: var(--panel); border-radius: 8px; max-width: 540px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.3); overflow:hidden; }
+  .modal-head { padding: 15px 20px; border-bottom: 1px solid var(--line); background: var(--accent-soft); }
+  .modal-title { font-weight: 700; font-size: 15px; color: var(--accent); }
+  .modal-body { padding: 18px 20px; font-size: 13px; }
+  .modal-foot { padding: 13px 20px; border-top: 1px solid var(--line); display:flex; justify-content:flex-end; gap:8px; background: #fbfbfc; position: relative; }
+  .crow { display:flex; justify-content:space-between; padding: 7px 0; border-bottom: 1px dashed var(--line-soft); gap: 16px; }
+  .crow:last-child { border-bottom: 0; }
+  .ckey { color: var(--ink-mute); font-weight:600; font-size:11.5px; }
+  .cval { color: var(--ink); font-weight:600; text-align:right; word-break: break-word; }
+  .cnote { border-radius: 5px; padding: 10px 12px; margin-top: 12px; font-size: 12px; font-weight: 600; }
+  .cnote.cur { background: var(--warn-soft); color: var(--warn); border:1px solid #f2c98a; }
+  .cnote.fut { background: var(--accent-soft); color: var(--accent); border:1px solid #b9d7f2; }
+  .cnote.dupe { background: var(--procurement-soft); color: var(--procurement); border:1px solid #cdbce8; }
+  .cnote ul { margin: 6px 0 0 18px; }
+  .progress-overlay { display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.85); align-items: center; justify-content: center; z-index: 10; font-size: 12px; color: var(--ink-soft); font-weight: 600; border-radius: 0 0 8px 8px; }
+  .progress-overlay.show { display: flex; }
+
+  .loading { padding: 40px; text-align: center; color: var(--ink-mute); font-size: 13px; }
+  .empty-state { padding: 40px 20px; text-align: center; color: var(--ink-mute); font-size: 13px; }
+  .error-state { padding: 24px; text-align: center; color: var(--danger); font-size: 13px; background: var(--danger-soft); border-radius: 4px; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 11px 22px; border-radius: 6px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.2); z-index: 9999; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: 80%; }
+  .toast.show { opacity: 1; }
+  .toast.ok { background: var(--ok); color: #fff; }
+  .toast.err { background: var(--danger); color: #fff; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <div class="page-title">👥 결재자 변경 <span class="url-hint">/ ?action=admin&fn=change_approver</span></div>
+    <div class="page-sub">진행 중 문서의 <strong>미결재 단계</strong> 결재자를 교체합니다. 승인 완료 단계·기안자 슬롯은 변경 불가.</div>
+  </div>
+  <a class="back-link" id="back-link" href="#">← 홈으로</a>
+</div>
+
+<!-- 검색 필터 -->
+<div class="filter-panel">
+  <div class="filter-row">
+    <div class="filter-field">
+      <label>문서 유형</label>
+      <select id="f-type">
+        <option value="">전체</option>
+        <option value="REQ">REQ (구매요청)</option>
+        <option value="PRC">PRC (구매품의)</option>
+        <option value="INSP">INSP (검수)</option>
+      </select>
+    </div>
+    <div class="filter-field"><label>기안자 (이름/이메일)</label><input type="text" id="f-drafter" placeholder="예: 최지훈"></div>
+    <div class="filter-field"><label>문서번호 (부분)</label><input type="text" id="f-docno" placeholder="예: REQ-2026"></div>
+    <div class="filter-field"><label>상태 (부분)</label><input type="text" id="f-status" placeholder="예: 결재중"></div>
+    <button class="btn btn-primary" onclick="searchDocs()">검색</button>
+    <button class="btn btn-ghost" onclick="resetFilters()">초기화</button>
+  </div>
+</div>
+
+<!-- 목록 -->
+<div class="panel">
+  <div class="panel-head">
+    <div><span class="panel-title">변경 가능 문서 (진행 중)</span> <span class="panel-sub" id="result-count" style="margin-left:8px;"></span></div>
+    <div class="panel-sub">💡 행을 클릭하면 결재 체인이 열립니다</div>
+  </div>
+  <div id="doc-table"><div class="loading">문서 목록을 불러오는 중...</div></div>
+</div>
+
+<!-- 상세: 결재 체인 -->
+<div class="panel hidden" id="detail-panel">
+  <div class="panel-head">
+    <div><span class="panel-title" id="detail-title">결재 체인</span></div>
+    <button class="btn btn-ghost" style="padding:4px 10px;" onclick="closeDetail()">닫기 ✕</button>
+  </div>
+  <div class="chain-wrap">
+    <div class="chain-meta" id="chain-meta"></div>
+    <div id="chain-stages"></div>
+
+    <div class="change-form" id="change-form">
+      <div class="cf-grid">
+        <div class="cf-field">
+          <label>새 결재자 선택<span class="req">*</span> (결재자목록 · 활성)</label>
+          <select id="new-approver" onchange="onFormInput()"><option value="">— 선택 —</option></select>
+        </div>
+        <div class="cf-field">
+          <label>변경 사유<span class="req">*</span> (관리자 액션 필수 기록)</label>
+          <textarea id="change-reason" placeholder="예: 담당 결재자 휴직으로 대체 지정" oninput="onFormInput()"></textarea>
+        </div>
+      </div>
+      <div class="cf-arrow" id="cf-arrow"></div>
+      <div class="cf-actions">
+        <button class="btn btn-admin" id="do-change" disabled onclick="openConfirm()">변경 실행</button>
+        <span class="cf-hint" id="cf-hint"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 확인 모달 -->
+<div class="modal-overlay" id="confirm-modal">
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">👥 결재자 변경 확인</div></div>
+    <div class="modal-body" id="confirm-body"></div>
+    <div class="modal-foot">
+      <div class="progress-overlay" id="confirm-progress">⏳ 변경 처리 중...</div>
+      <button class="btn" id="confirm-cancel" onclick="closeConfirm()">취소</button>
+      <button class="btn btn-admin" id="confirm-exec" onclick="executeChange()">변경 실행</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var WEBAPP_URL = '<?= webappUrl ?>';
+var state = {
+  docs: [],
+  master: [],          // 결재자 마스터 (active만)
+  selToken: null,
+  pickIdx: null,
+  reason: '',
+};
+
+document.getElementById('back-link').href = WEBAPP_URL;
+
+window.addEventListener('DOMContentLoaded', function() {
+  loadMaster();
+  loadDocs({});
+});
+
+// ── 서버 호출 ──────────────────────────────
+function loadMaster() {
+  if (!hasGas()) return;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      state.master = (res && res.ok && res.approvers ? res.approvers : []).filter(function(a){ return a.active; });
+    })
+    .withFailureHandler(function(){ state.master = []; })
+    .getApproverListForClient();
+}
+
+function loadDocs(filter) {
+  document.getElementById('doc-table').innerHTML = '<div class="loading">문서 목록을 불러오는 중...</div>';
+  if (!hasGas()) { document.getElementById('doc-table').innerHTML = '<div class="error-state">Google Apps Script 환경에서만 동작합니다.</div>'; return; }
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (res && res.ok) {
+        state.docs = res.docs || [];
+        state.selToken = null; state.pickIdx = null;
+        renderTable();
+        document.getElementById('detail-panel').classList.add('hidden');
+      } else {
+        document.getElementById('doc-table').innerHTML = '<div class="error-state">목록 조회 실패: ' + escHtml(res && res.message || '알 수 없는 오류') + '</div>';
+      }
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('doc-table').innerHTML = '<div class="error-state">목록 조회 실패: ' + escHtml(err && err.message ? err.message : err) + '</div>';
+    })
+    .adminListChangeableForClient(filter);
+}
+
+function searchDocs() {
+  loadDocs({
+    docType:   document.getElementById('f-type').value,
+    drafter:   document.getElementById('f-drafter').value.trim(),
+    docNoLike: document.getElementById('f-docno').value.trim(),
+    status:    document.getElementById('f-status').value.trim(),
+  });
+}
+function resetFilters() {
+  ['f-type','f-drafter','f-docno','f-status'].forEach(function(id){ document.getElementById(id).value=''; });
+  loadDocs({});
+}
+
+// ── 목록 ──────────────────────────────
+function renderTable() {
+  document.getElementById('result-count').textContent = state.docs.length + '건';
+  if (!state.docs.length) {
+    document.getElementById('doc-table').innerHTML = '<div class="empty-state">조건에 맞는 진행 중 문서가 없습니다.</div>';
+    return;
+  }
+  var h = '<table><thead><tr><th>문서번호</th><th>유형</th><th>기안자</th><th>거래처</th><th>상태</th><th>변경가능 단계</th></tr></thead><tbody>';
+  state.docs.forEach(function(doc) {
+    var sel = state.selToken === doc.token;
+    var cnt = (doc.chain || []).filter(function(c){ return c.changeable; }).length;
+    var dc = doc.docType === 'PRC' ? 'docno prc' : (doc.docType === 'INSP' ? 'docno insp' : 'docno');
+    h += '<tr class="row-clickable' + (sel ? ' row-selected' : '') + '" onclick="selectDoc(\'' + escAttr(doc.token) + '\')">'
+      + '<td><span class="' + dc + '">' + escHtml(doc.docNo) + '</span></td>'
+      + '<td><span class="type-tag ' + escAttr(doc.docType) + '">' + escHtml(doc.docType) + '</span></td>'
+      + '<td>' + escHtml(doc.drafter) + '</td>'
+      + '<td>' + escHtml(doc.vendor) + '</td>'
+      + '<td><span class="status ' + (String(doc.status).indexOf('검토') >= 0 ? 'review' : 'in_appr') + '">' + escHtml(doc.status) + '</span></td>'
+      + '<td><b>' + cnt + '</b>개</td></tr>';
+  });
+  document.getElementById('doc-table').innerHTML = h + '</tbody></table>';
+}
+
+// ── 상세 / 체인 ──────────────────────────────
+function findDoc(tk) { for (var i=0;i<state.docs.length;i++) if (state.docs[i].token === tk) return state.docs[i]; return null; }
+
+function selectDoc(tk) {
+  state.selToken = tk; state.pickIdx = null; state.reason = '';
+  renderTable(); renderDetail();
+  document.getElementById('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function closeDetail() { state.selToken = null; state.pickIdx = null; document.getElementById('detail-panel').classList.add('hidden'); renderTable(); }
+
+function renderDetail() {
+  var doc = findDoc(state.selToken); if (!doc) return;
+  document.getElementById('detail-panel').classList.remove('hidden');
+  var dc = doc.docType === 'PRC' ? 'docno prc' : (doc.docType === 'INSP' ? 'docno insp' : 'docno');
+  document.getElementById('detail-title').innerHTML = '결재 체인 · <span class="' + dc + '">' + escHtml(doc.docNo) + '</span>';
+  document.getElementById('chain-meta').innerHTML =
+    '<div>유형 <b>' + escHtml(doc.docType) + '</b></div><div>기안자 <b>' + escHtml(doc.drafter) + '</b></div>'
+    + '<div>현재상태 <b>' + escHtml(doc.status) + '</b></div><div>현재 결재 순번(APPR_IDX) <b>' + doc.curIdx + '</b></div>';
+
+  var h = '';
+  (doc.chain || []).forEach(function(c) {
+    var picked = state.pickIdx === c.stageIdx;
+    var cls = 'stage' + (c.isCurrent ? ' current' : '') + (c.changeable ? '' : ' locked') + (picked ? ' picked' : '');
+    var badge = (c.stageIdx === 0) ? '<span class="st-badge self">기안(자기결재)</span>'
+              : (c.status === '승인' ? '<span class="st-badge appr">✓ 승인완료</span>'
+              : (c.status === '반려' ? '<span class="st-badge rej">반려</span>'
+              : '<span class="st-badge wait">대기</span>'));
+    var act;
+    if (c.changeable) act = '<button class="pick-btn' + (picked ? ' active' : '') + '" onclick="pickStage(' + c.stageIdx + ')">' + (picked ? '선택됨 ✓' : '이 결재자 변경') + '</button>';
+    else if (c.stageIdx === 0) act = '<span class="lock-note">🔒 기안자 변경 불가</span>';
+    else if (c.status === '승인') act = '<span class="lock-note">🔒 승인완료 변경 불가</span>';
+    else act = '<span class="lock-note">🔒</span>';
+    h += '<div class="' + cls + '">'
+      + '<div class="stage-idx">' + c.stageIdx + '</div>'
+      + '<div class="stage-label">' + escHtml(c.label) + (c.isCurrent ? ' <span style="color:var(--warn);font-size:10px;">◀ 현재차례</span>' : '') + '</div>'
+      + '<div class="stage-who"><span class="nm">' + escHtml(c.name) + '</span> <span class="em">' + escHtml(c.email) + '</span></div>'
+      + '<div>' + badge + '</div>'
+      + '<div class="stage-act">' + act + '</div></div>';
+  });
+  document.getElementById('chain-stages').innerHTML = h;
+
+  var cf = document.getElementById('change-form');
+  if (state.pickIdx === null) { cf.classList.remove('show'); return; }
+  cf.classList.add('show');
+
+  // 새 결재자 드롭다운 — 현재 그 단계 결재자는 제외 (동일인 no-op 방지)
+  var stage = chainStage(doc, state.pickIdx);
+  var curEmail = stage ? String(stage.email || '').toLowerCase() : '';
+  var sel = document.getElementById('new-approver');
+  sel.innerHTML = '<option value="">— 선택 —</option>' + state.master
+    .filter(function(m){ return String(m.email || '').toLowerCase() !== curEmail; })
+    .map(function(m){ return '<option value="' + escAttr(m.email) + '">' + escHtml(m.name + ' (' + m.dept + ' ' + m.rank + ') · ' + m.email) + '</option>'; })
+    .join('');
+  sel.value = '';
+  document.getElementById('change-reason').value = state.reason || '';
+  onFormInput();
+}
+
+function chainStage(doc, idx) { var c = doc.chain || []; for (var i=0;i<c.length;i++) if (c[i].stageIdx === idx) return c[i]; return null; }
+function pickStage(idx) { var doc = findDoc(state.selToken); var s = chainStage(doc, idx); if (!s || !s.changeable) return; state.pickIdx = idx; renderDetail(); }
+
+function masterByEmail(email) { for (var i=0;i<state.master.length;i++) if (String(state.master[i].email).toLowerCase() === String(email).toLowerCase()) return state.master[i]; return null; }
+
+function onFormInput() {
+  var doc = findDoc(state.selToken); if (!doc || state.pickIdx === null) return;
+  var email = document.getElementById('new-approver').value;
+  state.reason = document.getElementById('change-reason').value.trim();
+  var m = masterByEmail(email);
+  var stage = chainStage(doc, state.pickIdx);
+  var arrow = document.getElementById('cf-arrow');
+  if (m && stage) {
+    arrow.innerHTML = '<span class="who-chip old">' + escHtml(stage.name + ' · ' + stage.email) + '</span>'
+      + '<span style="font-size:16px;color:var(--ink-mute);">→</span>'
+      + '<span class="who-chip new">' + escHtml(m.name + ' · ' + m.email) + '</span>';
+  } else {
+    arrow.innerHTML = '<span class="cf-hint">새 결재자를 선택하면 변경 전/후가 표시됩니다.</span>';
+  }
+  var isCur = stage && stage.isCurrent;
+  var crossDupe = m && stage && (doc.chain || []).some(function(c){ return c.stageIdx !== state.pickIdx && String(c.email).toLowerCase() === String(m.email).toLowerCase(); });
+  var hint = document.getElementById('cf-hint');
+  hint.innerHTML = isCur ? '⚠ 현재 차례 단계 — 실행 시 새 결재자에게 결재요청 메일이 즉시 발송됩니다.'
+                         : 'ℹ 이후 단계 — 지금은 메일 없이 블록만 교체됩니다(차례가 오면 자동 발송).';
+  if (crossDupe) hint.innerHTML += ' <span style="color:var(--ink-mute);">· 이 인물은 다른 단계에도 배정됩니다(허용).</span>';
+  document.getElementById('do-change').disabled = !(m && state.reason);
+}
+
+// ── 확인 모달 / 실행 ──────────────────────────────
+function openConfirm() {
+  var doc = findDoc(state.selToken); var email = document.getElementById('new-approver').value; var reason = document.getElementById('change-reason').value.trim();
+  var m = masterByEmail(email); var stage = chainStage(doc, state.pickIdx);
+  if (!doc || !m || !stage || !reason) return;
+  var isCur = stage.isCurrent;
+
+  var note = isCur
+    ? '<div class="cnote cur">⚡ <b>현재 차례 단계</b> 교체입니다.<ul><li>새 결재자 <b>' + escHtml(m.name) + '</b>에게 <b>결재요청 메일</b> 발송</li><li>기존 <b>' + escHtml(stage.name) + '</b>에게 <b>제거 통지 메일</b> 발송</li><li>문서 상태 → <b>결재중 (' + escHtml(m.name) + ')</b></li></ul></div>'
+    : '<div class="cnote fut">🕓 <b>이후(미래) 단계</b> 교체입니다.<ul><li>지금은 결재요청 메일 없음 — 차례가 오면 자동 발송</li><li>기존 <b>' + escHtml(stage.name) + '</b>에게 제거 통지 메일 발송</li></ul></div>';
+
+  var dupStages = (doc.chain || []).filter(function(c){ return c.stageIdx !== state.pickIdx && String(c.email).toLowerCase() === String(m.email).toLowerCase(); });
+  var dupeNote = dupStages.length
+    ? '<div class="cnote dupe">👥 <b>' + escHtml(m.name) + '</b>님은 이 문서의 다른 단계에도 배정되어 있습니다: <b>' + dupStages.map(function(c){ return escHtml(c.label); }).join(', ') + '</b>.<br><span style="font-weight:500;">동일 인물의 다단계 결재는 허용됩니다. 의도한 지정인지 확인하세요.</span></div>'
+    : '';
+
+  document.getElementById('confirm-body').innerHTML =
+    '<div style="margin-bottom:12px;">아래 내용으로 결재자를 변경합니다.</div>'
+    + '<div class="crow"><span class="ckey">문서번호</span><span class="cval" style="font-family:var(--mono);">' + escHtml(doc.docNo) + ' (' + escHtml(doc.docType) + ')</span></div>'
+    + '<div class="crow"><span class="ckey">단계</span><span class="cval">' + escHtml(stage.label) + ' · idx ' + state.pickIdx + (isCur ? ' (현재차례)' : ' (이후)') + '</span></div>'
+    + '<div class="crow"><span class="ckey">기존 결재자</span><span class="cval">' + escHtml(stage.name + ' · ' + stage.email) + '</span></div>'
+    + '<div class="crow"><span class="ckey">신규 결재자</span><span class="cval" style="color:var(--ok);">' + escHtml(m.name + ' · ' + m.email) + '</span></div>'
+    + '<div class="crow"><span class="ckey">변경 사유</span><span class="cval">' + escHtml(reason) + '</span></div>'
+    + note + dupeNote;
+  document.getElementById('confirm-modal').classList.add('show');
+}
+function closeConfirm() {
+  document.getElementById('confirm-modal').classList.remove('show');
+  document.getElementById('confirm-progress').classList.remove('show');
+  document.getElementById('confirm-exec').disabled = false;
+  document.getElementById('confirm-cancel').disabled = false;
+}
+
+function executeChange() {
+  var doc = findDoc(state.selToken); var email = document.getElementById('new-approver').value; var reason = document.getElementById('change-reason').value.trim();
+  if (!doc || !email || !reason || state.pickIdx === null) return;
+  document.getElementById('confirm-progress').classList.add('show');
+  document.getElementById('confirm-exec').disabled = true;
+  document.getElementById('confirm-cancel').disabled = true;
+  if (!hasGas()) { closeConfirm(); toast('Google Apps Script 환경에서만 동작합니다.', 'err'); return; }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      closeConfirm();
+      if (res && res.ok) {
+        toast(doc.docNo + ' 결재자 변경 완료', 'ok');
+        // 목록 재조회 (현재 필터 유지)
+        searchDocs();
+      } else {
+        toast('변경 실패: ' + (res && res.message || '알 수 없는 오류'), 'err');
+      }
+    })
+    .withFailureHandler(function(err) {
+      closeConfirm();
+      toast('변경 실패: ' + (err && err.message ? err.message : err), 'err');
+    })
+    .adminChangeApproverForClient({
+      token:    doc.token,
+      docType:  doc.docType,
+      stageIdx: state.pickIdx,
+      newEmail: email,
+      reason:   reason,
+    });
+}
+
+// ── 유틸 ──────────────────────────────
+function hasGas() { return (typeof google !== 'undefined' && google.script && google.script.run); }
+function toast(msg, type) { var t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast show ' + (type || 'ok'); setTimeout(function(){ t.classList.remove('show'); }, 3500); }
+function escHtml(s) { if (s === null || s === undefined) return ''; return String(s).replace(/[&<>"']/g, function(c){ return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+function escAttr(s) { return escHtml(s).replace(/`/g, '&#96;'); }
+</script>
+
+</body>
+</html>

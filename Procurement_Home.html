@@ -70,6 +70,7 @@
   .role-pill.user { background: var(--grad-brand); color: #fff; }
   .role-pill.proc { background: var(--grad-prc); color: #fff; }
   .role-pill.admin { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
+  .role-pill.gview { background: #0e8577; color: #fff; }  /* 전사조회(읽기 전용) — 부서 배지와 구분되는 틸/청록 */
 
   .layout { display: grid; grid-template-columns: 230px 1fr; min-height: calc(100vh - 70px); }
   .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 12px; }
@@ -540,6 +541,7 @@ function renderUser(){
   var deptLabel = (u.dept && String(u.dept).trim()) ? escHtml(u.dept) : '사용자';
   var pills = '<span class="role-pill user">' + deptLabel + '</span>';
   if(u.isProcurement) pills += '<span class="role-pill proc">구매팀</span>';
+  if(u.isGlobalViewer) pills += '<span class="role-pill gview">전사조회</span>';
   if(u.isAdmin) pills += '<span class="role-pill admin">관리자</span>';
   document.getElementById('user-roles').innerHTML = pills;
 }
@@ -608,9 +610,11 @@ function renderSidebar(){
     html += '<div class="nav-item" data-menu="admin_force_release_lock">'
          +    '<span>강제 락 해제</span>'
          + '</div>';
+    html += '<div class="nav-item" data-menu="admin_change_approver">'
+         +    '<span>결재자 변경</span>'
+         + '</div>';
     // 향후 추가 자리:
     // <div class="nav-item disabled"><span>대리 결재</span><span class="nav-soon">SOON</span></div>
-    // <div class="nav-item disabled"><span>결재자 변경</span><span class="nav-soon">SOON</span></div>
     // <div class="nav-item disabled"><span>상태 강제 변경</span><span class="nav-soon">SOON</span></div>
     html += '</div>';
   }
@@ -633,6 +637,11 @@ function renderSidebar(){
       if(key === 'admin_force_release_lock'){
         // 관리자 강제 락 해제 — ?action=admin&fn=force_release_lock로 이동
         window.top.location.href = WEBAPP_URL + '?action=admin&fn=force_release_lock';
+        return;
+      }
+      if(key === 'admin_change_approver'){
+        // 관리자 결재자 변경 — ?action=admin&fn=change_approver로 이동
+        window.top.location.href = WEBAPP_URL + '?action=admin&fn=change_approver';
         return;
       }
       // [결재 메뉴 세분화] 결재 트리: 펼침 토글 + 목록 이동을 함께 처리
