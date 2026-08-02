@@ -25,8 +25,9 @@
   .page-title { font-size: 18px; font-weight: 700; }
   .page-title .url-hint { font-size: 13px; color: var(--ink-mute); font-weight: 500; font-family: var(--mono); }
   .page-sub { color: var(--ink-mute); font-size: 12px; margin-top: 3px; }
-  .back-link { color: var(--accent); text-decoration: none; font-size: 12px; font-weight: 600; }
-  .back-link:hover { text-decoration: underline; }
+  /* 홈으로 버튼 (우측 상단 고정) — Form/Viewer 등과 동일 */
+  .home-btn { position: fixed; top: 16px; right: 20px; z-index: 5000; display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 9px; border: 1px solid #83161A; background: #fff; color: #83161A; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; box-shadow: 0 2px 6px rgba(131,22,26,.18); transition: background .15s, color .15s; }
+  .home-btn:hover { background: #83161A; color: #fff; }
 
   .btn { padding: 7px 14px; border-radius: 5px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
   .btn:hover:not(:disabled) { background: var(--neutral-soft); }
@@ -72,22 +73,23 @@
   .chain-wrap { padding: 6px 16px 16px; }
   .chain-meta { display:flex; gap:18px; flex-wrap:wrap; padding: 12px 2px; color: var(--ink-soft); font-size:12px; }
   .chain-meta b { color: var(--ink); }
-  .stage { display: grid; grid-template-columns: 30px 92px 1fr 78px 130px; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; margin-top: 8px; background:#fff; }
+  .stage { display: grid; grid-template-columns: 30px auto minmax(150px,1fr) auto auto; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; margin-top: 8px; background:#fff; }
   .stage.locked { background: var(--neutral-soft); color: var(--ink-mute); }
   .stage.current { border-color: var(--warn); box-shadow: inset 3px 0 0 0 var(--warn); }
   .stage.picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .stage-idx { width: 26px; height: 26px; border-radius: 50%; display:flex; align-items:center; justify-content:center; font-size: 11px; font-weight: 800; background: var(--neutral-soft); color: var(--ink-soft); }
   .stage.current .stage-idx { background: var(--warn); color:#fff; }
-  .stage-label { font-weight: 700; font-size: 12px; }
+  .stage-label { font-weight: 700; font-size: 12px; white-space: nowrap; }
+  .stage-who { min-width: 0; }
   .stage-who .nm { font-weight: 700; }
   .stage-who .em { color: var(--ink-mute); font-family: var(--mono); font-size: 11px; }
-  .st-badge { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 3px; text-align:center; }
+  .st-badge { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 3px; text-align:center; white-space: nowrap; }
   .st-badge.wait { background: var(--warn-soft); color: var(--warn); }
   .st-badge.appr { background: var(--ok-soft); color: var(--ok); }
   .st-badge.rej { background: var(--danger-soft); color: var(--danger); }
   .st-badge.self { background: var(--neutral-soft); color: var(--ink-mute); }
   .stage-act { text-align: right; }
-  .lock-note { font-size: 10.5px; color: var(--ink-mute); font-weight:600; }
+  .lock-note { font-size: 10.5px; color: var(--ink-mute); font-weight:600; white-space: nowrap; }
   .pick-btn { font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 5px; border:1px solid var(--accent); background:#fff; color: var(--accent); cursor:pointer; }
   .pick-btn:hover { background: var(--accent-soft); }
   .pick-btn.active { background: var(--accent); color:#fff; }
@@ -140,12 +142,13 @@
 </head>
 <body>
 
+<button class="home-btn" id="home-btn" onclick="goHome()">🏠 홈으로</button>
+
 <div class="page-head">
   <div>
     <div class="page-title">👥 결재자 변경 <span class="url-hint">/ ?action=admin&fn=change_approver</span></div>
     <div class="page-sub">진행 중 문서의 <strong>미결재 단계</strong> 결재자를 교체합니다. 승인 완료 단계·기안자 슬롯은 변경 불가.</div>
   </div>
-  <a class="back-link" id="back-link" href="#">← 홈으로</a>
 </div>
 
 <!-- 검색 필터 -->
@@ -160,7 +163,7 @@
         <option value="INSP">INSP (검수)</option>
       </select>
     </div>
-    <div class="filter-field"><label>기안자 (이름/이메일)</label><input type="text" id="f-drafter" placeholder="예: 최지훈"></div>
+    <div class="filter-field"><label>기안자 (이름/이메일)</label><input type="text" id="f-drafter" placeholder="예: 홍길동"></div>
     <div class="filter-field"><label>문서번호 (부분)</label><input type="text" id="f-docno" placeholder="예: REQ-2026"></div>
     <div class="filter-field"><label>상태 (부분)</label><input type="text" id="f-status" placeholder="예: 결재중"></div>
     <button class="btn btn-primary" onclick="searchDocs()">검색</button>
@@ -232,7 +235,7 @@ var state = {
   reason: '',
 };
 
-document.getElementById('back-link').href = WEBAPP_URL;
+function goHome() { if (WEBAPP_URL) { window.top.location.href = WEBAPP_URL + '?action=home'; } }
 
 window.addEventListener('DOMContentLoaded', function() {
   loadMaster();
@@ -386,8 +389,8 @@ function onFormInput() {
   var isCur = stage && stage.isCurrent;
   var crossDupe = m && stage && (doc.chain || []).some(function(c){ return c.stageIdx !== state.pickIdx && String(c.email).toLowerCase() === String(m.email).toLowerCase(); });
   var hint = document.getElementById('cf-hint');
-  hint.innerHTML = isCur ? '⚠ 현재 차례 단계 — 실행 시 새 결재자에게 결재요청 메일이 즉시 발송됩니다.'
-                         : 'ℹ 이후 단계 — 지금은 메일 없이 블록만 교체됩니다(차례가 오면 자동 발송).';
+  hint.innerHTML = isCur ? '⚡ 현재 차례 단계 — 실행 시 새 결재자에게 결재요청 메일이 즉시 발송됩니다.'
+                         : '🕓 이후 단계 — 지금은 메일 없이 블록만 교체됩니다(차례가 오면 자동 발송).';
   if (crossDupe) hint.innerHTML += ' <span style="color:var(--ink-mute);">· 이 인물은 다른 단계에도 배정됩니다(허용).</span>';
   document.getElementById('do-change').disabled = !(m && state.reason);
 }
