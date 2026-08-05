@@ -1658,22 +1658,6 @@ function markInspPdfDone(token, pdfFileId) {
 }
 
 /**
- * [임시] LC-2026-001-01 PDF 마감 — 편집기 Run 전용(무인자).
- *  GAS 편집기는 인자 있는 함수를 직접 실행할 수 없어, 이번 건 값을 박아둔 래퍼.
- *  실행 후 대기목록(listInspAwaitingPdf)에서 빠지면 이 함수는 삭제해도 됨.
- *  - token : a960ffe9-196c-4a75-a846-f500fd91de51
- *  - PDF   : INSP_LC-2026-001-01_20260728_0926.pdf (id=1KAdpLIfhLQOmEVszppllJubxfJyUEBl8)
- */
-function _tmp_markDone_LC_2026_001_01() {
-  var res = markInspPdfDone(
-    'a960ffe9-196c-4a75-a846-f500fd91de51',
-    '1KAdpLIfhLQOmEVszppllJubxfJyUEBl8'
-  );
-  Logger.log(JSON.stringify(res, null, 2));
-  return res;
-}
-
-/**
  * 실패/누락 회차의 PDF 핸드오프 재생성 (매니페스트 재작성 + 메일).
  *  - 큐 실패로 PDF가 안 만들어진 기존 회차 복구용. 사진이 STAGING에 보존돼 있어야 함.
  *  - 사용법: rerunInspHandoff("검수보고서_token")
