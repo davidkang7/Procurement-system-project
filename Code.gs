@@ -5019,6 +5019,19 @@ function processQueueTrigger() {
       break;
     }
 
+    // [게이트] 할 일이 없으면 전역 락을 아예 잡지 않는다.
+    //  이 트리거는 1분 간격이라 하루 ~1,440회 도는데, 큐가 비어 있어도 매 회
+    //  _claimNextJob()이 스크립트 락을 잡았다 놓았다. 다른 실행이 락을 오래 쥐고
+    //  있으면 '할 일도 없으면서' 30초를 기다리다 실패한다.
+    //  (2026-08-04 장애: 큐가 빈 상태였는데 트리거 6건이 이렇게 연쇄 실패해,
+    //   실제 사용자 피해와 무관한 실패가 로그의 3/4을 차지했다.)
+    //  ※ 선점의 정확성은 그대로다 — 실제 claim과 중복 방지는 아래 _claimNextJob이
+    //    락 안에서 수행한다. 이 게이트는 '건너뛸지'만 정하며, 확신이 없으면 통과시킨다.
+    if (!_hasPendingJobUnlocked()) {
+      skippedReason = processedCount === 0 ? '처리할 job 없음 (락 미획득)' : '큐 비움';
+      break;
+    }
+
     // 다음 pending job 1건 선점
     var job = _claimNextJob();
     if (!job) {
@@ -5065,6 +5078,26 @@ function processQueueTrigger() {
   if (totalElapsed > 5 * 60 * 1000) {
     notifyAdminError('큐 트리거 시간 초과 경고: ' + totalElapsed + 'ms / 처리 ' +
                      processedCount + '건');
+  }
+}
+
+/**
+ * pending job이 있는지만 락 없이 확인 (processQueueTrigger 게이트용)
+ *  - 읽기 전용이며 선점하지 않는다. 실제 선점·중복 방지는 _claimNextJob()이 락 안에서 수행.
+ *  - 판단 불가(파싱 실패 등) 시 true를 반환해 기존 경로로 폴백한다.
+ *    false를 반환하면 큐에 job이 있어도 영영 처리되지 않으므로, 애매하면 반드시 통과시킨다.
+ *  - 즉 '할 일이 없다고 확신할 때만' 건너뛴다. 최악의 경우가 곧 현재 동작이다.
+ * @returns {boolean}
+ */
+function _hasPendingJobUnlocked() {
+  try {
+    var queue = JSON.parse(PropertiesService.getScriptProperties().getProperty(QUEUE_KEY) || '[]');
+    for (var i = 0; i < queue.length; i++) {
+      if (queue[i].status === 'pending') return true;
+    }
+    return false;
+  } catch(_) {
+    return true;   // 판단 불가 → 안전하게 락 경로로
   }
 }
 
