@@ -30,6 +30,7 @@ var CONFIG = {
 
   // 락
   LOCK_WAIT_MS:          30000,             // LockService 대기 (NFR/FR-51)
+  LOCK_HELD_WARN_MS:     5000,              // 이 시간 넘게 락을 쥔 실행은 실행 로그에 경고 기록
   PRC_CLAIM_TTL_HOURS:   24,                // PRC_DRAFT 락 자동 해제 시간 (예외처리)
 
   // 이메일 재시도 (NFR-05)
@@ -328,10 +329,25 @@ function withLock(fn) {
   } catch(e) {
     throw new Error('시스템이 바쁩니다. 잠시 후 다시 시도해주세요.');
   }
+  var held0 = Date.now();
   try {
     return fn();
   } finally {
     lock.releaseLock();
+    // [진단] 락을 오래 쥔 실행은 아무 흔적도 남기지 않는다.
+    //  대기하다 실패한 쪽(피해자)의 스택에는 '가해자'가 찍히지 않으므로,
+    //  점유 시간이 임계를 넘으면 여기서 직접 남긴다.
+    //  ※ 2026-08-04 장애: _decisionCore가 474초간 락을 쥐어 큐 트리거 6건 +
+    //    사용자 재시도 2건이 연쇄 실패했는데, 이 한 줄이 없어 실행 목록의
+    //    Duration 열을 눈으로 훑어 범인을 찾아야 했다.
+    //  ※ 락을 '놓는 시점'에 기록되므로 실시간 감지는 아니다(사후 추적용).
+    var held = Date.now() - held0;
+    if (held > CONFIG.LOCK_HELD_WARN_MS) {
+      try {
+        console.warn('[Lock] 장시간 점유 ' + held + 'ms / caller=' +
+                     (new Error().stack || '').split('\n').slice(1, 4).join(' | '));
+      } catch(_) {}
+    }
   }
 }
 
