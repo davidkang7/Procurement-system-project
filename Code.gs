@@ -300,7 +300,7 @@ function doPost(e) {
     var action  = payload.action || '';
 
     if (action === 'submit')        return jsonResponse(_submitCore(payload));
-    if (action === 'decide')        return jsonResponse(_decisionCore(payload));
+    if (action === 'decide')        return jsonResponse(_decisionCore_(payload));
     if (action === 'resubmit')      return jsonResponse(_resubmitCore(payload));
     if (action === 'discard')       return jsonResponse(_discardCore(payload));
     if (action === 'get_doc')       return jsonResponse(_getDocumentDataCore(payload));
@@ -450,6 +450,26 @@ function getActiveUserEmail() {
   } catch(_) { return ''; }
 }
 
+// 인가(권한) 판단 전용 — getEffectiveUser() 폴백이 없다.
+//
+// ⚠ getActiveUserEmail()과 혼용 금지.
+//   웹앱이 executeAs: USER_DEPLOYING으로 실행되므로 getEffectiveUser()는 '접속자'가 아니라
+//   '배포 계정'을 반환한다. 신원 확인에 실패했을 때 그 값을 대신 쓰면
+//   `if (!actor) return 거부;` 형태의 관문이 영원히 열려 있게 되고,
+//   감사로그의 actor에도 배포자가 찍혀 실제 처리자를 사후 추적할 수 없다.
+//
+//   신원 확인 불가 = 빈 문자열 = 거부. 다른 사람 이름으로 채우지 않는다.
+//
+// 사용처: 결재/폐기/재상신 등 '거부·허용을 결정하는' 자리에만.
+//   기록·화면 자동채움 등 편의 기능은 기존 getActiveUserEmail()을 그대로 쓴다.
+function getRequestUserEmail_() {
+  try {
+    return String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+
 // 기안자 본인 검증: 결재란 1번(기안자)의 이메일이 현재 로그인 사용자와 일치해야 함.
 // 클라이언트 잠금이 우회/변조된 경우의 서버측 안전망. 불일치 시 에러객체, 정상 시 null 반환.
 function assertDrafterIsSelf(data) {
@@ -541,9 +561,19 @@ var AUDIT_EVENT = {
   INSP_RESUBMIT:  'INSP_RESUBMIT',   // 반려 후 수정 재상신
   INSP_FINALIZED: 'INSP_FINALIZED',  // 최종 검수 승인 → 품의 종결
 
-  // 추후 확장 자리 (Step 3 이후 추가):
-  // DOC_SUBMIT, DOC_APPROVE, DOC_REJECT, DOC_DISCARD,
-  // PRC_CLAIM, PRC_RELEASE, PRC_SUBMIT,
+  // REQ·PRC 라이프사이클 — 실제 처리자 기록(부인방지)
+  DOC_APPROVE:    'DOC_APPROVE',     // 결재 승인 (단계별)
+  DOC_REJECT:     'DOC_REJECT',      // 결재 반려
+  DOC_DISCARD:    'DOC_DISCARD',     // 기안자 본인 폐기
+  DOC_RESUBMIT:   'DOC_RESUBMIT',    // 반려 후 수정 재상신
+
+  // 비인가 시도 (보안 기록)
+  //   결재/폐기/재상신 요청이 권한 검증에서 거부된 모든 경우.
+  //   지정 결재자가 아닌 사용자의 직접 호출을 사후에 식별하기 위한 흔적.
+  DECISION_DENIED: 'DECISION_DENIED',
+
+  // 추후 확장 자리:
+  // DOC_SUBMIT, PRC_CLAIM, PRC_RELEASE, PRC_SUBMIT,
   // DRIVE_SAVE_FAIL, LINK_INVALID_ACCESS
 };
 
@@ -1082,169 +1112,279 @@ function _submitCore(data) {
 // ================================================================
 
 function processDecisionFromClient(payload) {
-  return _decisionCore(payload);
+  return _decisionCore_(payload);
 }
 function processDecisionForViewer(payload) {
-  return _decisionCore(payload);
+  return _decisionCore_(payload);
 }
 
-function _decisionCore(payload) {
-  // 락 안: 시트 업데이트만 빠르게
+/**
+ * 결재 가능한 문서 상태인지 판정 — '금지 목록'이 아니라 '허용 목록'으로 본다.
+ * 알 수 없는 상태는 전부 거부되어야 안전하다.
+ *   허용: 검토중 / 재상신 / 결재중 (...)
+ *   거부: 반려, 폐기, 최종승인, 최종승인(PRC), PRC생성됨, 업로드오류, 그 외 전부
+ * ※ '반려'가 거부 목록에 있는 것이 핵심 — 반려는 APPR_IDX를 되돌리지 않으므로
+ *   허용하면 같은 idx로 재승인이 가능해진다.
+ * @param {string} status 문서 상태 (COL.STATUS)
+ * @returns {boolean}
+ */
+function _canDecideStatus_(status) {
+  status = String(status || '');
+  return status === '검토중'
+      || status === '재상신'
+      || status.indexOf('결재중 (') === 0;
+}
+
+/**
+ * 본인의 결재 단계(idx) 판정 — 동일인이 여러 단계에 배정된 경우 대응
+ * (INSP.gs의 _findMyInspIdx와 대칭. 블록 접근은 reqApprCol만 사용)
+ * - 현재 차례(curIdx)의 결재자가 본인이면 그 단계를 우선 반환
+ * - 아니면 본인이 배정된 첫 단계 반환 (순서 판정은 호출자가 curIdx와 비교)
+ * @param {Array}  row       REQ/PRC 행 배열
+ * @param {number} apprCount 결재자 수
+ * @param {number} curIdx    현재 결재 차례
+ * @param {string} actor     로그인 이메일(소문자)
+ * @returns {number} 본인 결재 단계 idx, 없으면 -1
+ */
+function _findMyReqIdx_(row, apprCount, curIdx, actor) {
+  actor = String(actor || '').trim().toLowerCase();
+  if (!actor) return -1;
+
+  // 1) 현재 차례가 본인이면 그 단계 우선 (동일인 다단계 핵심)
+  if (curIdx >= 0 && curIdx < apprCount &&
+      String(row[reqApprCol(curIdx, 2)] || '').trim().toLowerCase() === actor) {
+    return curIdx;
+  }
+  // 2) 본인이 배정된 첫 단계
+  for (var a = 0; a < apprCount; a++) {
+    if (String(row[reqApprCol(a, 2)] || '').trim().toLowerCase() === actor) return a;
+  }
+  return -1;
+}
+
+/**
+ * 결재 거부 응답 생성 — 감사로그 엔트리를 함께 실어 보낸다.
+ * 로그 기록은 호출자가 '락 밖'에서 수행한다 (락 안에서 appendRow 금지).
+ *
+ * ※ actor를 빈 값으로 두지 않는다. writeAuditLog는 entry.actor가 비면
+ *   getActiveUserEmail()로 자동 취득하는데, 그 폴백은 배포 계정을 반환할 수 있어
+ *   '신원 미상의 시도'가 배포자 이름으로 둔갑한다.
+ */
+function _denyDecision_(message, info) {
+  info = info || {};
+  return {
+    ok: false,
+    message: message,
+    audit: {
+      eventType:  AUDIT_EVENT.DECISION_DENIED,
+      actor:      info.actor || '(미인증)',
+      actorRole:  _deriveActorRole(info.actor || ''),
+      docNo:      info.docNo    || '',
+      docToken:   info.token    || '',
+      docType:    info.docType  || '',
+      targetUser: info.assignedEmail || '',
+      reason:     message,
+      payload: {
+        reasonCode:   info.reason       || '',
+        decision:     info.decision     || '',
+        docStatus:    info.docStatus    || '',
+        stageStatus:  info.stageStatus  || '',
+        serverIdx:    (info.serverIdx    === undefined) ? '' : info.serverIdx,
+        myIdx:        (info.myIdx        === undefined) ? '' : info.myIdx,
+        requestedIdx: (info.requestedIdx === undefined) ? '' : info.requestedIdx,
+      },
+    },
+  };
+}
+
+/**
+ * 폐기·재상신 거부 응답 생성 — _denyDecision_의 자매 함수.
+ * 결재와 마찬가지로 로그 기록은 호출자가 '락 밖'에서 수행한다.
+ * @param {string} message   사용자에게 보여줄 사유
+ * @param {string} eventType AUDIT_EVENT 상수
+ * @param {Object} info      { actor, token, docNo, docType, docStatus, assignedEmail, action, reason }
+ */
+function _denyResubmitOrDiscard_(message, eventType, info) {
+  info = info || {};
+  return {
+    ok: false,
+    message: message,
+    audit: {
+      eventType:  eventType || AUDIT_EVENT.DECISION_DENIED,
+      actor:      info.actor || '(미인증)',
+      actorRole:  _deriveActorRole(info.actor || ''),
+      docNo:      info.docNo   || '',
+      docToken:   info.token   || '',
+      docType:    info.docType || '',
+      targetUser: info.assignedEmail || '',   // 시트에 저장된 정당한 기안자
+      reason:     message,
+      payload: {
+        action:     info.action    || '',
+        reasonCode: info.reason    || '',
+        docStatus:  info.docStatus || '',
+      },
+    },
+  };
+}
+
+/**
+ * REQ·PRC 결재 처리 (승인/반려) — 인증·인가 계층
+ *
+ * 이 함수는 '누가 처리해도 되는가'만 판단하고, 실제 시트 변경은 _applyDecision_에 위임한다.
+ * (정책과 동작의 분리 — 향후 관리자 대리결재는 별도 정책 함수에서 _applyDecision_을 재사용)
+ *
+ * 함수명이 밑줄로 '끝나야' google.script.run 직접 호출이 차단된다.
+ * (밑줄로 시작하는 것만으로는 비공개가 되지 않는다)
+ *
+ * ⚠ payload.idx는 권한 판단에 쓰지 않는다 — 감사로그 기록용으로만 읽는다.
+ *   이메일 링크에는 idx가 붙지만 홈 화면 진입에는 없다. 과거 클라이언트가 이때
+ *   idx를 0으로 떨어뜨려 보내 서버가 거절했고, '뷰어는 열리는데 결재가 안 되는' 버그가 있었다.
+ *   결재 단계는 서버가 시트의 APPR_IDX와 로그인 사용자로 직접 판정한다. (INSP와 동일)
+ *
+ * payload: { token, decision('approve'|'reject'), comment, idx? }
+ */
+function _decisionCore_(payload) {
+  payload = payload || {};
+  var actor = getRequestUserEmail_();   // 인가 전용 — 폴백 없음
+
+  // 락 안: 인가 검증 + 시트 업데이트만 빠르게 (메일·감사로그는 락 밖)
   var lockResult = withLock(function() {
     try {
-      var token    = payload.token;
-      var decision = payload.decision;
+      var token    = String(payload.token || '');
+      var decision = String(payload.decision || '');
       var comment  = payload.comment || '';
-      var idx      = parseInt(payload.idx || '0');
+      // 신뢰하지 않는 값. 감사로그에만 남긴다.
+      var reqIdx   = (payload.idx === undefined || payload.idx === '') ? '' : payload.idx;
 
-      var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
-      var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+      // ── 관문 1: 로그인 사용자 확인 ──
+      if (!actor) {
+        return _denyDecision_('로그인 사용자를 확인할 수 없습니다. 다시 로그인 후 시도해 주세요.', {
+          actor: actor, token: token, decision: decision,
+          requestedIdx: reqIdx, reason: 'no_active_user',
+        });
+      }
+
+      // ── 관문 2: decision 값 검증 ──
+      if (decision !== 'approve' && decision !== 'reject') {
+        return _denyDecision_('잘못된 결재 구분입니다.', {
+          actor: actor, token: token, decision: decision,
+          requestedIdx: reqIdx, reason: 'bad_decision',
+        });
+      }
+
+      var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
       var rowNum = findRowNumByToken(sheet, token);
 
-      if (rowNum < 0) return { ok: false, message: '유효하지 않은 토큰입니다.' };
+      // ── 관문 3: 문서 존재 (토큰은 식별값일 뿐 — 권한을 증명하지 않는다) ──
+      if (rowNum < 0) {
+        return _denyDecision_('유효하지 않은 토큰입니다.', {
+          actor: actor, token: token, decision: decision,
+          requestedIdx: reqIdx, reason: 'no_such_doc',
+        });
+      }
 
-      var r = readRow(sheet, rowNum);
-      if (r[COL.STATUS] === '폐기') return { ok: false, message: '폐기된 품의서입니다.' };
+      var r       = readRow(sheet, rowNum);
+      var docNo   = String(r[COL.DOC_NO]   || '');
+      var docType = String(r[COL.DOC_TYPE] || 'REQ');
+      var status  = String(r[COL.STATUS]   || '');
 
-      var apprCount = parseInt(r[COL.APPR_COUNT]);
+      // ── 관문 4: 문서 상태 화이트리스트 ──
+      if (!_canDecideStatus_(status)) {
+        return _denyDecision_('현재 상태에서는 결재할 수 없습니다. (상태: ' + status + ')', {
+          actor: actor, token: token, docNo: docNo, docType: docType,
+          decision: decision, docStatus: status,
+          requestedIdx: reqIdx, reason: 'status_not_decidable',
+        });
+      }
+
+      var apprCount = parseInt(r[COL.APPR_COUNT]) || 0;
       var curIdx    = parseInt(r[COL.APPR_IDX]);
+      if (isNaN(curIdx)) curIdx = -1;
 
-      if (curIdx !== idx) return { ok: false, message: '이미 처리되었거나 결재 순서가 맞지 않습니다.' };
-
-      var baseCol = COL.APPR_START + idx * COL.APPR_COLS;
-      var now     = new Date();
-
-      // 결재자 블록 일괄 업데이트 (3개 연속 컬럼)
-      sheet.getRange(rowNum, baseCol + 4, 1, 3).setValues([[
-        decision === 'approve' ? '승인' : '반려',
-        now,
-        comment,
-      ]]);
-
-      var docNo     = String(r[COL.DOC_NO] || '');
-      var drafter   = String(r[COL.DRAFTER] || '');
-      var subject   = String(r[COL.SUBJECT] || '');
-      var docType   = String(r[COL.DOC_TYPE] || 'REQ');
-      var issueDate = r[COL.ISSUE_DATE];
-
-      if (decision === 'reject') {
-        // 반려 처리
-        sheet.getRange(rowNum, COL.STATUS + 1).setValue('반려');
-
-        // 첨부 삭제 시도
-        try {
-          deleteUserAttachments(r[COL.ATTACH_LIST] || '[]');
-        } catch(_) {}
-        sheet.getRange(rowNum, COL.ATTACH_LIST + 1).setValue('[]');
-
-        var resubCount = parseInt(r[COL.RESUB_COUNT] || 0);
-        var existLog   = r[COL.REJECT_LOG] || '';
-        var approverNm = r[COL.APPR_START + idx * COL.APPR_COLS + 1] || '-';
-        var entry      = '[' + (resubCount + 1) + '차 반려] ' + approverNm + ' / ' +
-                         toDateTimeStr(now) + ' / ' + (comment || '사유 없음');
-        sheet.getRange(rowNum, COL.REJECT_LOG + 1)
-          .setValue(existLog ? existLog + '\n' + entry : entry);
-
-        var drafterEmail = String(r[COL.APPR_START + 2] || '');
-
-        return {
-          ok: true,
-          message: '반려 처리되었습니다.',
-          notify: {
-            type: 'reject',
-            toEmail: drafterEmail,
-            drafter: drafter,
-            docNo: docNo,
-            subject: subject,
-            approverName: String(approverNm),
-            comment: comment,
-            token: token,
-          },
-        };
+      // ── 관문 5: 서버가 읽은 결재 순번이 유효 범위인가 ──
+      if (curIdx < 0 || curIdx >= apprCount) {
+        return _denyDecision_('결재 단계 정보가 올바르지 않습니다. 관리자에게 문의해 주세요.', {
+          actor: actor, token: token, docNo: docNo, docType: docType,
+          decision: decision, docStatus: status, serverIdx: curIdx,
+          requestedIdx: reqIdx, reason: 'idx_out_of_range',
+        });
       }
 
-      // 승인 처리
-      var nextIdx = idx + 1;
-      sheet.getRange(rowNum, COL.APPR_IDX + 1).setValue(nextIdx);
+      var assignedEmail = String(r[reqApprCol(curIdx, 2)] || '').trim();
 
-      // 결재 알림 메일 부가정보 — 락 안에서 이미 읽은 r만 사용 (추가 시트 조회 없음).
-      // 다음 결재자 메일 / 최종 승인 메일 / PRC 검수안내 메일이 공유한다.
-      var mailExtra = buildMailExtraInfo(
-        r[COL.PURPOSE], r[COL.VENDOR_NAME],
-        parseItemsSummary(String(r[COL.ITEMS] || '')),
-        r[COL.TOTAL_AMT], r[COL.REMARKS]);
-
-      if (nextIdx < apprCount) {
-        // 다음 결재자에게 이메일
-        var nb = COL.APPR_START + nextIdx * COL.APPR_COLS;
-        sheet.getRange(rowNum, COL.STATUS + 1).setValue('결재중 (' + r[nb] + ')');
-
-        return {
-          ok: true,
-          message: '승인 처리되었습니다.',
-          notify: {
-            type: 'next_approval',
-            approver: { label: String(r[nb]), name: String(r[nb+1]), email: String(r[nb+2]) },
-            data: {
-              docNo: docNo,
-              subject: subject,
-              drafter: drafter,
-              issueDate: toDateStr(issueDate),
-              extra: mailExtra,
-            },
-            token: token,
-            rowNum: rowNum,
-            idx: nextIdx,
-          },
-        };
+      // ── 관문 6: 이 문서의 결재자이긴 한가 (핵심) ──
+      var myIdx = _findMyReqIdx_(r, apprCount, curIdx, actor);
+      if (myIdx < 0) {
+        return _denyDecision_('결재 권한이 없습니다. (지정된 결재자가 아닙니다)', {
+          actor: actor, token: token, docNo: docNo, docType: docType,
+          decision: decision, docStatus: status, serverIdx: curIdx, myIdx: myIdx,
+          assignedEmail: assignedEmail, requestedIdx: reqIdx, reason: 'not_an_approver',
+        });
       }
 
-      // 최종 승인
-      var finalStatus = (docType === 'PRC') ? '최종승인(PRC)' : '최종승인';
-      sheet.getRange(rowNum, COL.STATUS + 1).setValue(finalStatus);
-      var drafterEmail2 = String(r[COL.APPR_START + 2] || '');
-
-      var completionNotify = {
-        type: 'completion',
-        toEmail: drafterEmail2,
-        drafter: drafter,
-        docNo: docNo,
-        subject: subject,
-        issueDate: toDateStr(issueDate),
-        token: token,
-        docType: docType,
-        extra: mailExtra,
-      };
-
-      // PRC 최종 승인 → 원 REQ 기안자에게 '검수보고서 작성 가능' 안내를 위해
-      // 원본 REQ 행에서 기안자/이메일/품의번호/토큰을 락 안에서 미리 조회 (락 밖 발송용)
-      if (docType === 'PRC') {
-        var reqToken = String(r[COL.PARENT_DOC_ID] || '');
-        if (reqToken) {
-          var reqRowNum = findRowNumByToken(sheet, reqToken);
-          if (reqRowNum > 0) {
-            var reqRow = readRow(sheet, reqRowNum);
-            completionNotify.reqToken       = reqToken;
-            completionNotify.reqDocNo       = String(reqRow[COL.DOC_NO] || '');
-            completionNotify.reqDrafter     = String(reqRow[COL.DRAFTER] || '');
-            completionNotify.reqDrafterEmail = String(reqRow[COL.APPR_START + 2] || '');
-          }
-        }
+      // ── 관문 7: 지금이 내 차례인가 ──
+      if (myIdx !== curIdx) {
+        return _denyDecision_('결재 순서가 아닙니다. 앞 단계 결재 완료 후 처리됩니다.', {
+          actor: actor, token: token, docNo: docNo, docType: docType,
+          decision: decision, docStatus: status, serverIdx: curIdx, myIdx: myIdx,
+          assignedEmail: assignedEmail, requestedIdx: reqIdx, reason: 'not_my_turn',
+        });
       }
 
-      return {
-        ok: true,
-        message: '승인 처리되었습니다.',
-        notify: completionNotify,
-      };
+      // ── 관문 8: 해당 단계가 아직 '대기'인가 (중복 클릭·동시 요청 차단) ──
+      var stageStatus = String(r[reqApprCol(curIdx, 3)] || '');
+      if (stageStatus !== '대기') {
+        return _denyDecision_('이미 처리된 결재 단계입니다. (' + stageStatus + ')', {
+          actor: actor, token: token, docNo: docNo, docType: docType,
+          decision: decision, docStatus: status, stageStatus: stageStatus,
+          serverIdx: curIdx, myIdx: myIdx, assignedEmail: assignedEmail,
+          requestedIdx: reqIdx, reason: 'stage_already_processed',
+        });
+      }
+
+      // 검증 통과 — 여기서부터 시트 변경. 처리 대상은 언제나 서버가 읽은 curIdx.
+      return _applyDecision_(sheet, rowNum, r, curIdx, decision, comment, { actor: actor });
+
     } catch(err) {
       return { ok: false, message: err.toString() };
     }
   });
 
+  // ── 락 밖 ①: 비인가 시도 감사로그 (§8.7) ──
+  if (lockResult && lockResult.audit) {
+    try { writeAuditLog(lockResult.audit); } catch(_) {}
+    delete lockResult.audit;
+  }
+
   if (!lockResult.ok || !lockResult.notify) return lockResult;
 
-  // 락 밖: 이메일 발송 (재시도)
+  // ── 락 밖 ②: 정상 처리 감사로그 — 실제 호출자를 남겨 부인방지 ──
+  //    메일 발송보다 먼저 기록한다 (메일이 실패해도 처리 사실은 남아야 함)
+  if (lockResult.auditInfo) {
+    try {
+      var ai = lockResult.auditInfo;
+      writeAuditLog({
+        eventType:  (ai.decision === 'reject') ? AUDIT_EVENT.DOC_REJECT : AUDIT_EVENT.DOC_APPROVE,
+        actor:      ai.actor || '(미인증)',
+        actorRole:  ai.onBehalfOf ? 'admin' : 'approver',
+        docNo:      ai.docNo,
+        docToken:   ai.token,
+        docType:    ai.docType,
+        targetUser: ai.onBehalfOf || '',
+        reason:     (ai.stageLabel || ('결재자 ' + ai.stageIdx)) + ' 단계 ' +
+                    (ai.decision === 'reject' ? '반려' : '승인') +
+                    (ai.finalized ? ' — 최종 승인' : ''),
+        payload: {
+          stageIdx:    ai.stageIdx,
+          onBehalfOf:  ai.onBehalfOf  || '',
+          adminReason: ai.adminReason || '',
+        },
+      });
+    } catch(_) {}
+  }
+
+  // 락 밖 ③: 이메일 발송 (재시도)
   var n = lockResult.notify;
   try {
     if (n.type === 'reject' && n.toEmail) {
@@ -1312,6 +1452,188 @@ function _decisionCore(payload) {
   return { ok: lockResult.ok, message: lockResult.message };
 }
 
+/**
+ * 결재 반영 (동작 계층) — 권한 판단 코드가 한 줄도 없다.
+ *
+ * 호출자가 인가를 이미 끝냈다는 전제로 시트를 변경한다.
+ *   - 결재란 상태/처리시각/의견 기록
+ *   - 반려: 상태 '반려' + 첨부 삭제 + 반려이력 누적
+ *   - 승인: 다음 단계 이동 또는 최종 승인
+ *   - 락 밖에서 쓸 알림 정보(notify)와 감사 정보(auditInfo) 구성
+ *
+ * ⚠ 이 함수를 직접 호출하지 말 것. 반드시 인가를 마친 정책 함수에서만 호출한다.
+ *   현재 호출자: _decisionCore_ (일반 결재)
+ *   향후 호출자: _adminProxyDecisionCore_ (A-2 관리자 대리결재)
+ *
+ * @param {Sheet}  sheet
+ * @param {number} rowNum    대상 행 번호
+ * @param {Array}  r         이미 읽어둔 행 배열
+ * @param {number} targetIdx 처리할 결재 단계 (호출자가 시트에서 판정한 값)
+ * @param {string} decision  'approve' | 'reject'
+ * @param {string} comment   결재 의견
+ * @param {Object} actorMeta { actor, onBehalfOf?, adminReason? }
+ * @returns {Object} { ok, message, notify, auditInfo }
+ */
+function _applyDecision_(sheet, rowNum, r, targetIdx, decision, comment, actorMeta) {
+  actorMeta = actorMeta || {};
+  comment   = comment || '';
+
+  var now       = new Date();
+  var token     = String(r[COL.TOKEN]    || '');
+  var docNo     = String(r[COL.DOC_NO]   || '');
+  var drafter   = String(r[COL.DRAFTER]  || '');
+  var subject   = String(r[COL.SUBJECT]  || '');
+  var docType   = String(r[COL.DOC_TYPE] || 'REQ');
+  var issueDate = r[COL.ISSUE_DATE];
+  var apprCount = parseInt(r[COL.APPR_COUNT]) || 0;
+
+  // 대리결재인 경우에만 결재 의견에 흔적을 남긴다 (일반 결재는 입력 원문 그대로 저장).
+  // 시트만 봐도 '지정 결재자가 직접 처리한 건'과 구분되어야 하기 때문.
+  var recordedComment = comment;
+  if (actorMeta.onBehalfOf) {
+    recordedComment = '[대리결재: ' + actorMeta.actor + ']'
+                    + (actorMeta.adminReason ? ' ' + actorMeta.adminReason : '')
+                    + (comment ? ' / ' + comment : '');
+  }
+
+  var auditInfo = {
+    docNo:       docNo,
+    docType:     docType,
+    token:       token,
+    decision:    decision,
+    stageIdx:    targetIdx,
+    stageLabel:  String(r[reqApprCol(targetIdx, 0)] || ''),
+    actor:       actorMeta.actor       || '',
+    onBehalfOf:  actorMeta.onBehalfOf  || '',
+    adminReason: actorMeta.adminReason || '',
+    finalized:   false,
+  };
+
+  // 결재자 블록 일괄 업데이트 (status, processedAt, comment — 3개 연속 컬럼)
+  sheet.getRange(rowNum, reqApprCol(targetIdx, 3) + 1, 1, 3).setValues([[
+    decision === 'approve' ? '승인' : '반려',
+    now,
+    recordedComment,
+  ]]);
+
+  if (decision === 'reject') {
+    // 반려 처리
+    sheet.getRange(rowNum, COL.STATUS + 1).setValue('반려');
+
+    // 첨부 삭제 시도
+    try {
+      deleteUserAttachments(r[COL.ATTACH_LIST] || '[]');
+    } catch(_) {}
+    sheet.getRange(rowNum, COL.ATTACH_LIST + 1).setValue('[]');
+
+    var resubCount = parseInt(r[COL.RESUB_COUNT] || 0);
+    var existLog   = r[COL.REJECT_LOG] || '';
+    var approverNm = r[reqApprCol(targetIdx, 1)] || '-';
+    var entry      = '[' + (resubCount + 1) + '차 반려] ' + approverNm + ' / ' +
+                     toDateTimeStr(now) + ' / ' + (comment || '사유 없음');
+    sheet.getRange(rowNum, COL.REJECT_LOG + 1)
+      .setValue(existLog ? existLog + '\n' + entry : entry);
+
+    var drafterEmail = String(r[reqApprCol(0, 2)] || '');
+
+    return {
+      ok: true,
+      message: '반려 처리되었습니다.',
+      auditInfo: auditInfo,
+      notify: {
+        type: 'reject',
+        toEmail: drafterEmail,
+        drafter: drafter,
+        docNo: docNo,
+        subject: subject,
+        approverName: String(approverNm),
+        comment: comment,
+        token: token,
+      },
+    };
+  }
+
+  // 승인 처리
+  var nextIdx = targetIdx + 1;
+  sheet.getRange(rowNum, COL.APPR_IDX + 1).setValue(nextIdx);
+
+  // 결재 알림 메일 부가정보 — 락 안에서 이미 읽은 r만 사용 (추가 시트 조회 없음).
+  // 다음 결재자 메일 / 최종 승인 메일 / PRC 검수안내 메일이 공유한다.
+  var mailExtra = buildMailExtraInfo(
+    r[COL.PURPOSE], r[COL.VENDOR_NAME],
+    parseItemsSummary(String(r[COL.ITEMS] || '')),
+    r[COL.TOTAL_AMT], r[COL.REMARKS]);
+
+  if (nextIdx < apprCount) {
+    // 다음 결재자에게 이메일
+    var nextLabel = String(r[reqApprCol(nextIdx, 0)] || '');
+    var nextName  = String(r[reqApprCol(nextIdx, 1)] || '');
+    var nextEmail = String(r[reqApprCol(nextIdx, 2)] || '');
+    sheet.getRange(rowNum, COL.STATUS + 1).setValue('결재중 (' + nextLabel + ')');
+
+    return {
+      ok: true,
+      message: '승인 처리되었습니다.',
+      auditInfo: auditInfo,
+      notify: {
+        type: 'next_approval',
+        approver: { label: nextLabel, name: nextName, email: nextEmail },
+        data: {
+          docNo: docNo,
+          subject: subject,
+          drafter: drafter,
+          issueDate: toDateStr(issueDate),
+          extra: mailExtra,
+        },
+        token: token,
+        rowNum: rowNum,
+        idx: nextIdx,
+      },
+    };
+  }
+
+  // 최종 승인
+  auditInfo.finalized = true;
+  var finalStatus = (docType === 'PRC') ? '최종승인(PRC)' : '최종승인';
+  sheet.getRange(rowNum, COL.STATUS + 1).setValue(finalStatus);
+  var drafterEmail2 = String(r[reqApprCol(0, 2)] || '');
+
+  var completionNotify = {
+    type: 'completion',
+    toEmail: drafterEmail2,
+    drafter: drafter,
+    docNo: docNo,
+    subject: subject,
+    issueDate: toDateStr(issueDate),
+    token: token,
+    docType: docType,
+    extra: mailExtra,
+  };
+
+  // PRC 최종 승인 → 원 REQ 기안자에게 '검수보고서 작성 가능' 안내를 위해
+  // 원본 REQ 행에서 기안자/이메일/품의번호/토큰을 락 안에서 미리 조회 (락 밖 발송용)
+  if (docType === 'PRC') {
+    var reqToken = String(r[COL.PARENT_DOC_ID] || '');
+    if (reqToken) {
+      var reqRowNum = findRowNumByToken(sheet, reqToken);
+      if (reqRowNum > 0) {
+        var reqRow = readRow(sheet, reqRowNum);
+        completionNotify.reqToken        = reqToken;
+        completionNotify.reqDocNo        = String(reqRow[COL.DOC_NO] || '');
+        completionNotify.reqDrafter      = String(reqRow[COL.DRAFTER] || '');
+        completionNotify.reqDrafterEmail = String(reqRow[reqApprCol(0, 2)] || '');
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    message: '승인 처리되었습니다.',
+    auditInfo: auditInfo,
+    notify: completionNotify,
+  };
+}
+
 
 // ================================================================
 // 9. 재상신
@@ -1329,6 +1651,8 @@ function _resubmitCore(payload) {
     return { ok: false, message: e.message };
   }
 
+  var actor = getRequestUserEmail_();   // 인가 전용 — 폴백 없음
+
   var lockResult = withLock(function() {
     try {
       var token = payload.token;
@@ -1340,7 +1664,40 @@ function _resubmitCore(payload) {
 
       if (rowNum < 0) return { ok: false, message: '유효하지 않은 토큰입니다.' };
       var r = readRow(sheet, rowNum);
-      if (r[COL.STATUS] === '폐기') return { ok: false, message: '폐기된 품의서는 재상신할 수 없습니다.' };
+
+      // ── 인가: 기안자 본인만 재상신할 수 있다 ──
+      // 재상신은 문서 내용 전체를 덮어쓰므로 결재와 동일한 수준으로 검증한다.
+      // ※ assertDrafterIsSelf()를 쓰지 않는다 — 그 함수는 클라이언트가 보낸
+      //   data.approvers[0]을 보므로, 공격자가 자기 이메일을 넣으면 통과한다.
+      //   반드시 '시트에 저장된' 기안자와 비교해야 한다.
+      var sheetDrafterEmail = String(r[reqApprCol(0, 2)] || '').trim().toLowerCase();
+      if (!actor) {
+        return _denyResubmitOrDiscard_('로그인 사용자를 확인할 수 없습니다. 다시 로그인 후 시도해 주세요.',
+          AUDIT_EVENT.DECISION_DENIED, {
+            actor: actor, token: token, docNo: String(r[COL.DOC_NO] || ''),
+            docType: String(r[COL.DOC_TYPE] || 'REQ'), docStatus: String(r[COL.STATUS] || ''),
+            assignedEmail: sheetDrafterEmail, action: 'resubmit', reason: 'no_active_user',
+          });
+      }
+      if (sheetDrafterEmail !== actor) {
+        return _denyResubmitOrDiscard_('기안자 본인만 재상신할 수 있습니다.',
+          AUDIT_EVENT.DECISION_DENIED, {
+            actor: actor, token: token, docNo: String(r[COL.DOC_NO] || ''),
+            docType: String(r[COL.DOC_TYPE] || 'REQ'), docStatus: String(r[COL.STATUS] || ''),
+            assignedEmail: sheetDrafterEmail, action: 'resubmit', reason: 'not_drafter',
+          });
+      }
+
+      // 재상신은 '반려'된 문서에만 허용 (허용 목록 방식)
+      var status = String(r[COL.STATUS] || '');
+      if (status !== '반려') {
+        return _denyResubmitOrDiscard_('반려된 품의서만 재상신할 수 있습니다. (현재 상태: ' + status + ')',
+          AUDIT_EVENT.DECISION_DENIED, {
+            actor: actor, token: token, docNo: String(r[COL.DOC_NO] || ''),
+            docType: String(r[COL.DOC_TYPE] || 'REQ'), docStatus: status,
+            assignedEmail: sheetDrafterEmail, action: 'resubmit', reason: 'status_not_resubmittable',
+          });
+      }
 
       // 품의번호 강제 유지
       data.docNo = String(r[COL.DOC_NO] || '');
@@ -1413,7 +1770,27 @@ function _resubmitCore(payload) {
     }
   });
 
+  // 락 밖: 비인가 시도 감사로그
+  if (lockResult && lockResult.audit) {
+    try { writeAuditLog(lockResult.audit); } catch(_) {}
+    delete lockResult.audit;
+  }
+
   if (!lockResult.ok) return lockResult;
+
+  // 락 밖: 정상 재상신 감사로그 (실제 호출자 기록)
+  try {
+    writeAuditLog({
+      eventType: AUDIT_EVENT.DOC_RESUBMIT,
+      actor:     actor || '(미인증)',
+      actorRole: 'requester',
+      docNo:     String((payload.data && payload.data.docNo) || ''),
+      docToken:  lockResult.newToken,
+      docType:   'REQ',
+      reason:    lockResult.resubCount + '차 재상신',
+      payload:   { prevToken: payload.token, resubCount: lockResult.resubCount },
+    });
+  } catch(_) {}
 
   // 락 밖: 첨부 업로드
   var folder;
@@ -1471,7 +1848,10 @@ function discardRequisitionForClient(payload) {
 }
 
 function _discardCore(payload) {
-  return withLock(function() {
+  payload = payload || {};
+  var actor = getRequestUserEmail_();   // 인가 전용 — 폴백 없음
+
+  var lockResult = withLock(function() {
     try {
       var token  = payload.token;
       var reason = payload.reason || '기안자 폐기';
@@ -1482,7 +1862,41 @@ function _discardCore(payload) {
 
       if (rowNum < 0) return { ok: false, message: '유효하지 않은 토큰입니다.' };
       var r = readRow(sheet, rowNum);
-      if (r[COL.STATUS] === '폐기') return { ok: false, message: '이미 폐기된 품의서입니다.' };
+
+      var docNo  = String(r[COL.DOC_NO]   || '');
+      var docType= String(r[COL.DOC_TYPE] || 'REQ');
+      var status = String(r[COL.STATUS]   || '');
+
+      // ── 인가: 기안자 본인만 폐기할 수 있다 ──
+      // 폐기는 Drive 폴더를 휴지통으로 보내므로 되돌리기 어렵다. 결재와 동일 수준으로 검증한다.
+      // ※ 관리자 강제 폐기는 별도 경로(_adminForceDiscardCore + assertAdminWithLog)가 있으므로
+      //   여기에 관리자 우회를 두지 않는다.
+      var sheetDrafterEmail = String(r[reqApprCol(0, 2)] || '').trim().toLowerCase();
+      if (!actor) {
+        return _denyResubmitOrDiscard_('로그인 사용자를 확인할 수 없습니다. 다시 로그인 후 시도해 주세요.',
+          AUDIT_EVENT.DECISION_DENIED, {
+            actor: actor, token: token, docNo: docNo, docType: docType, docStatus: status,
+            assignedEmail: sheetDrafterEmail, action: 'discard', reason: 'no_active_user',
+          });
+      }
+      if (sheetDrafterEmail !== actor) {
+        return _denyResubmitOrDiscard_('기안자 본인만 폐기할 수 있습니다.',
+          AUDIT_EVENT.DECISION_DENIED, {
+            actor: actor, token: token, docNo: docNo, docType: docType, docStatus: status,
+            assignedEmail: sheetDrafterEmail, action: 'discard', reason: 'not_drafter',
+          });
+      }
+
+      // 폐기 가능 상태 (허용 목록) — 결재가 끝난 문서는 기안자가 임의로 없앨 수 없다.
+      // 최종승인 / 최종승인(PRC) / PRC생성됨 / 이미 폐기 등은 전부 거부.
+      var canDiscard = (status === '반려' || status === '검토중' || status === '재상신');
+      if (!canDiscard) {
+        return _denyResubmitOrDiscard_('현재 상태에서는 폐기할 수 없습니다. (상태: ' + status + ')',
+          AUDIT_EVENT.DECISION_DENIED, {
+            actor: actor, token: token, docNo: docNo, docType: docType, docStatus: status,
+            assignedEmail: sheetDrafterEmail, action: 'discard', reason: 'status_not_discardable',
+          });
+      }
 
       // 상태/토큰 일괄
       sheet.getRange(rowNum, COL.STATUS + 1, 1, 2).setValues([[
@@ -1503,11 +1917,38 @@ function _discardCore(payload) {
       sheet.getRange(rowNum, COL.REJECT_LOG + 1)
         .setValue(existLog ? existLog + '\n' + discardLine : discardLine);
 
-      return { ok: true, message: '품의서가 폐기 처리되었습니다.' };
+      return {
+        ok: true,
+        message: '품의서가 폐기 처리되었습니다.',
+        auditInfo: { docNo: docNo, docType: docType, token: token, status: status, reason: reason },
+      };
     } catch(err) {
       return { ok: false, message: err.toString() };
     }
   });
+
+  // 락 밖: 감사로그 (거부 / 정상 모두 실제 호출자를 남긴다)
+  if (lockResult && lockResult.audit) {
+    try { writeAuditLog(lockResult.audit); } catch(_) {}
+    delete lockResult.audit;
+  } else if (lockResult && lockResult.ok && lockResult.auditInfo) {
+    try {
+      var ai = lockResult.auditInfo;
+      writeAuditLog({
+        eventType: AUDIT_EVENT.DOC_DISCARD,
+        actor:     actor || '(미인증)',
+        actorRole: 'requester',
+        docNo:     ai.docNo,
+        docToken:  ai.token,
+        docType:   ai.docType,
+        reason:    '기안자 본인 폐기 — ' + ai.reason,
+        payload:   { prevStatus: ai.status },
+      });
+    } catch(_) {}
+    delete lockResult.auditInfo;
+  }
+
+  return lockResult;
 }
 
 
