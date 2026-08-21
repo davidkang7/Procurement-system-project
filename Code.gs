@@ -5363,19 +5363,32 @@ function regeneratePdfForClient(payload) {
 // 21. 비동기 작업 큐 (NFR-07 응답성)
 // ================================================================
 // 큐 키:        Script Properties의 'PENDING_JOB_QUEUE' (JSON 배열)
-// Job 구조:     { id, type, token, docNo, docType, attempts, status, enqueuedAt, lastError? }
+// Job 구조:     { id, type, token, docNo, docType, attempts, status, enqueuedAt, lastError?, notBefore? }
 // Job 타입:     'pdf_only'              REQ 최종승인 → PDF 생성만
 //               'pdf_and_consolidate'   PRC 최종승인 → PDF + FINAL 통합 이동
 // 처리 주기:    Time-based Trigger, 1분 간격 — installQueueTrigger() 1회 호출하여 설치
 // 한 트리거당:  while 루프로 시간 한도 안에 최대한 많이 처리
 //               (예: 4분 한도 - 30초 안전 마진 → 12초/건 시 약 17건 가능)
-// 재시도:       3회까지, 그 후엔 큐에서 제거하고 관리자 알림
+// 재시도:       3회까지. 실패한 job에는 notBefore(다시 집어도 되는 시각)를 붙여 다음 트리거로 미룬다.
+//               그 후엔 failed로 남기고 관리자 알림.
 // ================================================================
 
 var QUEUE_KEY = 'PENDING_JOB_QUEUE';
 var QUEUE_MAX_ATTEMPTS = 3;
 var QUEUE_MAX_RUNTIME_MS = 4 * 60 * 1000;   // 트리거 자체 안전 한도 (4분)
 var QUEUE_SAFETY_MARGIN_MS = 30 * 1000;     // 다음 job 진입 여유 (30초)
+
+// 실패 후 재시도까지의 대기 시간 — [1회 실패 후, 2회 실패 후]. 최종 실패까지 약 6분.
+//  ※ 이 값을 두는 이유 (2026-08-20 장애):
+//    실패한 job이 배열 제자리에서 pending으로 돌아가면 processQueueTrigger의 while 루프가
+//    곧바로 같은 job을 다시 집는다. 그래서 3회가 한 실행 안에서 몇 초 만에 소진됐다.
+//    실제 소진 시간: 6.3초 / 50.7초 / 52.3초 / 74.6초 — 4건 모두 1분 안팎.
+//    네 건 다 '조금 기다렸으면 성공했을' 실패였다.
+//      - 3건: 구글 'no servers are currently available' (용량 부족, 몇 분 이어질 수 있음)
+//      - 1건: 결재 쓰기가 아직 다른 실행에 보이지 않던 구간을 읽음 (몇 초면 해소)
+//    1분은 트리거 간격과 같은 최소 단위(그보다 짧게 잡아도 어차피 다음 트리거),
+//    2회차 5분은 같은 장애 구간에서 또 소진되지 않도록 확실히 벌린 값이다.
+var QUEUE_RETRY_DELAYS_MS = [60 * 1000, 5 * 60 * 1000];
 
 /**
  * 작업을 큐에 추가
@@ -5523,18 +5536,42 @@ function processQueueTrigger() {
 }
 
 /**
- * pending job이 있는지만 락 없이 확인 (processQueueTrigger 게이트용)
+ * 이 job을 지금 집으면 안 되는가 (notBefore 미도래인가)
+ *  - 값이 없거나 파싱 불가면 false(=집어도 된다). 잘못 막으면 job이 영영 처리되지 않으므로
+ *    _hasPendingJobUnlocked와 같은 원칙을 쓴다: 확신이 없으면 통과시킨다.
+ *  - notBefore가 없는 과거 job도 그대로 처리된다(하위 호환).
+ * @param job — 큐의 job
+ * @param now — Date.now() (루프 안에서 재계산하지 않도록 호출자가 넘긴다)
+ * @returns {boolean} true면 아직 때가 아니다
+ */
+function _isJobDeferred(job, now) {
+  if (!job || !job.notBefore) return false;
+  var t = new Date(job.notBefore).getTime();
+  if (isNaN(t)) return false;
+  return now < t;
+}
+
+/**
+ * 지금 집을 수 있는 job이 있는지만 락 없이 확인 (processQueueTrigger 게이트용)
  *  - 읽기 전용이며 선점하지 않는다. 실제 선점·중복 방지는 _claimNextJob()이 락 안에서 수행.
  *  - 판단 불가(파싱 실패 등) 시 true를 반환해 기존 경로로 폴백한다.
  *    false를 반환하면 큐에 job이 있어도 영영 처리되지 않으므로, 애매하면 반드시 통과시킨다.
  *  - 즉 '할 일이 없다고 확신할 때만' 건너뛴다. 최악의 경우가 곧 현재 동작이다.
+ *  ※ notBefore 도입(2026-08-21)으로 status==='pending'만 세면 안 된다.
+ *    pending 안에 '아직 때가 안 된 job'이 섞이기 때문이다. 그것만 남은 상태에서 true를 내면
+ *    트리거가 매분 락을 잡았다가 빈손으로 나온다 — 이 게이트가 없애려던 바로 그 패턴
+ *    (2026-08-04 장애의 실패 8건 중 6건)이 그대로 재발한다.
+ *    그래서 _claimNextJob과 동일한 기준(_isJobDeferred)으로 센다.
  * @returns {boolean}
  */
 function _hasPendingJobUnlocked() {
   try {
     var queue = JSON.parse(PropertiesService.getScriptProperties().getProperty(QUEUE_KEY) || '[]');
+    var now = Date.now();
     for (var i = 0; i < queue.length; i++) {
-      if (queue[i].status === 'pending') return true;
+      if (queue[i].status !== 'pending') continue;
+      if (_isJobDeferred(queue[i], now)) continue;
+      return true;
     }
     return false;
   } catch(_) {
@@ -5554,15 +5591,17 @@ function _claimNextJob() {
     try { queue = JSON.parse(queueStr); }
     catch(_) { return null; }
 
-    // FIFO 순서로 첫 pending 찾기
+    // FIFO 순서로 '지금 집을 수 있는' 첫 pending 찾기
+    //  notBefore가 아직인 job은 건너뛴다 — 그 job이 앞에 있어도 뒤의 job은 정상 처리된다.
+    var now = Date.now();
     for (var i = 0; i < queue.length; i++) {
-      if (queue[i].status === 'pending') {
-        queue[i].status = 'processing';
-        queue[i].attempts = (queue[i].attempts || 0) + 1;
-        queue[i].lastStartedAt = new Date().toISOString();
-        props.setProperty(QUEUE_KEY, JSON.stringify(queue));
-        return queue[i];
-      }
+      if (queue[i].status !== 'pending') continue;
+      if (_isJobDeferred(queue[i], now)) continue;
+      queue[i].status = 'processing';
+      queue[i].attempts = (queue[i].attempts || 0) + 1;
+      queue[i].lastStartedAt = new Date().toISOString();
+      props.setProperty(QUEUE_KEY, JSON.stringify(queue));
+      return queue[i];
     }
     return null;
   });
@@ -5601,16 +5640,22 @@ function _finalizeJob(jobId, result) {
     if (job.attempts >= QUEUE_MAX_ATTEMPTS) {
       // 최대 재시도 초과 → failed로 표시 (큐에는 남겨두어 관리자 확인 가능)
       job.status = 'failed';
+      job.notBefore = '';
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
       notifyAdminError('큐 작업 최종 실패: ' + job.docNo + ' (' + job.type + ')\n' +
                        'job ID: ' + job.id + '\n' +
                        '시도 횟수: ' + job.attempts + '\n' +
                        '마지막 오류: ' + job.lastError);
     } else {
-      // 다시 pending으로 되돌려 다음 트리거에서 재시도
+      // 다시 pending으로 되돌리되, notBefore를 붙여 '다음 트리거 이후'로 미룬다.
+      //  이 한 줄이 없으면 while 루프가 곧바로 같은 job을 다시 집어 3회가 몇 초 만에 소진된다.
+      var delay = QUEUE_RETRY_DELAYS_MS[job.attempts - 1] ||
+                  QUEUE_RETRY_DELAYS_MS[QUEUE_RETRY_DELAYS_MS.length - 1];
       job.status = 'pending';
+      job.notBefore = new Date(Date.now() + delay).toISOString();
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
-      Logger.log('[Queue] 재시도 대기: ' + jobId + ' (' + job.attempts + '/' + QUEUE_MAX_ATTEMPTS + ')');
+      Logger.log('[Queue] 재시도 대기: ' + jobId + ' (' + job.attempts + '/' + QUEUE_MAX_ATTEMPTS +
+                 ') — ' + Math.round(delay / 1000) + '초 뒤부터 재시도 (notBefore=' + job.notBefore + ')');
     }
   });
 }
@@ -5718,6 +5763,7 @@ function retryFailedJobs() {
         j.status = 'pending';
         j.attempts = 0;
         j.lastError = '';
+        j.notBefore = '';   // 관리자가 지금 재시도하겠다는 뜻이므로 지연은 지운다
         resetCount++;
       }
     });
