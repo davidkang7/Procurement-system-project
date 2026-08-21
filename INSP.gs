@@ -1658,6 +1658,32 @@ function markInspPdfDone(token, pdfFileId) {
 }
 
 /**
+ * [임시] 2026-08-21 렌더분 2건 PDF 일괄 마감 — 편집기 Run 전용(무인자).
+ *  GAS 편집기는 인자 있는 함수를 직접 실행할 수 없어, 이번 회차 값을 박아둔 래퍼.
+ *  실행 후 대기목록(listInspAwaitingPdf)에서 2건이 모두 빠지면 이 함수는 삭제해도 됨.
+ *  한 건이 실패해도 나머지는 계속 진행하고, 마지막에 건별 결과를 로그로 남긴다.
+ */
+function _tmp_markDone_20260821_batch2() {
+  var items = [
+    // [문서번호, token, 업로드된 PDF 파일 id]
+    ['TH-AP-26-046-01', 'faf834a4-ab21-4039-b69d-253318981887', '1XygY72xM_yLxOP9wSXWMK3Zy1ev4sCRj'],
+    ['TH-AP-26-049-02', 'fe4cb914-cebc-43f6-80a2-90e1c6593811', '1ZbGXwxjH5fn0siFoeghAeTLZ3rYMt_pd']
+  ];
+  var out = [];
+  items.forEach(function (it) {
+    var docNo = it[0];
+    try {
+      var res = markInspPdfDone(it[1], it[2]);
+      out.push({ docNo: docNo, ok: !!(res && res.ok), message: res && res.message });
+    } catch (e) {
+      out.push({ docNo: docNo, ok: false, message: '예외: ' + (e && e.message ? e.message : e) });
+    }
+  });
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
+/**
  * 실패/누락 회차의 PDF 핸드오프 재생성 (매니페스트 재작성 + 메일).
  *  - 큐 실패로 PDF가 안 만들어진 기존 회차 복구용. 사진이 STAGING에 보존돼 있어야 함.
  *  - 사용법: rerunInspHandoff("검수보고서_token")
