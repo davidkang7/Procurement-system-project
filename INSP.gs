@@ -1658,6 +1658,22 @@ function markInspPdfDone(token, pdfFileId) {
 }
 
 /**
+ * [임시] TG-AP-26-022-01 PDF 마감 — 편집기 Run 전용(무인자).
+ *  GAS 편집기는 인자 있는 함수를 직접 실행할 수 없어, 이번 건 값을 박아둔 래퍼.
+ *  실행 후 대기목록(listInspAwaitingPdf)에서 빠지면 이 함수는 삭제해도 됨.
+ *  - token : 4fe0dee1-b5d3-4a0b-bdf3-a336e5edc99c
+ *  - PDF   : INSP_TG-AP-26-022-01_20260825_1216.pdf (id=1iDr0dGVG45jbrhIypCT6vAVcWcUSivyT)
+ */
+function _tmp_markDone_TG_AP_26_022_01() {
+  var res = markInspPdfDone(
+    '4fe0dee1-b5d3-4a0b-bdf3-a336e5edc99c',
+    '1iDr0dGVG45jbrhIypCT6vAVcWcUSivyT'
+  );
+  Logger.log(JSON.stringify(res, null, 2));
+  return res;
+}
+
+/**
  * 실패/누락 회차의 PDF 핸드오프 재생성 (매니페스트 재작성 + 메일).
  *  - 큐 실패로 PDF가 안 만들어진 기존 회차 복구용. 사진이 STAGING에 보존돼 있어야 함.
  *  - 사용법: rerunInspHandoff("검수보고서_token")
