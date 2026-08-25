@@ -13,8 +13,24 @@ Playwright(headless Chromium)로 PDF를 만들고 `FINAL/{PO번호}` 폴더에 �
    └→ [GAS] manifest.json 기록 + 사진 보존 + David에게 작업요청 메일
         └→ [David → 클로드 에이전트] "이 건 PDF 만들어줘"
              └→ [render_insp.py] 사진 다운로드 → Playwright 렌더 → PO 폴더 업로드
-                  └→ [GAS] markInspPdfDone(token, fileId) 로 마감
+                  └→ [에이전트] 마감용 임시 래퍼 INSP.gs에 추가 → 커밋 → clasp push
+                       └→ [David] GAS 편집기에서 래퍼 Run (= 마감) → 에이전트에게 알림
+                            └→ [에이전트] 임시 래퍼 제거 → 커밋 → clasp push
 ```
+
+### 에이전트 작업 범위
+
+"검수보고서 생성해줘" 한마디의 스코프는 위 전 구간이다 (2026-08-25 확정).
+PDF 업로드에서 멈추지 말고, **마감 래퍼 push까지** 진행한 뒤 사용자의 마감 실행을
+기다리고, 알림을 받으면 **래퍼 제거 push까지** 마무리한다.
+
+- 마감(`markInspPdfDone`) 실행 자체는 사용자 몫 — 에이전트가 대신 실행하지 않는다.
+- GAS 편집기는 인자 있는 함수를 직접 실행할 수 없으므로, 이번 회차 값을 박아둔
+  **무인자 래퍼** `_tmp_markDone_<문서번호>` 를 만들어 준다.
+  같은 날 여러 건이면 배열로 묶고 `_tmp_markDone_YYYYMMDD_batchN` 으로 명명한다.
+- `clasp push`는 원격 Head를 덮어쓰므로, 임시 폴더에 `clasp pull` 후 마지막 커밋과
+  diff해 편집기 직접 수정이 없는지 먼저 확인한다.
+- 래퍼는 함수 추가일 뿐 웹앱 동작을 바꾸지 않으므로 **별도 배포는 불필요**하다.
 
 ## 최초 1회 설정
 
