@@ -3657,6 +3657,8 @@ function getHomeDataForClient() {
         vendorName: m.vendorName, drafterName: m.drafterName, dept: '',
         status: m.status, docType: 'INSP', issueDate: m.receivedDate, submitAt: m.submitAt,
         poNo: m.poNo, reqNo: m.reqNo, seq: m.seq,
+        // 회차 구분 표시용 — 중간 회차도 목록에 포함되므로 화면에서 배지로 가른다.
+        isFinal: !!m.isFinal, verdict: m.verdict,
         mine: (String(m.drafter || '').toLowerCase() === String(actor || '').toLowerCase()),
       });
     });

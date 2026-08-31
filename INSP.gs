@@ -1105,9 +1105,14 @@ function _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView) {
         if (isAdmin) out.allInspPending.push(pendMeta);
       }
 
-      // 최종 완료(INSP): IS_FINAL=Y && 최종승인(INSP)
+      // 완료된 검수보고서: 최종승인(INSP)이면 회차와 무관하게 전부 수집한다.
+      //   ⚠ 과거에는 IS_FINAL='Y'인 최종 회차만 담아, 여러 회차로 나눠 검수한 건의
+      //     중간 회차가 '최종 완료' 목록에서 통째로 사라졌다(예: TH-AP-26-044는
+      //     -01/-02 두 건을 제출했는데 -02만 보임). 중간 회차도 결재를 마치고 PDF까지
+      //     생성된 완결 문서이므로 목록에 나와야 한다.
+      //     최종/중간 구분은 meta.isFinal로 내려보내 화면에서 배지로 표시한다.
       // 가시성: 관리자 / 구매팀 / 결재 참여자 / 본인 기안 / 같은 부서(부서 공유)
-      if (isFinal && status === '최종승인(INSP)') {
+      if (status === '최종승인(INSP)') {
         if (isAdmin || isProc || isGView || amParticipant ||
             meta.drafter.toLowerCase() === actor ||
             _isSameDeptEmail(ss, meta.drafter, actor)) {

@@ -325,6 +325,7 @@
   .insp-sub-table tr:last-child td { border-bottom: none; }
   .docno.ir { color: #0e7d72; }
   .final-flag { color: #0e7d72; font-weight: 700; font-size: 11px; }
+  .seq-flag { color: var(--ink-mute); font-weight: 600; font-size: 10.5px; }
   .btn-insp { background: #0e7d72; color: #fff; border: none; border-radius: var(--radius-btn); padding: 6px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
   .btn-insp:hover { filter: brightness(1.08); }
   .btn-insp.pending-feature { background: #aab4be; }
@@ -1661,7 +1662,7 @@ function renderFinal(){
   var scopeNote = isAdmin ? '관리자 권한으로 전사 문서가 표시됩니다.'
                 : isProc  ? '구매팀 권한으로 전체가 표시됩니다.'
                 : ('본인이 기안·결재에 참여했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 문서가 표시됩니다.');
-  return pageHead('최종 완료', '최종 승인 처리된 품의·구매 및 최종 검수 완료된 검수보고서입니다. '
+  return pageHead('최종 완료', '최종 승인 처리된 품의·구매와 검수 완료된 검수보고서입니다. 여러 회차로 나눠 검수한 건은 회차별로 각각 표시됩니다. '
       + scopeNote
       + ' 행을 클릭하면 처리된 문서를 열람할 수 있습니다.')
     + kpiFilterSection('final', segments, {
@@ -1690,7 +1691,14 @@ function finalTable(rows){
       : 'data-view-token="' + escAttr(r.token) + '" data-docno="' + escAttr(r.docNo) + '"';
     body += '<tr class="row-clickable" ' + clickAttr + '>'
       + '<td><span class="' + typeCls + '">' + escHtml(typeLabel) + '</span></td>'
-      + '<td><span class="' + typeCls + '">' + escHtml(r.docNo) + '</span></td>'
+      + '<td><span class="' + typeCls + '">' + escHtml(r.docNo) + '</span>'
+      // [검수 회차 조회] 여러 회차로 나눠 검수한 건은 중간 회차도 목록에 나온다.
+      //   최종 회차와 구분되도록 배지를 붙인다.
+      + (r.docType === 'INSP'
+           ? (r.isFinal ? ' <span class="final-flag">★최종</span>'
+                        : ' <span class="seq-flag">' + (r.seq || 1) + '회차</span>')
+           : '')
+      + '</td>'
       + '<td>' + escHtml(r.subject) + '</td>'
       + '<td>' + drafterCell(r) + '</td>'
       + '<td>' + escHtml(r.vendorName) + '</td>'
@@ -1826,7 +1834,10 @@ function inspSubRows(x){
       if((s.status === '검토중' || s.status.indexOf('결재중') >= 0) && s.currentApprName){
         stTxt = '결재중 (' + s.currentApprName + ')';
       }
-      inner += '<tr>'
+      // [검수 회차 조회] 회차 행을 클릭하면 그 회차의 검수보고서를 연다.
+      //   서버는 원래 임의 회차 토큰을 열어줬는데, 여기서 s.token을 쓰지 않아
+      //   중간 회차로 들어갈 길이 없었다. 액션 버튼은 stopPropagation이 걸려 있다.
+      inner += '<tr class="row-clickable" data-insp-view="' + escAttr(s.token) + '">'
         + '<td><span class="docno ir">' + escHtml(s.docNo) + '</span>' + (s.isFinal ? ' <span class="final-flag">★최종</span>' : '') + '</td>'
         + '<td>' + escHtml(s.receivedDate) + '</td>'
         + '<td>' + escHtml(s.receivedNote) + '</td>'
