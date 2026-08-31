@@ -3219,16 +3219,24 @@ function parseItemsSummary(s) {
   var lines = String(s || '').split('\n');
   var items = [];
   lines.forEach(function(line) {
-    // 신규 포맷(품목명·규격 '/' 구분): "1. 품목 명 / 규격 / 100개 / 1,000 KRW"
-    // qty(\d+개)를 우측 앵커로 삼아 품목명에 공백/슬래시가 있어도 규격과 정확히 분리
-    // 단가는 소수점 허용([\d,]+(?:\.\d+)?): 소수 단가가 있으면 정규식이 라인 전체 매칭에 실패해
-    // 품목이 통째로 누락되고 합계에서도 빠지므로 반드시 소수부를 포함시킨다.
-    var mNew = line.match(/^\d+\.\s*(.+?)\s*\/\s*(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+(?:\.\d+)?)\s*([A-Z]{3})$/);
-    if (mNew) { items.push({ name: mNew[1].trim(), spec: mNew[2].trim(), qty: mNew[3], price: mNew[4].replace(/,/g,''), currency: mNew[5] }); return; }
-    // 구 포맷(품목명·규격 공백 구분): "1. 품목 규격 / 100개 / 1,000 KRW"
+    // ① 신규 포맷(구분자 '|'): "1. 볼트/너트 | M8x20 | 100개 | 1,000 KRW"
+    //    buildItemsSummary가 필드 값 안의 '|'를 '/'로 치환해 저장하므로 구분자가 모호할 수 없다.
+    //    규격은 비어 있을 수 있어 (.*?)로 둔다.
+    //    단가는 소수점 허용([\d,]+(?:\.\d+)?): 소수 단가가 있으면 정규식이 라인 전체 매칭에 실패해
+    //    품목이 통째로 누락되고 합계에서도 빠지므로 반드시 소수부를 포함시킨다.
+    var mPipe = line.match(/^\d+\.\s*(.+?)\s*\|\s*(.*?)\s*\|\s*(\d+)개\s*\|\s*([\d,]+(?:\.\d+)?)\s*([A-Z]{3})$/);
+    if (mPipe) { items.push({ name: mPipe[1].trim(), spec: mPipe[2].trim(), qty: mPipe[3], price: mPipe[4].replace(/,/g,''), currency: mPipe[5] }); return; }
+    // ② 구 포맷(품목명·규격 '/' 구분): "1. 품목 명 / 규격 / 100개 / 1,000 KRW"
+    //    ⚠ 구분자와 필드 값이 같은 '/'라 데이터 자체가 모호하다 — 완전 복원은 불가능하다.
+    //    첫 그룹을 greedy((.+))로 두어 '품목명 안의 /'를 살리는 쪽을 택했다(실제 보고된 증상).
+    //    그 대가로 규격에만 '/'가 있는 옛 행(예: '220V/60Hz')은 여전히 부정확하다.
+    //    신규 저장분은 ①의 '|' 구분자라 이 모호성이 없다.
+    var mSlash = line.match(/^\d+\.\s*(.+)\s*\/\s*(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+(?:\.\d+)?)\s*([A-Z]{3})$/);
+    if (mSlash) { items.push({ name: mSlash[1].trim(), spec: mSlash[2].trim(), qty: mSlash[3], price: mSlash[4].replace(/,/g,''), currency: mSlash[5] }); return; }
+    // ③ 구 포맷(품목명·규격 공백 구분): "1. 품목 규격 / 100개 / 1,000 KRW"
     var m = line.match(/^\d+\.\s*(.+?)\s+(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+(?:\.\d+)?)\s*([A-Z]{3})$/);
     if (m) { items.push({ name: m[1], spec: m[2], qty: m[3], price: m[4].replace(/,/g,''), currency: m[5] }); return; }
-    // 하위호환 포맷: "... / 1,000원" → KRW (마이그레이션 없이 기존 행 호환)
+    // ④ 하위호환 포맷: "... / 1,000원" → KRW (마이그레이션 없이 기존 행 호환)
     var m2 = line.match(/^\d+\.\s*(.+?)\s+(.+?)\s*\/\s*(\d+)개\s*\/\s*([\d,]+(?:\.\d+)?)원$/);
     if (m2) { items.push({ name: m2[1], spec: m2[2], qty: m2[3], price: m2[4].replace(/,/g,''), currency: 'KRW' }); }
   });
@@ -3407,6 +3415,7 @@ function getHomeDataForClient() {
         completedDocs: [],   // [INSP Step 2]
         myInspPending: [], finalDocs: [],   // [INSP Step 5]
         allPending: [], allInspPending: [],   // [결재 메뉴 세분화] 관리자 전사 조회
+        prefs: _readUserPrefs(),   // [설정 유지] 별도 왕복 없이 홈 데이터에 편승
       };
     }
 
@@ -3674,10 +3683,88 @@ function getHomeDataForClient() {
       // 누산 시점에 이미 isAdmin으로 걸렀지만, 삼항을 한 번 더 두어 서버측 권한 백스톱으로 삼는다.
       allPending:     isAdmin ? allPending : [],
       allInspPending: isAdmin ? (inspMenus.allInspPending || []) : [],
+      // [설정 유지] 마지막 컬럼 필터 설정. 홈은 서버를 원래 1회만 부르므로 여기에 실어
+      //   보내면 왕복이 늘지 않고, 화면이 이 응답을 받은 뒤에야 그려지므로 깜빡임도 없다.
+      prefs: _readUserPrefs(),
     };
   } catch(err) {
     return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
   }
+}
+
+// ================================================================
+// 12-1. 사용자 화면 설정(홈 컬럼 필터) 영속화
+// ================================================================
+//
+// ⚠ PropertiesService.getUserProperties() 를 쓰면 안 된다.
+//    이 웹앱은 appsscript.json 의 executeAs: 'USER_DEPLOYING' 으로 실행되므로
+//    UserProperties 는 '접속자'가 아니라 '배포 계정'의 저장소를 가리킨다.
+//    → 전 사용자가 설정 하나를 공유하게 되어 A가 건 필터가 B 화면에 걸린다.
+//    ⚠ 스크립트 에디터에서 실행하면 접속자와 배포자가 같은 사람이라 이 사고가
+//      재현되지 않는다. 반드시 배포 URL + 제2계정으로 검증할 것.
+//
+// 저장 형태(클라이언트가 만든다):
+//   colFilters = { menuKey: { th라벨: {t:'ex', v:[제외값,...]} | {t:'range', from, to} } }
+//   · 컬럼 index가 아니라 th 라벨을 키로 쓴다 — 관리자 조회범위 토글이 '현재 결재자'
+//     열을 삽입해 인덱스를 밀기 때문(§apprScope).
+//   · 허용값이 아니라 제외값을 저장한다 — 허용값을 저장하면 다음 접속에 새로 생긴
+//     값이 목록에 없어 자동으로 숨는다("새로 올린 품의가 안 보인다").
+var PREFS_KEY_PREFIX = 'UPREF_';   // QUEUE_KEY('PENDING_JOB_QUEUE')와 네임스페이스 분리
+var PREFS_MAX_CHARS  = 8000;       // ScriptProperties 값 1건 상한(9KB) 대비 여유
+
+function _prefsKeyFor(email) {
+  return PREFS_KEY_PREFIX + String(email || '').trim().toLowerCase();
+}
+
+// 설정 파손이 홈 로딩을 막아서는 안 된다 → 어떤 실패도 null로 퇴화
+// ⚠ 인자를 받지 않는다. 호출부(getHomeDataForClient)의 actor는 getActiveUserEmail() 결과라
+//    배포자로 폴백될 수 있고, 그러면 남의 설정을 읽어오게 된다. 저장과 같은 키 규칙을 쓴다.
+function _readUserPrefs() {
+  try {
+    var actor = getRequestUserEmail_();   // 폴백 없음
+    if (!actor) return null;
+    var raw = PropertiesService.getScriptProperties().getProperty(_prefsKeyFor(actor));
+    if (!raw) return null;
+    var pf = JSON.parse(raw);
+    return (pf && pf.v === 1) ? pf : null;   // 스키마 버전 불일치 = 무시(마이그레이션 불필요)
+  } catch (_) { return null; }
+}
+
+// 클라이언트 저장 요청. 사용자마다 키가 달라 큐 갱신과 경합하지 않으므로 LockService 불필요.
+function saveUserPrefsForClient(prefs) {
+  try {
+    // ⚠ getActiveUserEmail()을 쓰면 안 된다 — 그 함수는 신원 확인 실패 시
+    //   getEffectiveUser()로 폴백하는데, executeAs:'USER_DEPLOYING'에서 그 값은 '배포자'다.
+    //   설정이 배포자 칸에 저장되어 그런 사용자들끼리 필터를 공유하게 된다.
+    //   신원 불명이면 저장하지 않는 편이 옳다(필터가 안 걸릴 뿐, 아무도 오염되지 않는다).
+    var actor = getRequestUserEmail_();   // 폴백 없음
+    if (!actor) return { ok: false, message: '사용자 확인 실패' };
+
+    var pf = prefs || {};
+    // 화이트리스트 — 클라이언트가 보낸 임의 키를 그대로 저장하지 않는다.
+    var safe = {
+      v: 1,
+      // 장기 미접속 설정의 서버측 정리용(화면 동작과 무관).
+      // 부수 필드 하나가 저장 전체를 실패시키지 않도록 개별 방어한다.
+      t: (function(){ try { return toDateTimeStr(new Date()); } catch (_) { return ''; } })(),
+      colFilters: (pf.colFilters && typeof pf.colFilters === 'object') ? pf.colFilters : {},
+    };
+
+    var json = JSON.stringify(safe);
+    if (json.length > PREFS_MAX_CHARS) {
+      return { ok: false, message: '설정 크기 초과' };   // 클라이언트는 조용히 무시한다
+    }
+    PropertiesService.getScriptProperties().setProperty(_prefsKeyFor(actor), json);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
+  }
+}
+
+// 운영/디버깅용 — 특정 사용자의 저장 설정 삭제(에디터 직접 실행).
+function clearUserPrefs(email) {
+  PropertiesService.getScriptProperties().deleteProperty(_prefsKeyFor(email));
+  Logger.log('[Prefs] 삭제: ' + _prefsKeyFor(email));
 }
 
 // ================================================================
@@ -4804,12 +4891,22 @@ function toNum(v) {
   return Number(String(v == null ? '' : v).replace(/,/g, '')) || 0;
 }
 
+// 품목 필드 정제 — 구분자로 쓰는 '|'가 값 안에 들어오면 '/'로 치환한다.
+// 사용자가 '|'를 입력할 일은 거의 없지만, 들어와도 parseItemsSummary가 절대
+// 모호해지지 않게 하는 안전장치다(구분자는 값에 존재할 수 없는 문자여야 한다).
+function _sanitizeItemField(v) {
+  return String(v == null ? '' : v).replace(/\|/g, '/').trim();
+}
+
 function buildItemsSummary(items) {
   return (items || []).map(function(it, i) {
     var cur = String(it.currency || 'KRW');
-    // 품목명·규격을 ' / '로 구분 — 품목명에 공백이 있어도 규격 셀로 넘어가지 않도록 명시적 구분자 사용
-    return (i + 1) + '. ' + (it.name || '') + ' / ' + (it.spec || '') +
-           ' / ' + (it.qty || 0) + '개 / ' + toNum(it.price).toLocaleString() + ' ' + cur;
+    // 구분자는 ' | '다. 과거엔 ' / '를 썼는데, 품목명·규격 안에 '/'가 들어가면
+    //   (예: '볼트/너트', '220V/60Hz') 구분자와 구별되지 않아 parseItemsSummary가
+    //   엉뚱한 위치에서 잘랐다 — 결재창에서 품목명 뒷부분이 규격란으로 넘어가는 증상.
+    //   '|'는 _sanitizeItemField가 값에서 제거하므로 파싱이 모호해질 수 없다.
+    return (i + 1) + '. ' + _sanitizeItemField(it.name) + ' | ' + _sanitizeItemField(it.spec) +
+           ' | ' + (it.qty || 0) + '개 | ' + toNum(it.price).toLocaleString() + ' ' + cur;
   }).join('\n');
 }
 

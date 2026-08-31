@@ -174,6 +174,36 @@
   .cfp-foot button { flex: 1; padding: 6px 0; border-radius: 7px; border: 1px solid var(--line); background: #fff; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
   .cfp-foot .cfp-close { background: var(--grad-brand); color: #fff; border: none; }
   .cfp-foot button:hover { filter: brightness(0.97); }
+  /* [기간 필터] 날짜 컬럼 팝업 — 기존 변수·클래스명은 보존하고 신규 클래스만 추가 */
+  .col-filter-pop.range { width: 246px; }
+  .cfp-range { padding: 2px 0 6px; }
+  .cfp-r-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; }
+  .cfp-r-row > span { width: 32px; flex-shrink: 0; font-size: 11.5px; color: var(--ink-mute); font-weight: 700; }
+  .cfp-r-row input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; font-family: inherit; font-size: 12px; outline: none; }
+  .cfp-r-row input:focus { border-color: var(--brand); }
+  .cfp-quick { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 7px; }
+  .cfp-q { padding: 5px 0; border: 1px solid var(--line); border-radius: 7px; background: #fff; font-family: inherit; font-size: 11px; font-weight: 700; color: var(--ink-soft); cursor: pointer; }
+  .cfp-q:hover { border-color: var(--brand); color: var(--brand); }
+  /* [내 결재 대기 강조] 홈 상단 알림 배너 */
+  .pending-alert { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+                   padding: 11px 16px; margin-bottom: 14px; border-radius: var(--radius-card);
+                   background: var(--brand-soft); border: 1px solid var(--brand); box-shadow: var(--shadow-card); }
+  .pa-main { display: flex; align-items: center; gap: 9px; }
+  .pa-badge { background: var(--grad-brand); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 9px;
+              border-radius: var(--radius-pill); font-variant-numeric: tabular-nums; }
+  .pa-text { color: var(--brand-deep); font-weight: 700; font-size: 13px; }
+  .pa-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pa-chip { background: #fff; border: 1px solid var(--brand); color: var(--brand); font-family: inherit;
+             font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: var(--radius-pill); cursor: pointer; }
+  .pa-chip:hover { background: var(--grad-brand); color: #fff; border-color: transparent; }
+  /* [설정 유지] 컬럼 필터 적용 표시 · 일괄 해제 칩 */
+  .cf-chip-slot { display: inline-flex; align-items: center; }
+  .cf-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 700;
+             padding: 3px 4px 3px 10px; border-radius: var(--radius-pill);
+             background: var(--brand-soft); color: var(--brand); border: 1px solid var(--brand); }
+  .cf-chip-x { background: var(--grad-brand); color: #fff; border: none; border-radius: var(--radius-pill);
+               padding: 2px 9px; font-family: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
+  .cf-chip-x:hover { filter: brightness(1.08); }
 
   /* ── 상태 배지: 기존 디자인 그대로 유지 ── */
   .status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10.5px; font-weight: 700; }
@@ -357,7 +387,22 @@ var STATE = {
   page: {},   // 메뉴별 현재 페이지 (menuKey → 1-based). 필터/메뉴 변경 시 1로 리셋
   navOpen: {},         // [결재 메뉴 세분화] 결재 트리 부모 펼침 상태 (parentKey → bool)
   apprScope: 'mine',   // [결재 메뉴 세분화] 결재 조회 범위: 'mine' | 'all' (관리자 전용)
+  // ─── [설정 유지] 컬럼 필터 영속화 ───────────────────────────────
+  // colFilters는 컬럼 index 키인데, 저장은 th 라벨 키로 한다.
+  //   관리자 조회범위 토글이 '현재 결재자' 열을 삽입해 인덱스를 밀기 때문 —
+  //   index로 저장하면 다음 접속에 엉뚱한 열에 필터가 걸린다.
+  // 값도 허용목록이 아니라 '끈 값' 목록으로 저장한다 —
+  //   허용목록을 저장하면 다음 접속에 새로 생긴 값이 목록에 없어 자동으로 숨는다.
+  colPersist: {},   // { menuKey → { th라벨 → {t:'ex', v:[제외값,...]} | {t:'range', from, to} } }
+  colLabels: {},    // { menuKey → { 컬럼index → th라벨 } } 커밋 시 저장 키를 알아내는 캐시
 };
+
+// [설정 유지] 서버에서 복원했지만 아직 테이블에 바인딩되지 않은 필터.
+//   attachColumnFilters가 해당 메뉴의 표를 처음 그릴 때 라벨→index로 소비한다.
+var PENDING_COL_RESTORE = {};
+var PREFS_LOADED    = false;   // 서버 응답을 받기 전에는 저장하지 않는다(빈 값 덮어쓰기 방지)
+var PREFS_SAVE_TIMER = null;
+var PREFS_LAST_JSON  = '';     // 무변경 스킵 — 직전 저장과 같으면 아예 보내지 않는다
 
 // 리스트 페이지당 최대 표시 항목 수 (관리자 메뉴 제외 — home에서 처리되는 모든 리스트 공통)
 var PAGE_SIZE = 20;
@@ -495,6 +540,8 @@ function loadHome(){
       }
       STATE.data = res;
       STATE.user = res.user;
+      // [설정 유지] 같은 응답에 실려 온 설정을 렌더 전에 적용 → 추가 왕복 0, 깜빡임 0
+      applyPrefs(res.prefs);
       renderUser();
       renderSidebar();
       renderContent();
@@ -713,7 +760,8 @@ function renderContent(){
   else if(key === 'completed') html = renderCompleted();   // [INSP Step 2]
   else if(key === 'final') html = renderFinal();                // [INSP Step 5]
   else html = '<div class="empty">알 수 없는 메뉴입니다.</div>';
-  document.getElementById('content').innerHTML = html;
+  // [내 결재 대기 강조] 결재 메뉴를 보고 있을 땐 중복이라 배너를 생략한다.
+  document.getElementById('content').innerHTML = (apprNode ? '' : pendingAlert()) + html;
   attachContentHandlers();
 }
 
@@ -730,7 +778,13 @@ function attachContentHandlers(){
       APPROVAL_TREE.forEach(function(n){
         STATE.page[n.key] = 1;
         delete STATE.colFilters[n.key];
+        // [설정 유지] 저장본·라벨 캐시도 함께 비운다. 열 구성이 바뀌므로 그대로 두면
+        //   다음 접속에 엉뚱한 열로 복원된다.
+        delete STATE.colPersist[n.key];
+        delete STATE.colLabels[n.key];
+        delete PENDING_COL_RESTORE[n.key];
       });
+      savePrefs();
       renderSidebar();   // 사이드바 배지 숫자도 선택 범위 기준으로 전환
       renderContent();
     });
@@ -749,6 +803,21 @@ function attachContentHandlers(){
         renderSidebar();
       }
       renderContent();
+    });
+  });
+  // [내 결재 대기 강조] 배너 칩 → 해당 결재 메뉴로 이동
+  Array.from(document.querySelectorAll('[data-goto-menu]')).forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();   // 표 안으로 옮길 경우 행 클릭(뷰어 이동)이 함께 발동하지 않도록
+      var k = el.getAttribute('data-goto-menu');
+      var node = apprNodeFor(k);
+      if(node){
+        STATE.navOpen[node.key] = true;
+        STATE.filters[node.key] = 'all';
+        STATE.page[node.key] = 1;
+        renderSidebar();
+      }
+      showMenu(k);
     });
   });
   // 픽업 버튼
@@ -839,6 +908,83 @@ var COL_FILTER_ICON = '<svg width="11" height="11" viewBox="0 0 16 16"><path d="
 var COL_FILTER_STATE = null;        // 현재 열린 팝업 정보 ({ btn, table, menuKey, ci })
 var COL_FILTER_DOC_HANDLER = null;  // 외부 클릭 감지 핸들러
 
+// ─── [설정 유지] 컬럼 필터 영속화 헬퍼 ─────────────────────────────
+function rememberColLabel(menuKey, ci, label){
+  if(!STATE.colLabels[menuKey]) STATE.colLabels[menuKey] = {};
+  STATE.colLabels[menuKey][ci] = label;
+}
+function colLabelOf(menuKey, ci){ return (STATE.colLabels[menuKey] || {})[ci] || ''; }
+
+// 저장본 갱신. 라벨을 모르면 저장하지 않는다(index로 저장하면 안 되므로).
+function setColPersist(menuKey, label, enc){
+  if(!label) return;
+  if(!STATE.colPersist[menuKey]) STATE.colPersist[menuKey] = {};
+  if(enc == null) delete STATE.colPersist[menuKey][label];
+  else STATE.colPersist[menuKey][label] = enc;
+}
+
+// 컬럼 필터 커밋 시 호출 — 화면 표현(켠 목록)을 저장 표현(끈 목록)으로 뒤집는다.
+//   allowed=null(전체 선택) → 저장 해제
+function persistListFilter(menuKey, ci, values, allowed){
+  var label = colLabelOf(menuKey, ci);
+  if(allowed == null){ setColPersist(menuKey, label, null); return; }
+  var ex = values.filter(function(v){ return allowed.indexOf(v) < 0; });
+  setColPersist(menuKey, label, { t:'ex', v: ex.slice(0, 300) });
+}
+
+// 저장된 필터를 현재 테이블 기준으로 환원 (메뉴당 1회 소비)
+function restoreColFilterFor(table, menuKey, ci, label){
+  var box = PENDING_COL_RESTORE[menuKey];
+  if(!box || !box[label]) return;
+  var enc = box[label];
+  delete box[label];                       // 재렌더마다 덮어쓰지 않도록 소비
+  if(enc.t === 'range'){
+    setColFilter(menuKey, ci, { t:'range', from: enc.from || '', to: enc.to || '' });
+    return;
+  }
+  // 끈 값 목록 → 지금 데이터 기준 허용목록으로 환원.
+  //   새로 생긴 값은 끈 목록에 없으므로 자동으로 '보임'이 된다.
+  var all   = distinctColValues(table, ci);
+  var excl  = enc.v || [];
+  var allow = all.filter(function(v){ return excl.indexOf(v) < 0; });
+  if(allow.length === all.length){         // 끈 값이 데이터에서 사라짐 → 필터 자체를 해제
+    setColPersist(menuKey, label, null);
+    return;
+  }
+  setColFilter(menuKey, ci, allow);
+}
+
+// 서버 응답의 prefs 적용. colFilters 외에는 건드리지 않으므로 부팅 경로·딥링크는 무수정.
+function applyPrefs(pf){
+  PREFS_LOADED = true;
+  if(!pf || pf.v !== 1) return;
+  if(pf.colFilters && typeof pf.colFilters === 'object'){
+    STATE.colPersist    = pf.colFilters;                              // 미방문 메뉴 설정도 보존해 재저장
+    PENDING_COL_RESTORE = JSON.parse(JSON.stringify(pf.colFilters));  // 소비용 사본
+    PREFS_LAST_JSON     = JSON.stringify(pf.colFilters);
+  }
+}
+
+// 저장 — 400ms 디바운스. 컬럼 필터 커밋은 체크박스 하나마다 발사되므로 필수.
+function savePrefs(){
+  if(!PREFS_LOADED) return;
+  if(PREFS_SAVE_TIMER) clearTimeout(PREFS_SAVE_TIMER);
+  PREFS_SAVE_TIMER = setTimeout(flushPrefs, 400);
+}
+function flushPrefs(){
+  if(PREFS_SAVE_TIMER){ clearTimeout(PREFS_SAVE_TIMER); PREFS_SAVE_TIMER = null; }
+  if(!PREFS_LOADED || typeof google === 'undefined') return;
+  var json = JSON.stringify(STATE.colPersist || {});
+  if(json === PREFS_LAST_JSON) return;   // 무변경 스킵 — 서버 호출 자체를 하지 않는다
+  PREFS_LAST_JSON = json;
+  google.script.run
+    .withSuccessHandler(function(){})
+    .withFailureHandler(function(){})    // 설정 저장 실패가 업무 흐름을 막아선 안 된다
+    .saveUserPrefsForClient({ v: 1, colFilters: STATE.colPersist || {} });
+}
+// 상세 화면 이동은 전체 페이지 이동이라 디바운스가 유실될 수 있다 → 베스트에포트 보강
+window.addEventListener('pagehide', flushPrefs);
+
 function attachColumnFilters(){
   closeColFilterPop();
   var content = document.getElementById('content');
@@ -854,6 +1000,9 @@ function attachColumnFilters(){
       var label = th.textContent.trim();
       if(!label) return;   // 액션/빈 헤더에는 필터 미부착
       if(th.classList.contains('no-filter')) return;   // 액션 열(예: '문서 생성')은 라벨이 있어도 필터 미부착
+      // [설정 유지] 두 return 이후에 둔다 — 필터를 붙이지 않는 열은 저장·복원 대상도 아니다.
+      rememberColLabel(menuKey, ci, label);
+      restoreColFilterFor(table, menuKey, ci, label);
       th.classList.add('th-filter');
       var btn = document.createElement('span');
       btn.className = 'col-filter-btn';
@@ -900,18 +1049,81 @@ function distinctColValues(table, ci){
   return out;
 }
 
+// ─── [기간 필터] 날짜 컬럼 판정 · 비교 ─────────────────────────────
+// 서버가 내려주는 날짜 문자열은 toDateStr='YYYY-MM-DD' 또는 toDateTimeStr='YYYY-MM-DD HH:mm'.
+// 두 형식이 한 컬럼에 섞이는 곳도 있다 — 최종 문서의 '일자'는 `r.issueDate || r.submitAt`이라
+// 날짜와 날짜시각이 공존한다.
+var DATE_CELL_RE = /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/;
+
+// ⚠ Date 파싱 금지.
+//   · new Date('2026-08-25')는 UTC 자정으로 파싱 → KST(+9) 환산에서 하루가 밀린다
+//   · new Date('2026-08-25 14:30')은 ECMA 표준 형식이 아니라 엔진마다 결과가 다르다
+//   두 형식 모두 제로패딩 ISO라 '앞 10자 문자열 사전순 비교 = 날짜순 비교'가 정확히 성립한다.
+function cellDay(v){
+  var s = String(v == null ? '' : v).trim();
+  return DATE_CELL_RE.test(s) ? s.slice(0, 10) : '';
+}
+function passesRange(v, f){
+  var d = cellDay(v);
+  if(!d) return false;                     // 빈 값·비정형 → 기간 필터를 걸면 제외
+  if(f.from && d < f.from) return false;
+  if(f.to   && d > f.to)   return false;   // 시각부를 잘라내므로 to는 '그 날 포함'이 자동 성립
+  return true;
+}
+
+// 날짜 컬럼 판정 — th 라벨 화이트리스트가 아니라 '값 패턴 전수 일치'로 판정한다.
+//   · 라벨 방식은 신규 컬럼('제출일','1차 승인일','입고일','일자'…)마다 관리가 필요하고 오탈자에 취약
+//   · 값 패턴은 self-maintaining. 금액 '1,234 원', 문서번호 'REQ-2026-0001'은 앵커 정규식에 안 걸린다
+//   · 비어있지 않은 값이 하나라도 날짜 형식이 아니면 일반(체크박스) 컬럼으로 취급 → 오탐 0
+function isDateColumn(table, ci){
+  var vals = distinctColValues(table, ci), n = 0;
+  for(var i = 0; i < vals.length; i++){
+    if(vals[i] === '') continue;
+    if(!DATE_CELL_RE.test(vals[i])) return false;
+    n++;
+  }
+  return n > 0;
+}
+
 // 한 데이터 행이 저장된 컬럼 필터를 통과하는지 판정
 function rowPassesColFilter(tr, m){
   var pass = true;
   Object.keys(m).forEach(function(ci){
     if(!pass) return;
-    var allowed = m[ci];
-    if(!allowed || !allowed.length){ pass = false; return; }   // 전부 해제 → 숨김
+    var f = m[ci];
+    if(!f){ pass = false; return; }
     var cell = tr.cells[ci];
     var v = cell ? cell.textContent.trim() : '';
-    if(allowed.indexOf(v) < 0) pass = false;
+    // [기간 필터] 날짜 컬럼은 허용값 배열이 아니라 { t:'range', from, to } 객체다.
+    // ⚠ 이 분기는 반드시 아래 length 검사보다 먼저 와야 한다.
+    //   객체는 length가 undefined → `!f.length` 가드에 걸려 전 행이 사라진다.
+    if(f.t === 'range'){ if(!passesRange(v, f)) pass = false; return; }
+    if(!f.length){ pass = false; return; }   // 전부 해제 → 숨김
+    if(f.indexOf(v) < 0) pass = false;
   });
   return pass;
+}
+
+// ─── [설정 유지] 컬럼 필터 적용 표시 + 일괄 해제 ───────────────────
+// 필터는 재접속 후에도 유지되므로(시간 만료 없음), 걸려 있다는 사실이 눈에 띄어야 한다.
+// 지금은 열 제목의 깔때기 색만 바뀌어 스크롤 위치에 따라 놓치기 쉽다.
+function renderFilterChip(menuKey){
+  var slot = document.getElementById('cfchip-' + menuKey);
+  if(!slot) return;
+  var m = STATE.colFilters[menuKey] || {};
+  var n = Object.keys(m).length;
+  if(!n){ slot.innerHTML = ''; return; }
+  slot.innerHTML = '<span class="cf-chip">필터 ' + n + '개'
+    + '<button type="button" class="cf-chip-x" data-clear-filters="' + escAttr(menuKey) + '">해제</button></span>';
+  var b = slot.querySelector('[data-clear-filters]');
+  if(b) b.addEventListener('click', function(ev){
+    ev.stopPropagation();
+    delete STATE.colFilters[menuKey];
+    delete STATE.colPersist[menuKey];   // 저장본까지 비운다 — 다음 접속에도 풀린 상태
+    STATE.page[menuKey] = 1;
+    savePrefs();
+    renderContent();   // 깔때기 active 표시까지 함께 갱신하려면 재렌더가 가장 확실하다
+  });
 }
 
 // 컬럼 필터 + 페이지네이션을 함께 적용해 행을 표시/숨김 처리
@@ -948,6 +1160,9 @@ function applyColumnFilters(table, menuKey){
 
   // 4) 페이지네이션 컨트롤 렌더
   renderPager(table, menuKey, passRows.length, page, totalPages);
+
+  // 5) [설정 유지] 필터 적용 표시 갱신 (커밋 직후에도 최신 개수가 보이도록)
+  renderFilterChip(menuKey);
 }
 
 // 페이지네이션 컨트롤 렌더 + 클릭 핸들러 부착
@@ -1005,19 +1220,10 @@ function closeColFilterPop(){
   }
 }
 
-function openColFilterPop(table, menuKey, ci, btn){
-  var sameBtn = COL_FILTER_STATE && COL_FILTER_STATE.btn === btn;
-  closeColFilterPop();
-  if(sameBtn){ COL_FILTER_STATE = null; return; }   // 같은 버튼 재클릭 → 토글 닫기
-
-  var values = distinctColValues(table, ci);
-  var allowed = getColFilter(menuKey, ci);          // null = 전체 선택
+// 팝업 본문 — 체크박스 목록(기존)
+function listPopHtml(values, allowed){
   var isChecked = function(v){ return !allowed || allowed.indexOf(v) >= 0; };
-
-  var pop = document.createElement('div');
-  pop.className = 'col-filter-pop';
-  pop.id = 'col-filter-pop';
-  var html = '<input class="cfp-search" type="text" placeholder="검색…">'
+  var html = '<input class="cfp-search" type="text" placeholder="검색 — 입력하면 바로 적용">'
     + '<label class="cfp-item cfp-all"><input type="checkbox" class="cfp-all-cb"><span>전체 선택</span></label>'
     + '<div class="cfp-list">';
   values.forEach(function(v, i){
@@ -1027,8 +1233,54 @@ function openColFilterPop(table, menuKey, ci, btn){
       + '<span title="' + escAttr(disp) + '">' + escHtml(disp) + '</span></label>';
   });
   if(!values.length) html += '<div class="cfp-empty">표시할 값이 없습니다.</div>';
-  html += '</div><div class="cfp-foot"><button class="cfp-clear">초기화</button><button class="cfp-close">닫기</button></div>';
-  pop.innerHTML = html;
+  return html + '</div><div class="cfp-foot"><button class="cfp-clear">초기화</button><button class="cfp-close">닫기</button></div>';
+}
+
+// [기간 필터] 팝업 본문 — 날짜 컬럼용 from/to
+// <input type="date">의 value는 항상 'YYYY-MM-DD' 또는 '' → 파싱 코드가 아예 필요 없다.
+function rangePopHtml(cur){
+  return '<div class="cfp-range">'
+    + '<label class="cfp-r-row"><span>시작</span><input type="date" class="cfp-from" value="' + escAttr(cur.from || '') + '"></label>'
+    + '<label class="cfp-r-row"><span>종료</span><input type="date" class="cfp-to" value="' + escAttr(cur.to || '') + '"></label>'
+    + '<div class="cfp-quick">'
+    +   '<button type="button" class="cfp-q" data-days="7">최근 7일</button>'
+    +   '<button type="button" class="cfp-q" data-days="30">최근 30일</button>'
+    +   '<button type="button" class="cfp-q" data-mon="0">이번 달</button>'
+    +   '<button type="button" class="cfp-q" data-mon="-1">지난 달</button>'
+    + '</div></div>'
+    + '<div class="cfp-foot"><button class="cfp-clear">초기화</button><button class="cfp-close">닫기</button></div>';
+}
+
+// [기간 필터] Date는 'YYYY-MM-DD 문자열 생성'에만 쓰고, 절대 파싱에는 쓰지 않는다(로컬=KST 기준).
+function ymd(d){
+  var p = function(n){ return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function openColFilterPop(table, menuKey, ci, btn){
+  var sameBtn = COL_FILTER_STATE && COL_FILTER_STATE.btn === btn;
+  closeColFilterPop();
+  if(sameBtn){ COL_FILTER_STATE = null; return; }   // 같은 버튼 재클릭 → 토글 닫기
+
+  // [기간 필터] 값이 전부 날짜 형태인 컬럼은 체크박스 대신 from/to UI를 띄운다.
+  var isRange = isDateColumn(table, ci);
+  var values = [], allowed = null, cur = null;
+
+  var pop = document.createElement('div');
+  pop.className = 'col-filter-pop' + (isRange ? ' range' : '');
+  pop.id = 'col-filter-pop';
+
+  if(isRange){
+    cur = getColFilter(menuKey, ci);
+    if(!cur || cur.t !== 'range') cur = { t:'range', from:'', to:'' };
+    pop.innerHTML = rangePopHtml(cur);
+  } else {
+    values  = distinctColValues(table, ci);
+    allowed = getColFilter(menuKey, ci);          // null = 전체 선택
+    // 방어: 컬럼 구성이 바뀌어 range 값이 일반 컬럼에 남은 경우 무시한다.
+    if(allowed && allowed.t === 'range') allowed = null;
+    pop.innerHTML = listPopHtml(values, allowed);
+  }
   document.body.appendChild(pop);
 
   // 위치 — 버튼 우하단 정렬, 화면 밖이면 보정
@@ -1042,10 +1294,38 @@ function openColFilterPop(table, menuKey, ci, btn){
 
   COL_FILTER_STATE = { btn: btn, table: table, menuKey: menuKey, ci: ci };
 
+  // 공용 — 바깥 클릭으로 닫기
+  pop.addEventListener('mousedown', function(ev){ ev.stopPropagation(); });
+  COL_FILTER_DOC_HANDLER = function(ev){
+    if(pop.contains(ev.target) || btn.contains(ev.target)) return;
+    closeColFilterPop();
+    COL_FILTER_STATE = null;
+  };
+  document.addEventListener('mousedown', COL_FILTER_DOC_HANDLER, true);
+
+  // ⚠ 검색창·전체선택·체크박스 초기화는 목록 모드에만 존재한다.
+  //   공용 자리에 두면 기간 모드에서 null 참조로 팝업 전체가 죽는다.
+  if(isRange) wireRangePop(pop, table, menuKey, ci, btn);
+  else        wireListPop(pop, table, menuKey, ci, btn, values);
+}
+
+// 목록 모드 배선
+function wireListPop(pop, table, menuKey, ci, btn, values){
   var listCbs = function(){ return Array.from(pop.querySelectorAll('.cfp-cb')); };
-  var allCb = pop.querySelector('.cfp-all-cb');
+  // 검색 중에는 '보이는 항목'만을 대상으로 삼는다(검색어가 없으면 전체와 같다).
+  var visibleCbs = function(){
+    return listCbs().filter(function(c){ return c.parentNode.style.display !== 'none'; });
+  };
+  var allCb  = pop.querySelector('.cfp-all-cb');
+  var search = pop.querySelector('.cfp-search');
+
+  // [검색 즉시 적용] 검색을 시작하기 직전의 체크 상태. 검색어를 지우면 여기로 되돌린다.
+  //   검색 중 사용자가 체크를 직접 건드리면(userTouched) 되돌리지 않는다 — 그 편집을 존중한다.
+  var preSearch = null;
+  var userTouched = false;
+
   var syncAllCb = function(){
-    var cbs = listCbs();
+    var cbs = visibleCbs();
     var on = cbs.filter(function(c){ return c.checked; }).length;
     allCb.checked = cbs.length > 0 && on === cbs.length;
     allCb.indeterminate = on > 0 && on < cbs.length;
@@ -1057,57 +1337,177 @@ function openColFilterPop(table, menuKey, ci, btn){
     listCbs().forEach(function(c){ if(c.checked) checkedVals.push(values[+c.getAttribute('data-idx')]); });
     if(checkedVals.length === values.length){
       setColFilter(menuKey, ci, null);          // 전체 선택 → 필터 해제
+      persistListFilter(menuKey, ci, values, null);
       btn.classList.remove('active');
     } else {
       setColFilter(menuKey, ci, checkedVals);
+      persistListFilter(menuKey, ci, values, checkedVals);   // [설정 유지] 끈 값으로 뒤집어 저장
       btn.classList.add('active');
     }
     STATE.page[menuKey] = 1;   // 컬럼 필터 변경 → 첫 페이지로
     applyColumnFilters(table, menuKey);
+    savePrefs();
   };
 
   allCb.addEventListener('change', function(){
     var on = allCb.checked;
-    listCbs().forEach(function(c){ c.checked = on; });
+    visibleCbs().forEach(function(c){ c.checked = on; });   // 검색 중이면 검색 결과에만 적용
     allCb.indeterminate = false;
+    userTouched = true;
     commit();
   });
   listCbs().forEach(function(c){
-    c.addEventListener('change', function(){ syncAllCb(); commit(); });
+    c.addEventListener('change', function(){ userTouched = true; syncAllCb(); commit(); });
   });
 
-  var search = pop.querySelector('.cfp-search');
+  // [검색 즉시 적용] 검색어를 치는 순간 표도 함께 걸러진다.
+  //   기존에는 팝업 목록만 좁아지고 표는 그대로여서, 원하는 값 하나만 보려면
+  //   '전체 선택 해제 → 그 값만 다시 체크'를 해야 했다.
   search.addEventListener('input', function(){
     var q = search.value.trim().toLowerCase();
+
+    if(q && preSearch === null){                 // 검색 시작 — 현재 상태를 기억해 둔다
+      preSearch = listCbs().map(function(c){ return c.checked; });
+      userTouched = false;
+    }
+
     Array.from(pop.querySelectorAll('.cfp-list .cfp-item')).forEach(function(lab){
-      lab.style.display = (!q || lab.textContent.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+      var hit = lab.textContent.toLowerCase().indexOf(q) >= 0;
+      lab.style.display = (!q || hit) ? '' : 'none';
+      var cb = lab.querySelector('.cfp-cb');
+      if(cb && q) cb.checked = hit;              // 검색 중 — 일치하는 값만 선택
     });
+
+    if(!q){                                       // 검색어를 지웠다 — 검색 전 상태로 복귀
+      if(preSearch && !userTouched){
+        listCbs().forEach(function(c, i){ c.checked = preSearch[i]; });
+      }
+      preSearch = null;
+    }
+
+    syncAllCb();
+    commit();
   });
+
   pop.querySelector('.cfp-clear').addEventListener('click', function(){
+    search.value = '';
+    preSearch = null; userTouched = false;
+    Array.from(pop.querySelectorAll('.cfp-list .cfp-item')).forEach(function(lab){ lab.style.display = ''; });
     listCbs().forEach(function(c){ c.checked = true; });
     setColFilter(menuKey, ci, null);
+    setColPersist(menuKey, colLabelOf(menuKey, ci), null);
     btn.classList.remove('active');
     STATE.page[menuKey] = 1;   // 컬럼 필터 초기화 → 첫 페이지로
     applyColumnFilters(table, menuKey);
+    savePrefs();
     syncAllCb();
   });
   pop.querySelector('.cfp-close').addEventListener('click', function(){
     closeColFilterPop();
     COL_FILTER_STATE = null;
   });
+  search.focus();
+}
 
-  pop.addEventListener('mousedown', function(ev){ ev.stopPropagation(); });
-  COL_FILTER_DOC_HANDLER = function(ev){
-    if(pop.contains(ev.target) || btn.contains(ev.target)) return;
+// [기간 필터] 기간 모드 배선
+function wireRangePop(pop, table, menuKey, ci, btn){
+  var fi = pop.querySelector('.cfp-from');
+  var ti = pop.querySelector('.cfp-to');
+
+  var commit = function(){
+    var f = fi.value || '', t = ti.value || '';
+    if(f && t && f > t){ var sw = f; f = t; t = sw; fi.value = f; ti.value = t; }   // 역전 입력 자동 교정
+    if(!f && !t){
+      setColFilter(menuKey, ci, null);
+      setColPersist(menuKey, colLabelOf(menuKey, ci), null);
+      btn.classList.remove('active');
+    } else {
+      setColFilter(menuKey, ci, { t:'range', from:f, to:t });
+      setColPersist(menuKey, colLabelOf(menuKey, ci), { t:'range', from:f, to:t });
+      btn.classList.add('active');
+    }
+    STATE.page[menuKey] = 1;   // 필터 변경 → 첫 페이지로
+    applyColumnFilters(table, menuKey);
+    savePrefs();
+  };
+
+  fi.addEventListener('change', commit);
+  ti.addEventListener('change', commit);
+
+  Array.from(pop.querySelectorAll('.cfp-q')).forEach(function(b){
+    b.addEventListener('click', function(){
+      var now = new Date(), from, to;
+      if(b.getAttribute('data-days')){
+        var n = parseInt(b.getAttribute('data-days'), 10);
+        var st = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (n - 1));
+        from = ymd(st); to = ymd(now);
+      } else {
+        var off = parseInt(b.getAttribute('data-mon'), 10);
+        var first = new Date(now.getFullYear(), now.getMonth() + off, 1);
+        var last  = new Date(now.getFullYear(), now.getMonth() + off + 1, 0);
+        from = ymd(first); to = ymd(last);
+      }
+      fi.value = from; ti.value = to;
+      commit();
+    });
+  });
+
+  pop.querySelector('.cfp-clear').addEventListener('click', function(){
+    fi.value = ''; ti.value = '';
+    setColFilter(menuKey, ci, null);
+    setColPersist(menuKey, colLabelOf(menuKey, ci), null);
+    btn.classList.remove('active');
+    STATE.page[menuKey] = 1;
+    applyColumnFilters(table, menuKey);
+    savePrefs();
+  });
+  pop.querySelector('.cfp-close').addEventListener('click', function(){
     closeColFilterPop();
     COL_FILTER_STATE = null;
-  };
-  document.addEventListener('mousedown', COL_FILTER_DOC_HANDLER, true);
-  search.focus();
+  });
+  fi.focus();
 }
 
 // ─── 메뉴별 렌더 ─────────────────────────────
 // 최신 생성 건이 앞단에 오도록 내림차순 정렬 (원본 배열은 보존하기 위해 복제 후 정렬)
+// ─── [내 결재 대기 강조] 홈 상단 알림 배너 ─────────────────────────
+// 기본 진입 메뉴가 mydocs라 결재 대기 건이 본문에 전혀 보이지 않는다.
+// 사이드바 카운트 배지는 트리를 접으면 사라지므로, 어느 메뉴에 있든 따라오는 배너를 둔다.
+//
+// ⚠ 소스는 반드시 myPending / myInspPending 고정.
+//   apprSourceRows()는 관리자 '전체' 범위(apprScope)를 따르므로 그대로 쓰면
+//   '내가 결재할 건'이 아니라 전사 대기 건수가 표시된다.
+function myPendingBuckets(){
+  var d = STATE.data || {};
+  var mp = d.myPending || [];
+  return {
+    req:  mp.filter(function(x){ return x.docType === 'REQ'; }),
+    prc:  mp.filter(function(x){ return x.docType === 'PRC'; }),
+    insp: d.myInspPending || [],
+  };
+}
+
+// 0건이면 빈 문자열 → 아무것도 그리지 않는다.
+// ⚠ 표(<table>)를 만들지 않는다. 표를 추가하면 attachColumnFilters가 현재 메뉴의
+//   컬럼 필터를 그 표에도 적용해 본 표의 행이 사라지고 페이저가 충돌한다.
+function pendingAlert(){
+  var b = myPendingBuckets();
+  var total = b.req.length + b.prc.length + b.insp.length;
+  if(!total) return '';
+  var chip = function(key, label, n){
+    return n ? '<button type="button" class="pa-chip" data-goto-menu="' + escAttr(key) + '">'
+             + escHtml(label) + ' <b>' + n + '</b></button>' : '';
+  };
+  return '<div class="pending-alert">'
+    + '<div class="pa-main"><span class="pa-badge">' + total + '</span>'
+    +   '<span class="pa-text">내가 결재해야 할 문서가 ' + total + '건 있습니다.</span></div>'
+    + '<div class="pa-chips">'
+    +   chip('pending_req',  '품의',       b.req.length)
+    +   chip('pending_prc',  '구매',       b.prc.length)
+    +   chip('pending_insp', '검수보고서', b.insp.length)
+    + '</div></div>';
+}
+
 function sortByNewest(rows, key){
   key = key || 'submitAt';
   return (rows || []).slice().sort(function(a, b){
@@ -1948,7 +2348,9 @@ function kpiFilterSection(menuKey, segments, opts){
     var scopeCls = 'scope-tag' + (opts.scopeClass ? ' ' + opts.scopeClass : '');
     panel += '<div class="panel-head"><div><span class="panel-title">' + escHtml(opts.panelTitle) + '</span>'
       + '<span class="' + scopeCls + '">' + cur.rows.length + '건' + (opts.scopeSuffix || '') + '</span>'
-      + '</div></div>';
+      // [설정 유지] 컬럼 필터가 걸려 있음을 알리고 한 번에 푸는 칩. 내용은 applyColumnFilters가 채운다.
+      //   ⚠ 표(<table>) 바깥이라 attachColumnFilters 순회와 접점이 없다.
+      + '</div><span class="cf-chip-slot" id="cfchip-' + escAttr(menuKey) + '"></span></div>';
   }
   panel += renderTable(cur.rows);
   // 페이지네이션 컨트롤 컨테이너 (행 표시는 applyColumnFilters에서 페이지 단위로 처리)
