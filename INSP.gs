@@ -1658,33 +1658,6 @@ function markInspPdfDone(token, pdfFileId) {
 }
 
 /**
- * [임시] 2026-08-28 렌더분 3건 PDF 일괄 마감 — 편집기 Run 전용(무인자).
- *  GAS 편집기는 인자 있는 함수를 직접 실행할 수 없어, 이번 회차 값을 박아둔 래퍼.
- *  실행 후 대기목록(listInspAwaitingPdf)에서 3건이 모두 빠지면 이 함수는 삭제해도 됨.
- *  한 건이 실패해도 나머지는 계속 진행하고, 마지막에 건별 결과를 로그로 남긴다.
- */
-function _tmp_markDone_20260828_batch1() {
-  var items = [
-    // [문서번호, token, 업로드된 PDF 파일 id]
-    ['LC-2026-003-01',  'c029277f-24cf-4f8b-af7d-a1d2e64aada5', '1W_Vz65iIkkVdZjxt9iCQBgRtLW1fIMTG'],
-    ['LC-2026-004-01',  'cdbf5491-b2fd-4bc7-a2e9-6fd3677332c6', '15Pi3wWvdglxw1avs8dW0qN2gFJoqMy_i'],
-    ['TH-AP-26-050-01', 'd03d6b7f-93bb-41bc-a001-252edcf4126a', '1NKCl_quwps8bQQsDxxOOwEKQ0mgK0yzm']
-  ];
-  var out = [];
-  items.forEach(function (it) {
-    try {
-      var r = markInspPdfDone(it[1], it[2]);
-      out.push(it[0] + ': ' + (r && r.ok ? 'OK' : 'FAIL') + ' / ' + (r && r.message));
-    } catch (e) {
-      out.push(it[0] + ': ERROR / ' + e.toString());
-    }
-  });
-  console.log(out.join('\n'));
-  console.log('남은 대기: ' + JSON.stringify(listInspAwaitingPdf().map(function (x) { return x.docNo; })));
-  return out;
-}
-
-/**
  * 실패/누락 회차의 PDF 핸드오프 재생성 (매니페스트 재작성 + 메일).
  *  - 큐 실패로 PDF가 안 만들어진 기존 회차 복구용. 사진이 STAGING에 보존돼 있어야 함.
  *  - 사용법: rerunInspHandoff("검수보고서_token")
