@@ -1947,10 +1947,3 @@ function testInspStep1() {
   console.log(results.join('\n'));
   return allPass;
 }
-
-// ===== 임시 마감 래퍼 (2026-09-02 렌더분 1건) — 마감 실행 후 제거 =====
-function _tmp_markDone_TH_AP_26_052_01() {
-  var r = markInspPdfDone('209e80a3-a182-4fb6-970b-5f417f76c886', '19nXJCZ8Fy-EuGGOf-z8uXIhvYwtGerGT');
-  Logger.log(JSON.stringify(r));
-  return r;
-}
