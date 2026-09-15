@@ -1947,3 +1947,20 @@ function testInspStep1() {
   console.log(results.join('\n'));
   return allPass;
 }
+
+// ===== 임시 마감 래퍼 (2026-09-15 렌더분 4건) — 마감 실행 후 제거 =====
+function _tmp_markDone_20260915_batch4() {
+  var jobs = [
+    ['TH-AP-26-053-01', '09766968-e5c5-482e-af14-d6a1ca8d596a', '1drPEOJ5FPZ6PWnZ-W9CH2iEs6cgfOy18'],
+    ['LC-2026-010-01',  'adfd4257-8f26-4a8b-9d7c-4d3af98e49b3', '1FGSYTzsSEAG7QGGXk7_xOxpcsAvJhY_D'],
+    ['TH-AP-26-054-01', '4a93245a-33a1-4684-b939-6c5a13545c3c', '1sWOTbKazdu1XDzF54MLRV63fPaq-wGpz'],
+    ['TP-AP-26-019-01', '4423e15a-fafb-44ce-aab8-fcf9b4299c6d', '1DVWk_Mji1GHKIPReb5-kF08hIF7BNXv-'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markInspPdfDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
