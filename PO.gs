@@ -2,18 +2,22 @@
 // PO.gs — 주문서(PURCHASE ORDER) 생성 핸드오프
 //  - PRC 최종승인(최종승인(PRC)) → 큐 job(pdf_and_consolidate) 말미에서
 //    _preparePoHandoff() 호출 (Code.gs _processPdfAndConsolidateJob).
-//  - GAS는 xlsx를 만들지 않는다(openpyxl이 템플릿 이미지·괘선을 소실시킴).
-//    대신 FINAL/{PO} 폴더에 po_manifest.json을 기록하고 David에게 작업요청 메일.
-//  - 로컬 파이썬(po-renderer/render_po.py)이 매니페스트로 QF-741-2 주문서 xlsx를
-//    생성 → 주문서 폴더에 {품의제목}_{업체명}.xlsx 로 업로드.
+//  - GAS는 xlsx를 만들지 않는다. FINAL/{PO} 폴더에 po_manifest.json을 기록하고
+//    David에게 작업요청 메일만 보낸다.
+//  - 로컬 파이썬(po-renderer/render_po.py)이 매니페스트를 읽어 2026 기준 양식
+//    (내자=태성테크 / 외자=Coherent, 표준거래조건 2페이지 포함)으로 주문서를 만들고
+//    주문서 폴더에 {PO번호}_{업체명}.xlsx + .pdf 로 올린다.
 //  - 설계는 INSP PDF 핸드오프(INSP.gs)와 대칭. (검수보고서 파이썬 렌더러와 같은 방식)
+//
+//  ※ 주문서 표기 관례(Shipper 상호·REMARK 라벨·Payment Terms 문구·Destination)는
+//     렌더러의 vendor_rules.json 이 담당한다. GAS는 품의서 원본 값만 넘긴다.
 // ================================================================
 
 var PO_CONFIG = {
   // 공유 드라이브 SCM_Innovation/02. Purchase/주문서 폴더 ID (2026-07-24 확인)
   ORDER_FOLDER_ID: '1Ot_KcJlCS8oZpu_IKCwAqz2CSPUTd81c',
   MANIFEST_NAME:   'po_manifest.json',
-  SCHEMA:          'po-manifest-v1',
+  SCHEMA:          'po-manifest-v2',
 };
 
 /**
@@ -93,7 +97,8 @@ function _buildPoManifest(prc, reqRow) {
   }
 
   var reference = reqRow ? String(reqRow[COL.DOC_NO] || '') : '';
-  // Payment Terms: 지급정보(자유텍스트) 우선, 없으면 구매방법
+  // Payment Terms 원문: 구매조건(자유텍스트) 우선, 없으면 구매방법.
+  //   주문서 표기로의 변환(예: 'NET 30' → 'T/T(NET 30 day)')은 렌더러가 맡는다.
   var paymentTerms = payload.paymentInfo || payload.purchaseMethod || '';
   var currency = (payload.items[0] && payload.items[0].currency) || 'KRW';
 
@@ -117,9 +122,11 @@ function _buildPoManifest(prc, reqRow) {
     vendorEmail:   payload.vendorEmail,
     vendorContact: payload.vendorContact,
     vendorPhone:   payload.vendorPhone,
-    paymentTerms:  paymentTerms,           // Payment Terms
-    destination:   payload.deliveryAddr || '',  // Destination (빈값이면 렌더러가 기본값 대체)
-    deliveryDate:  payload.deliveryDate,
+    paymentTerms:  paymentTerms,           // Payment Terms 원문(구매조건/구매방법)
+    // 주문서 Destination 은 관례상 내자 'KOREA' / 외자 'INLC Technology, Daejeon, Korea' 이다.
+    // 품의서 납품장소(도로명 주소)를 그대로 쓰지 않는다 — 참고용으로만 넘긴다.
+    deliveryAddr:  payload.deliveryAddr || '',
+    deliveryDate:  payload.deliveryDate,   // DEL'Y DATE (H열)
     issueDate:     payload.issueDate,
     items:         items,                  // [{name,spec,qty,price,currency}]
     totalAmt:      payload.totalAmt,
@@ -145,16 +152,22 @@ function _sendPoHandoffEmail(m, stagingFolderId) {
     + '<tr><td style="color:#888;padding:4px 12px 4px 0;">업체</td><td>' + escapeHtml(m.vendorName) + '</td></tr>'
     + '<tr><td style="color:#888;padding:4px 12px 4px 0;">품목</td><td>' + (m.items ? m.items.length : 0) + '건</td></tr>'
     + '<tr><td style="color:#888;padding:4px 12px 4px 0;">prcToken</td><td>' + escapeHtml(m.prcToken) + '</td></tr>'
+    + '<tr><td style="color:#888;padding:4px 12px 4px 0;">통화</td><td>' + escapeHtml(m.currency || '') + ' ('
+    + (String(m.currency || 'KRW') === 'KRW' ? '내자 — 국문 거래조건' : '외자 — 영문 거래조건') + ')</td></tr>'
     + '</table>'
     + '<p style="margin-top:12px;">'
     + '· 입력 폴더(po_manifest.json): <a href="' + stagingUrl + '">' + stagingUrl + '</a><br>'
     + '· 출력 폴더(주문서): <a href="' + orderUrl + '">' + orderUrl + '</a></p>'
-    + '<p style="font-size:13px;">실행: <code>po-renderer/.venv/Scripts/python.exe render_po.py --folder ' + stagingUrl + '</code></p>'
-    + '<p style="font-size:12px;color:#888;">완료 후 GAS에서 <b>markPoDone("' + escapeHtml(m.prcToken) + '", "생성된파일ID")</b> 실행해 마감(감사로그) 하세요.</p>'
+    + '<p style="font-size:13px;">실행: <code>po-renderer\\.venv\\Scripts\\python.exe render_po.py --folder ' + stagingUrl + '</code><br>'
+    + '→ <b>' + escapeHtml(m.poNo) + '_' + escapeHtml(m.vendorName) + '.xlsx</b> + 같은 이름 PDF 생성·업로드</p>'
+    + '<p style="font-size:12px;color:#888;">생성 후 PDF를 열어 1p 주문서 · 2p 표준거래조건과 글자 잘림을 눈으로 확인하세요.<br>'
+    + '완료 후 GAS에서 <b>markPoDone("' + escapeHtml(m.prcToken) + '", "생성된파일ID")</b> 실행해 마감(감사로그) 하세요.</p>'
     + '</div>';
   var plain = '주문서(PO) 생성 요청\nP/O-No: ' + m.poNo + '\n품의제목: ' + m.subject + '\n업체: ' + m.vendorName
+    + '\n통화: ' + (m.currency || '')
     + '\n입력 폴더: ' + stagingUrl + '\n출력 폴더(주문서): ' + orderUrl
     + '\n실행: render_po.py --folder ' + stagingUrl
+    + '\n산출물: ' + m.poNo + '_' + m.vendorName + '.xlsx (+ PDF)'
     + '\n완료 후: markPoDone("' + m.prcToken + '", "파일ID")';
   sendEmailWithRetry(toList.join(','), subj, plain, html);
 }

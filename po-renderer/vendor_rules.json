@@ -1,0 +1,60 @@
+{
+  "_comment": [
+    "업체별 주문서 표기 관례. 키는 정규화된 업체명(㈜/(주)/공백/대소문자 제거).",
+    "키는 부분일치도 허용한다 — 품의서 업체명 'EverproX Technologies(舊 BDX)'는 키 'everprox'에 붙는다.",
+    "shipper  = G12 Shipper 표기(기존 주문서 관례 유지)",
+    "file     = 파일명에 쓸 짧은 상호(없으면 shipper에서 ㈜/(주)를 뗀 값)",
+    "remark   = I14 REMARK 열 라벨. 품의서에 값이 없으면 라벨만 넣고 값은 비운다(임의 생성 금지).",
+    "payment  = 품의서 구매조건/구매방법이 비었을 때만 쓰는 기본 결제조건",
+    "base     = 통화와 무관하게 강제할 기준 양식('krw' | 'fx'). 없으면 통화로 판단.",
+    "신규 업체는 여기에 추가만 하면 된다. 미등록 업체는 품의서 업체명 그대로 쓰고 REMARK 라벨은 생략한다."
+  ],
+  "vendors": {
+    "아이비전":        { "shipper": "㈜아이비전" },
+    "신광정보통신":     { "shipper": "㈜신광정보통신", "remark": "QUO NO." },
+    "한화팩키지":      { "shipper": "㈜한화팩키지" },
+    "한샘디지텍":      { "shipper": "㈜한샘디지텍", "remark": "QUO DATE" },
+    "태성테크":        { "shipper": "(주)태성테크", "remark": "견적 내역" },
+    "빅터스":          { "shipper": "(주)빅터스", "remark": "일련번호", "payment": "익월말 현금입금" },
+    "환화":           { "shipper": "(주)환화", "remark": "QUO DATE" },
+    "신영트레이딩":     { "shipper": "(주)신영트레이딩", "remark": "QUO NO." },
+    "오엠에이이엔지":   { "shipper": "오엠에이이엔지", "remark": "QUO NO." },
+    "한빛테크":        { "shipper": "한빛테크", "remark": "견적 내역" },
+    "이오에스":        { "shipper": "이오에스(주)", "remark": "견적 내역" },
+    "디에스티반도체":   { "shipper": "디에스티반도체", "remark": "견적 내역" },
+    "이에이텍":        { "shipper": "이에이텍", "remark": "QUO NO.", "payment": "익월말 현금 결제 조건" },
+    "아트테크":        { "shipper": "아트테크" },
+    "라인테크":        { "shipper": "라인테크" },
+    "유사이드":        { "shipper": "유사이드" },
+    "에이피피":        { "shipper": "에이피피" },
+    "아이브리지닷컴":   { "shipper": "아이브리지닷컴" },
+    "샘플온":          { "shipper": "샘플온", "payment": "익월말 현금 결제 조건" },
+    "파이버피아":      { "shipper": "㈜파이버피아", "remark": "QUO NO." },
+    "아마다웰드테크코리아": { "shipper": "아마다웰드테크코리아", "remark": "QUO NO." },
+    "한국생산기술연구원": { "shipper": "한국생산기술연구원" },
+    "viadcad":        { "shipper": "VIADCAD", "remark": "견적일자" },
+    "coherent":       { "shipper": "COHERENT", "file": "Coherent", "base": "fx" },
+    "hitronics":      { "shipper": "HI-TRONICS", "file": "Hitronics", "base": "fx" },
+    "everprox":       { "shipper": "EverproX", "file": "EverproX", "base": "fx" },
+    "optowide":       { "shipper": "Optowide", "file": "Optowide", "base": "fx" },
+    "kmco":           { "shipper": "Kawashima Manufacturing Co.,Ltd.(KMCO)", "file": "KMCO",
+                        "remark": "Quotation No", "base": "fx" }
+  },
+  "payment_alias": {
+    "_comment": "품의서 구매조건 원문 → 주문서 Payment Terms 표기. 외자(fx)는 fx 맵을 먼저 본다.",
+    "fx": {
+      "NET 30": "T/T(NET 30 day)",
+      "NET 60": "T/T(NET 60 day)",
+      "현금": "T/T in advance"
+    },
+    "krw": {
+      "익월말": "익월말 현금 결제 조건",
+      "익월말 현금": "익월말 현금 결제 조건",
+      "현금": "익월말 현금 결제 조건"
+    }
+  },
+  "defaults": {
+    "krw": { "payment": "익월말 현금 결제 조건", "destination": "KOREA" },
+    "fx":  { "payment": "T/T(NET 30 day)",       "destination": "INLC Technology, Daejeon, Korea" }
+  }
+}

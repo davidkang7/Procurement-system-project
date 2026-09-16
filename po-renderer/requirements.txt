@@ -1,4 +1,6 @@
 google-api-python-client>=2.100
 google-auth-oauthlib>=1.1
 google-auth-httplib2>=0.2
-# openpyxl는 런타임에 필요 없음(zip/XML 직접 편집). 템플릿 점검/디버깅용으로만 선택 설치.
+openpyxl>=3.1
+# ⚠ Pillow 필수: 없으면 openpyxl이 load→save 때 InLC 로고·서명 이미지를 조용히 버린다.
+pillow>=10.0

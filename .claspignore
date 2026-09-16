@@ -11,3 +11,4 @@
 
 # 파이썬 렌더러는 GAS와 무관 — 절대 푸시 금지 (재확인용)
 insp-renderer/**
+po-renderer/**
