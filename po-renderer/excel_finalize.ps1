@@ -44,8 +44,11 @@ try {
 
     # Page layout probe: a vertical break means the columns no longer fit the page width
     # (the form would be sliced in half), which no print scale may trade away.
+    # PageSetup.Pages.Count is the authoritative page count; HPageBreaks alone under-counts
+    # because Excel only materializes automatic breaks after it paginates.
     Write-Output ("HPAGEBREAKS=" + $ws.HPageBreaks.Count)
     Write-Output ("VPAGEBREAKS=" + $ws.VPageBreaks.Count)
+    try { Write-Output ("PAGES=" + $ws.PageSetup.Pages.Count) } catch { Write-Output "PAGES=" }
     $total = [double]$ws.Range("C12").Value2
     Write-Output ("AMOUNT=" + $total)
 

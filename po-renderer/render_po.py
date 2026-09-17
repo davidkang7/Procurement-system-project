@@ -159,6 +159,14 @@ def pdf_page_count(pdf: Path) -> int:
 # ──────────────────────────────────────────────────────────────
 # 생성
 # ──────────────────────────────────────────────────────────────
+def probe_pages(info: dict) -> int:
+    """Excel이 보고한 페이지 수. Pages.Count가 없으면 페이지나눔 수로 추정한다."""
+    pages = (info.get("PAGES") or "").strip()
+    if pages.isdigit():
+        return int(pages)
+    return (int(info.get("HPAGEBREAKS") or 0) + 1) * (int(info.get("VPAGEBREAKS") or 0) + 1)
+
+
 def choose_print_mode(layout, xlsx: Path, kind: str, args):
     """Excel로 페이지 나눔만 재보고 인쇄 설정을 고른다. 반환: (mode, scale).
 
@@ -177,7 +185,7 @@ def choose_print_mode(layout, xlsx: Path, kind: str, args):
         po_form.save(layout, xlsx)
         info = finalize(xlsx, None)
         v = int(info.get("VPAGEBREAKS") or 0)
-        pages = (int(info.get("HPAGEBREAKS") or 0) + 1) * (v + 1)
+        pages = probe_pages(info)
         if v == 0:
             if best is None or pages < best[0]:
                 best = (pages, "scale", scale)
@@ -188,7 +196,7 @@ def choose_print_mode(layout, xlsx: Path, kind: str, args):
     po_form.set_print_mode(layout, "width")
     po_form.save(layout, xlsx)
     info = finalize(xlsx, None)
-    pages = (int(info.get("HPAGEBREAKS") or 0) + 1) * (int(info.get("VPAGEBREAKS") or 0) + 1)
+    pages = probe_pages(info)
     print(f"      · 가로 1페이지 맞춤 → {pages}페이지")
     if best is None or pages <= best[0]:
         return "width", 0
