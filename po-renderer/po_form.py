@@ -64,6 +64,10 @@ NUMBER_FORMATS = {
 }
 DATE_FORMAT = "yyyy-mm-dd"
 
+# 행 높이 = 글꼴 크기 × 이 비율. Excel 기본 줄간격(약 1.2)에 여백을 더한 값으로,
+# 18pt 제목이 19.5pt 행에 갇혀 위가 잘리던 문제를 막는다.
+ROW_HEIGHT_RATIO = 1.45
+
 # 인쇄 배율 후보 — 주문서는 2페이지(1p 폼 + 2p 거래조건)로 떨어져야 한다.
 # 기준 양식 원본은 fitToPage=True·배율 100이라 거래조건 마지막 줄이 3페이지로 밀린다.
 # 실제 발행분(2페이지짜리)은 모두 fitToPage=False + 배율 94~97 이었다 → 같은 방식으로 맞춘다.
@@ -303,6 +307,32 @@ def _shrink(ws: Worksheet, row: int, col: int):
         pass
 
 
+def fix_row_heights(layout: FormLayout):
+    """글꼴 크기에 비해 낮은 행의 높이를 키운다 — 글자 윗부분 잘림 방지.
+
+    기준 양식의 제목행(A3 'PURCHASE ORDER', 18pt 굵게)은 행 높이가 19.5pt뿐이라
+    Excel 화면에서 글자 위가 잘려 보인다(세로 정렬이 '아래쪽'이라 위를 깎는다).
+    PDF로 내보내면 멀쩡해서 자동 검사로는 안 잡히던 결함이다(2026-09-17 확인).
+    병합 셀은 Excel의 자동 맞춤이 동작하지 않으므로 필요한 높이를 계산해 직접 넣는다.
+    """
+    ws = layout.sheet
+    for row in range(1, ITEM_FIRST_ROW):          # 머리글 블록(1~13행)
+        max_pt = 0.0
+        for col in range(1, COL_REMARK + 1):
+            cell = ws.cell(row, col)
+            if cell.value in (None, "") and not isinstance(cell, MergedCell):
+                continue
+            size = getattr(cell.font, "size", None)
+            if size:
+                max_pt = max(max_pt, float(size))
+        if not max_pt:
+            continue
+        need = round(max_pt * ROW_HEIGHT_RATIO, 2)
+        cur = ws.row_dimensions[row].height
+        if cur is None or cur < need:
+            ws.row_dimensions[row].height = need     # height 설정 자체가 customHeight를 켠다
+
+
 def _clear_body(layout: FormLayout):
     """품목 구간만 비운다. 2페이지 거래조건 블록·푸터·서명은 절대 건드리지 않는다."""
     ws = layout.sheet
@@ -319,6 +349,7 @@ def fill(layout: FormLayout, order: PoOrder, rules: VendorRules):
     warnings = []
 
     _clear_body(layout)
+    fix_row_heights(layout)
 
     for ref, text in LETTERHEAD[kind].items():
         _set(ws, ref, text)
