@@ -54,8 +54,20 @@ var PO_TOTAL_COLS = 20;
 
 var PO_STATUS = {
   PENDING: '생성대기',
-  DONE:    '생성완료',
+  DONE:    '생성완료',   // 주문서를 실제로 만들어 주문서 폴더에 올린 건
+  SKIP:    '생성불요',   // 주문서 발행이 필요 없다고 판단한 건 (사유는 비고에)
 };
+// 상태 드롭다운 목록 (손으로 고칠 때 오타로 '생성대기'에 남는 사고 방지)
+var PO_STATUS_LIST = [PO_STATUS.PENDING, PO_STATUS.DONE, PO_STATUS.SKIP];
+
+/**
+ * 아직 주문서 작업이 남아 있는 상태인가 (미생성 목록에 띄울 대상).
+ *  '생성완료'·'생성불요'가 아니면 전부 열린 건으로 본다 — 오타·빈칸이 조용히 사라지지 않게.
+ */
+function _isPoOpen_(status) {
+  var s = String(status || '').trim();
+  return s !== PO_STATUS.DONE && s !== PO_STATUS.SKIP;
+}
 
 /**
  * 주문서 운영 함수(관리자 콘솔 전용) 권한 관문.
@@ -106,6 +118,23 @@ function _poSchemaSelfCheck_() {
 }
 
 /**
+ * 상태 열에 드롭다운(생성대기/생성완료/생성불요)을 건다.
+ *  손으로 고칠 때 오타가 나면 그 행이 '미생성'으로 조용히 남기 때문에 입력을 아예 제한한다.
+ *  시트 생성 시 1회 + backfillPoSheet 실행 시(이미 만들어진 시트 보정) 호출.
+ */
+function _setPoStatusValidation_(sheet) {
+  try {
+    var rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(PO_STATUS_LIST, true)
+      .setAllowInvalid(false)
+      .build();
+    sheet.getRange(2, PO_COL.STATUS + 1, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
+  } catch (e) {
+    Logger.log('[PO] 상태 드롭다운 설정 실패(무시): ' + e.toString());
+  }
+}
+
+/**
  * 주문서목록 시트 보장 — 없으면 생성, 헤더가 비었으면 헤더 작성.
  *  ensureAuditLogSheet / ensureInspSheet 와 같은 패턴 (데이터가 있으면 즉시 통과).
  * @returns {Sheet}
@@ -136,6 +165,8 @@ function ensurePoSheet_() {
   sheet.getRange(1, 1, 1, headers.length)
     .setFontWeight('bold')
     .setBackground('#fdf0d5');   // PO 테마(연한 주황) — 품의서목록·검수보고서목록과 시각적 구분
+
+  _setPoStatusValidation_(sheet);
 
   sheet.setColumnWidth(PO_COL.CREATED_AT + 1, 150);
   sheet.setColumnWidth(PO_COL.PO_NO + 1, 140);
@@ -182,8 +213,11 @@ function _upsertPoRow_(m) {
 
   var note = prev ? String(prev[PO_COL.NOTE] || '') : '';
   var status = PO_STATUS.PENDING;
-  if (prev && String(prev[PO_COL.STATUS] || '') === PO_STATUS.DONE) {
-    note = ('재핸드오프 ' + toDateTimeStr(now) + ' — 주문서 재생성 필요' + (note ? ' / ' + note : ''));
+  if (prev && !_isPoOpen_(prev[PO_COL.STATUS])) {
+    // 이미 닫힌 건(생성완료·생성불요)에 새 핸드오프가 왔다 = 재발행 요청.
+    // 판단을 덮어쓰지 않고 이력을 남긴 채 다시 대기로 올려 사람이 보게 한다.
+    note = ('재핸드오프 ' + toDateTimeStr(now) + ' — 이전 상태 ' + String(prev[PO_COL.STATUS] || '')
+            + ', 재검토 필요' + (note ? ' / ' + note : ''));
   }
 
   var row = new Array(PO_TOTAL_COLS);
@@ -434,6 +468,43 @@ function markPoDone(prcToken, xlsxFileId) {
 }
 
 /**
+ * 주문서 발행이 필요 없는 건 마감 ('생성불요').
+ *  - 과거 건 정리·발주 취소·다른 경로로 처리된 건 등. 사유를 반드시 남긴다.
+ *  - 시트에서 상태를 직접 '생성불요'로 바꿔도 되지만, 이 함수를 쓰면 사유와 감사로그가 함께 남는다.
+ * @param {string} prcToken PRC token (주문서목록 C열)
+ * @param {string} reason 사유 (비고에 기록 — 필수)
+ * @returns {Object} { ok, message }
+ */
+function markPoNotRequired(prcToken, reason) {
+  _assertPoOperator_('markPoNotRequired');
+  if (!prcToken || !String(reason || '').trim()) {
+    return { ok: false, message: '사용법: markPoNotRequired("prcToken", "사유")' };
+  }
+  var sheet = ensurePoSheet_();
+  var rowNum = _findPoRowNum_(sheet, prcToken);
+  if (rowNum < 0) return { ok: false, message: '주문서목록에 행 없음: ' + prcToken };
+
+  var row = sheet.getRange(rowNum, 1, 1, PO_TOTAL_COLS).getValues()[0];
+  var poNo = String(row[PO_COL.PO_NO] || '');
+  var prevNote = String(row[PO_COL.NOTE] || '');
+  var note = '생성불요 ' + toDateTimeStr(new Date()) + ' — ' + String(reason).trim()
+           + (prevNote ? ' / ' + prevNote : '');
+
+  batchUpdate(sheet, rowNum, [
+    [PO_COL.STATUS + 1,       PO_STATUS.SKIP],
+    [PO_COL.GENERATED_AT + 1, new Date()],
+    [PO_COL.GENERATED_BY + 1, getActiveUserEmail() || ''],
+    [PO_COL.NOTE + 1,         note],
+  ]);
+  try {
+    writeAuditLog({ eventType: AUDIT_EVENT.PO_SKIPPED, docNo: poNo, docToken: prcToken,
+      docType: 'PO', reason: '주문서 생성불요: ' + String(reason).trim() });
+  } catch (_) {}
+  Logger.log('[PO] 생성불요 처리: ' + poNo);
+  return { ok: true, message: '생성불요 처리: ' + poNo };
+}
+
+/**
  * 주문서 미생성 목록 (관리자 콘솔).
  *  - 주문서목록에서 상태가 '생성완료'가 아닌 행을 오래된 순으로 보여 준다.
  *  - 대장에 아직 없는 과거 건은 backfillPoSheet()로 먼저 채운다.
@@ -448,7 +519,7 @@ function listPoPending() {
   var rows = sheet.getRange(2, 1, lastRow - 1, PO_TOTAL_COLS).getValues();
   var out = [];
   for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i][PO_COL.STATUS] || '') === PO_STATUS.DONE) continue;
+    if (!_isPoOpen_(rows[i][PO_COL.STATUS])) continue;   // 생성완료·생성불요는 제외
     out.push({
       poNo:       String(rows[i][PO_COL.PO_NO] || ''),
       vendorName: String(rows[i][PO_COL.VENDOR_NAME] || ''),
@@ -485,6 +556,7 @@ function backfillPoSheet(opts) {
   var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
   var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
   var poSheet = ensurePoSheet_();
+  _setPoStatusValidation_(poSheet);   // 먼저 만들어진 시트에도 드롭다운을 보정해 둔다
 
   // 주문서 폴더 1회 스캔 → { PO번호: {id, name} }
   var fileMap = {};

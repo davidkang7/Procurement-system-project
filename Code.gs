@@ -576,6 +576,7 @@ var AUDIT_EVENT = {
   // 주문서(PO) 라이프사이클 — PO.gs
   PO_HANDOFF:      'PO_HANDOFF',      // PRC 결재완료 → 주문서 생성 요청(매니페스트+메일)
   PO_GENERATED:    'PO_GENERATED',    // 주문서 xlsx/PDF 생성·업로드 완료 마감
+  PO_SKIPPED:      'PO_SKIPPED',      // 주문서 발행 불요 처리(사유 기록)
 
   // 추후 확장 자리:
   // DOC_SUBMIT, PRC_CLAIM, PRC_RELEASE, PRC_SUBMIT,

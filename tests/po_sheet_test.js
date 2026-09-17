@@ -32,6 +32,7 @@ class FakeRange {
   getColumn() { return this.col; }
   setFontWeight() { return this; }
   setBackground() { return this; }
+  setDataValidation(rule) { this.sheet.validation = { range: [this.row, this.col, this.nRows], rule }; return this; }
   createTextFinder(text) {
     const self = this;
     const opts = { entire: false, matchCase: false };
@@ -65,6 +66,7 @@ class FakeSheet {
   getName() { return this.name; }
   getLastRow() { return this.rows.length; }
   getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0); }
+  getMaxRows() { return Math.max(this.rows.length, 1000); }
   appendRow(vals) { this.rows.push(vals.slice()); return this; }
   getRange(row, col, nRows = 1, nCols = 1) { return new FakeRange(this, row, col, nRows, nCols); }
   setFrozenRows() { return this; }
@@ -119,7 +121,19 @@ const sandbox = {
     getEffectiveUser: () => ({ getEmail: () => 'davidkang@inlct.com' }),   // 배포 계정
     getScriptTimeZone: () => 'Asia/Seoul',
   },
-  SpreadsheetApp: { openById: () => ss, flush: () => {} },
+  SpreadsheetApp: {
+    openById: () => ss,
+    flush: () => {},
+    newDataValidation: () => {
+      const r = { values: null, allowInvalid: true };
+      const b = {
+        requireValueInList(list) { r.values = list; return b; },
+        setAllowInvalid(v) { r.allowInvalid = v; return b; },
+        build: () => r,
+      };
+      return b;
+    },
+  },
   DriveApp: { getFolderById: id => makeFolder(id) },
   Utilities: {
     getUuid: () => 'uuid-' + Math.random().toString(16).slice(2),
@@ -259,10 +273,47 @@ call('_preparePoHandoff_', 'tok-902');
 const pending = call('listPoPending');
 check('미생성 2건(901 재발행 + 902)', () => pending.length === 2 || pending.map(p => p.poNo).join(','));
 
+console.log('\n[6-1] 생성불요 처리');
+check('상태 드롭다운 3종 설정', () => {
+  const v = poSheet().validation;
+  return (v && v.rule.values.join(',') === '생성대기,생성완료,생성불요' && v.rule.allowInvalid === false) || JSON.stringify(v && v.rule);
+});
+check('사유 없으면 거부', () => call('markPoNotRequired', 'tok-902', '  ').ok === false || '통과해 버림');
+const r6 = call('markPoNotRequired', 'tok-902', '샘플 입고분 — 발주서 발행 불요');
+check('markPoNotRequired ok', () => r6.ok === true || JSON.stringify(r6));
+check('상태 = 생성불요', () => {
+  const r = poRows().find(x => x[PO_COL.PO_NO] === 'TO-PO-26-902');
+  return r[PO_COL.STATUS] === '생성불요' || r[PO_COL.STATUS];
+});
+check('비고에 사유·처리자 기록', () => {
+  const r = poRows().find(x => x[PO_COL.PO_NO] === 'TO-PO-26-902');
+  return (String(r[PO_COL.NOTE]).indexOf('발행 불요') > 0 && r[PO_COL.GENERATED_BY] === 'davidkang@inlct.com')
+    || JSON.stringify([r[PO_COL.NOTE], r[PO_COL.GENERATED_BY]]);
+});
+check('미생성 목록에서 빠짐', () => {
+  const p = call('listPoPending');
+  return (p.length === 1 && p[0].poNo === 'TO-PO-26-901') || p.map(x => x.poNo).join(',');
+});
+check('오타 상태는 미생성으로 남음(조용히 사라지지 않음)', () => {
+  const s = poSheet();
+  const rowNum = call('_findPoRowNum_', s, 'tok-902');
+  s.getRange(rowNum, PO_COL.STATUS + 1).setValue('생성 완료');   // 공백 오타
+  const p = call('listPoPending');
+  const back = p.some(x => x.poNo === 'TO-PO-26-902');
+  s.getRange(rowNum, PO_COL.STATUS + 1).setValue('생성불요');
+  return back || '오타인데도 완료로 처리됨';
+});
+check('생성불요 건에 재핸드오프 시 다시 대기 + 이력', () => {
+  call('_preparePoHandoff_', 'tok-902');
+  const r = poRows().find(x => x[PO_COL.PO_NO] === 'TO-PO-26-902');
+  return (r[PO_COL.STATUS] === '생성대기' && String(r[PO_COL.NOTE]).indexOf('이전 상태 생성불요') > 0)
+    || JSON.stringify([r[PO_COL.STATUS], r[PO_COL.NOTE]]);
+});
+
 console.log('\n[7] 권한 관문 (google.script.run 노출 대비)');
 activeUser = 'someone@inlct.com';
 const before = JSON.stringify(poSheet().rows);
-['markPoDone', 'listPoPending', 'backfillPoSheet', 'rerunPoHandoff'].forEach(fn => {
+['markPoDone', 'listPoPending', 'backfillPoSheet', 'rerunPoHandoff', 'markPoNotRequired'].forEach(fn => {
   check(fn + ' 비관리자 차단', () => {
     try { call(fn, 'tok-901', 'X'); return '차단 실패(호출됨)'; }
     catch (e) { return e.message.indexOf('관리자 권한') >= 0 || e.message; }
