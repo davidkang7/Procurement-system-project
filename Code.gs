@@ -74,6 +74,7 @@ var CONFIG = {
   AUDIT_SHEET_NAME: '시스템로그',
   INSP_SHEET_NAME:  '검수보고서목록',   // [INSP Step 1] 검수보고서 시트 탭명
   VENDOR_SHEET_NAME: '업체목록',        // 공급업체 마스터 (REQ 폼 조회 자동입력용)
+  PO_SHEET_NAME:    '주문서목록',       // [PO] 주문서 생성 대장 (PO.gs) — PRC 결재완료 이후 추적
 };
 
 // ================================================================
@@ -571,6 +572,10 @@ var AUDIT_EVENT = {
   //   결재/폐기/재상신 요청이 권한 검증에서 거부된 모든 경우.
   //   지정 결재자가 아닌 사용자의 직접 호출을 사후에 식별하기 위한 흔적.
   DECISION_DENIED: 'DECISION_DENIED',
+
+  // 주문서(PO) 라이프사이클 — PO.gs
+  PO_HANDOFF:      'PO_HANDOFF',      // PRC 결재완료 → 주문서 생성 요청(매니페스트+메일)
+  PO_GENERATED:    'PO_GENERATED',    // 주문서 xlsx/PDF 생성·업로드 완료 마감
 
   // 추후 확장 자리:
   // DOC_SUBMIT, PRC_CLAIM, PRC_RELEASE, PRC_SUBMIT,
@@ -5791,7 +5796,7 @@ function _processPdfAndConsolidateJob(job) {
   //    FINAL/{PO} 폴더에 po_manifest.json 기록 + David 메일. 비치명적(실패해도 job 성공).
   //    ※ 통합 이동 뒤라 PRC.DRIVE_ID가 FINAL 폴더 id로 갱신돼 있어 정확하다.
   try {
-    var po = _preparePoHandoff(job.token);
+    var po = _preparePoHandoff_(job.token);
     if (po && !po.ok) {
       notifyAdminError('[PO] 핸드오프 미완료: ' + job.docNo + ' / ' + po.message);
     }
