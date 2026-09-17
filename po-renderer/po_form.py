@@ -211,15 +211,18 @@ class PoOrder:
 def split_unit_spec(second_field: str):
     """품목내역 둘째 필드 → (단위, 규격).
 
-    실무상 이 자리에는 '1 ea', 'ea', '개'처럼 단위가 들어오지만 'M8x20' 같은 실제 규격이
-    들어오는 옛 데이터도 있다. 단위로 읽히면 E열(단위)에, 아니면 규격으로 보고
-    품목 아래 행에 적는다(값을 버리지 않는다)."""
+    실무상 이 자리에는 '1 ea', 'ea', '개'처럼 단위가 들어오지만 'M8x20', '1.8M' 같은
+    실제 규격이 들어오는 경우도 있다. 단위로 읽히면 E열(단위)에, 아니면 규격으로 보고
+    품목 아래 행에 적는다(값을 버리지 않는다).
+
+    ⚠ 수량이 붙은 표기는 '1'일 때만 단위로 본다. '1.8M'은 길이 규격이지 단위가 아니다
+      (2026-09-17 TO-PO-26-278: '그라운드 코드 1.8M 3개'가 '3 M'으로 찍힐 뻔했다)."""
     s = str(second_field or "").strip()
     if not s or re.fullmatch(r"\d+(?:\.\d+)?", s):   # 빈칸 또는 숫자만("1") → 단위 기본값
         return DEFAULT_UNIT, ""
-    m = re.fullmatch(r"(?:\d+(?:\.\d+)?\s*)?([A-Za-z가-힣]{1,4})", s)
-    if m and m.group(1).lower() in UNIT_WORDS:
-        return m.group(1), ""
+    m = re.fullmatch(r"(?:(\d+(?:\.\d+)?)\s*)?([A-Za-z가-힣]{1,4})", s)
+    if m and m.group(2).lower() in UNIT_WORDS and (m.group(1) is None or float(m.group(1)) == 1):
+        return m.group(2), ""
     return DEFAULT_UNIT, s
 
 
