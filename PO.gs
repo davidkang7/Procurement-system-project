@@ -651,3 +651,32 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-09-21 생성분 마감 — TO-PO-26-282 / 284 / 285.
+ *  주문서 폴더 업로드 완료:
+ *    TO-PO-26-282_환화.xlsx + .pdf
+ *    TO-PO-26-284_신광정보통신.xlsx + .pdf
+ *    TO-PO-26-285_디에스티반도체.xlsx + .pdf
+ *  (TO-PO-26-283 대전산업가스는 이번 생성 대상이 아니라 '생성대기'로 남겨 둔다.)
+ */
+function _tmp_markPoDone_20260921() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일 ID]
+    ['TO-PO-26-282', '51dd2796-3e8d-4c9c-bf1d-03c89385ffcb', '1ZkBQOcXRQBv_8GIL5sJhaOKAbQuS7CnP'],
+    ['TO-PO-26-284', '1154b6f8-657e-4573-9660-3bc743bdef1e', '1OvMhryQJOF64YlWxuGTNHJI2BENpQW_o'],
+    ['TO-PO-26-285', '6345079b-893d-43d5-91c8-32cda0537022', '1ULoQkdLvFj56IxSFODXtptBtijqGr2aj'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
