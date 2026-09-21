@@ -57,6 +57,7 @@ var CONFIG = {
     'mhpark@inlct.com',  // 박민하 경영총괄팀 대리
     'kskim@inlct.com',   // 김광식 경영총괄팀 차장
     'david@inlct.com',   // 염선민 개발팀 상무 (유일 크로스팀 결재자)
+    'logistics@inlct.com',  // 물류 담당 계정 (2026-09 추가)
   ],
 
   // ── 알림 수신처 (권한과 무관 — 순수 메일 수신 대상) ──
