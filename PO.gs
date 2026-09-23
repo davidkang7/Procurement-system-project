@@ -651,3 +651,35 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-09-23 생성분 마감 — TO-PO-26-286 / 287 / 288 / 289 / 290.
+ *  주문서 폴더 업로드 완료:
+ *    TO-PO-26-286_에이스텍.xlsx + .pdf
+ *    TO-PO-26-287_이에이텍.xlsx + .pdf
+ *    TO-PO-26-288_에스엠테크.xlsx + .pdf
+ *    TO-PO-26-289_쿠팡.xlsx + .pdf
+ *    TO-PO-26-290_Hitronics.xlsx + .pdf
+ */
+function _tmp_markPoDone_20260923() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일 ID]
+    ['TO-PO-26-286', '679db7ac-13b4-4b4d-b09f-193297f8bc74', '1v1a7OQZ0TXPN3lZOevL52QVKsgssBk7P'],
+    ['TO-PO-26-287', 'b2623048-fe42-4a44-be4f-5d5b67da9f93', '1zKHiyH8zBoKQpi1Tb_NJuFqV3ls2tHwb'],
+    ['TO-PO-26-288', '59d6bb29-6b69-4271-9a67-f07724ab0954', '1HTkt-7IQrECJbLAhtI4sbxHcfiSpZPuu'],
+    ['TO-PO-26-289', '36940a75-f8ff-4f56-a721-623f1048aa9e', '13rqz_UktRvtQ6qVtCvE9RBmHx9FUBngT'],
+    ['TO-PO-26-290', '4ad096e5-5aff-4c00-8c04-6cd575d3be14', '1VeCYmsPa_du6uO6qjbE45S5X0wOFoaVY'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
