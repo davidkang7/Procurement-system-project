@@ -1947,35 +1947,3 @@ function testInspStep1() {
   console.log(results.join('\n'));
   return allPass;
 }
-
-
-// ================================================================
-// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
-//  실행 후 제거하고 다시 push 한다.
-// ================================================================
-
-/**
- * 2026-09-23 최종승인분 3건 PDF 마감 — TO-PO-26-253 / 258 / 259.
- *  로컬 렌더러로 PDF 생성·PO 폴더 업로드 완료분:
- *    INSP_TG-AP-26-023-01_20260923_2108.pdf  (TO-PO-26-253)
- *    INSP_TG-AP-26-025-01_20260923_2108.pdf  (TO-PO-26-258)
- *    INSP_TG-AP-26-026-01_20260923_2109.pdf  (TO-PO-26-259)
- *  세 건 모두 isFinal='Y' 소급 표기 후 재렌더한 것이라 회차란에 ★최종 검수가 찍혀 있다.
- *  → moveStatus를 FINAL로 마감한다.
- */
-function _tmp_markInspPdfDone_20260923() {
-  var jobs = [
-    // [PO번호, INSP token, 업로드된 PDF 파일 ID]
-    ['TO-PO-26-253', '04669301-3036-46f2-b25f-cd574ab9ab10', '1UTzJoUozoadY3HuXrhCYjdeTsZwIuPeU'],
-    ['TO-PO-26-258', '92539522-8f06-4034-b4a3-d88954032d44', '113pYyDKY_Uo_OhcZgl0LI4Xhmw7GMN-I'],
-    ['TO-PO-26-259', '6ab7eae4-a3f9-4759-8344-3d7b79f5d8a9', '1UfImS2LpJLB5u0ymGtNkkbeydHDuJtaD'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markInspPdfDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  var msg = out.join('\n');
-  Logger.log(msg);
-  console.log(msg);
-  return out;
-}
