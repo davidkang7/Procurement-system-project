@@ -1947,3 +1947,82 @@ function testInspStep1() {
   console.log(results.join('\n'));
   return allPass;
 }
+
+
+// ================================================================
+// [임시] 최종 검수(isFinal) 소급 표기 + 매니페스트 재작성 래퍼
+//  GAS 편집기는 인자를 넘길 수 없어 무인자 래퍼를 둔다. 실행 후 제거하고 다시 push 한다.
+//  (주문서 마감 래퍼 _tmp_markPoDone_* 와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-09-23 최종승인분 3건 — 제출 시 '최종 검수' 체크를 누락한 건의 소급 처리.
+ *   TO-PO-26-253 / TG-AP-26-023-01
+ *   TO-PO-26-258 / TG-AP-26-025-01
+ *   TO-PO-26-259 / TG-AP-26-026-01
+ *
+ * 건별 수행:
+ *   1) 검수보고서목록 isFinal(Q열) = 'Y'
+ *   2) _prepareInspPdfHandoff(token) → STAGING manifest.json 재작성 (isFinal:true)
+ *
+ * 안전장치: docNo·poNo 대조, 상태가 '최종승인(INSP)'이 아니면 SKIP,
+ *           이미 PDF 마감(FINAL)된 건도 SKIP(덮어쓰기 금지).
+ * 주의: 건별로 관리자 작업요청 메일이 1통씩 다시 나간다(총 3통) — 정상 동작.
+ *       이미 발송된 '최종 승인' 완료 메일의 종결 문구는 소급되지 않는다.
+ */
+function _tmp_markInspFinal_20260923() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token]
+    ['TO-PO-26-253', 'TG-AP-26-023-01', '04669301-3036-46f2-b25f-cd574ab9ab10'],
+    ['TO-PO-26-258', 'TG-AP-26-025-01', '92539522-8f06-4034-b4a3-d88954032d44'],
+    ['TO-PO-26-259', 'TG-AP-26-026-01', '6ab7eae4-a3f9-4759-8344-3d7b79f5d8a9'],
+  ];
+
+  var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2];
+
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return poNo + ' → FAIL / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return poNo + ' → FAIL / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return poNo + ' → FAIL / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+
+    var status = String(r[INSP_COL.STATUS] || '');
+    if (status !== '최종승인(INSP)') return poNo + ' → SKIP / 결재 미완료 상태: ' + status;
+
+    var move = String(r[INSP_COL.MOVE_STATUS] || '');
+    if (move === 'FINAL') return poNo + ' → SKIP / 이미 PDF 마감(FINAL) — 별도 재렌더 필요';
+
+    var before = String(r[INSP_COL.IS_FINAL] || '');
+    if (before !== 'Y') {
+      sheet.getRange(info.rowNum, INSP_COL.IS_FINAL + 1).setValue('Y');
+      SpreadsheetApp.flush();
+    }
+
+    var h = _prepareInspPdfHandoff(token);
+
+    try {
+      writeAuditLog({
+        eventType: AUDIT_EVENT.INSP_FINALIZED, docNo: docNo, docToken: token, docType: 'INSP',
+        reason: '최종 검수(isFinal) 소급 표기 — 제출 시 체크 누락분 관리자 보정 / 매니페스트 재작성',
+      });
+    } catch (_) {}
+
+    return poNo + ' (' + docNo + ') row=' + info.rowNum
+      + ' / isFinal ' + (before || '(빈칸)') + '→Y'
+      + ' / manifest ' + (h.ok ? 'OK ' + h.manifestFileId : 'FAIL ' + h.message);
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
