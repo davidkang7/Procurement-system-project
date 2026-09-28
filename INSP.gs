@@ -1947,3 +1947,67 @@ function testInspStep1() {
   console.log(results.join('\n'));
   return allPass;
 }
+
+
+// ================================================================
+// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-09-28 미마감분 일괄 PDF 마감 — PENDING_PDF 10건.
+ *  결재는 이미 최종승인됐으나 로컬 렌더러 실행이 누락돼 PDF가 없던 건들.
+ *  2026-09-28 재점검에서 일괄 렌더 → 각 PO 폴더 업로드 완료:
+ *    INSP_TG-AP-26-024-01_20260928_1121.pdf  (TO-PO-26-257)
+ *    INSP_LC-2026-009-01_20260928_1121.pdf  (TO-PO-26-273)
+ *    INSP_LC-2026-011-01_20260928_1121.pdf  (TO-PO-26-279)
+ *    INSP_TO-AP-26-005-01_20260928_1121.pdf  (TO-PO-26-233)
+ *    INSP_TR-AP-27-048-01_20260928_1121.pdf  (TO-PO-26-274)
+ *    INSP_TR-AP-26-049-01_20260928_1121.pdf  (TO-PO-26-276)
+ *    INSP_TR-AP-026-43-01_20260928_1121.pdf  (TO-PO-26-237)
+ *    INSP_LC-2026-008-01_20260928_1122.pdf  (TO-PO-26-280)
+ *    INSP_LC-2026-012-01_20260928_1122.pdf  (TO-PO-26-285)
+ *    INSP_TH-AP-26-055-01_20260928_1122.pdf  (TO-PO-26-281)
+ *  모두 판정 '합격' · 1회차 · 최종 검수 · 사진 임베드 확인. → moveStatus를 FINAL로 마감한다.
+ *  (테스트 행 PRQ-2026-001-01/Test_123은 대상 제외)
+ */
+function _tmp_markInspPdfDone_20260928() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
+    ['TO-PO-26-257', 'TG-AP-26-024-01', 'a59ba00c-22d3-48e7-a1db-83a1fa1bda3f', '1V8UXEIj40X3OSDB9ja4ujXqZkYuaVr1c'],
+    ['TO-PO-26-273', 'LC-2026-009-01', '2bdb1e7c-4bba-46ce-8f5e-d256ca0baf0f', '1rIBefZ7Bt0Q7u9anL5msWEmdhrx0Q-mE'],
+    ['TO-PO-26-279', 'LC-2026-011-01', 'ccc34f0b-0009-4904-b0d9-cfd97d48950f', '1Pm3sCwOzQ7lDb4VkUjYDzhwxBHN0wRZx'],
+    ['TO-PO-26-233', 'TO-AP-26-005-01', 'b748c2f2-a5b6-40a3-a12e-cffcf6d75034', '1NPHlDSZccRay4Ozb86xeGWSTC-CU3iVZ'],
+    ['TO-PO-26-274', 'TR-AP-27-048-01', 'f5277b4d-ceb2-4f7e-a712-d604cb1ed491', '1lhFf2vBH2V0c-dW_hOnNMDxsGTcxuBRj'],
+    ['TO-PO-26-276', 'TR-AP-26-049-01', 'ea8ff6a8-16d6-4f47-9c29-032d31360c83', '11Q4jGQAnAVVpZBgvCoIC6smNCpODhKwo'],
+    ['TO-PO-26-237', 'TR-AP-026-43-01', 'fee8bb8f-4070-49bc-8588-699169374c2d', '1GgDmVqdM5DCrRPfhrI4bN6tN78pV2MqE'],
+    ['TO-PO-26-280', 'LC-2026-008-01', '7e7b66f5-ae93-47e8-ba47-1c4feeb3f074', '12z9ht9AifQ8y3-7dtbfKoslhv1uPfUln'],
+    ['TO-PO-26-285', 'LC-2026-012-01', 'd2a15b30-b818-4656-b1ef-89871d5b7cf0', '1yFYpRV-mUjzvbysPTMp1mi8OZVpiZRhj'],
+    ['TO-PO-26-281', 'TH-AP-26-055-01', 'f3cce18a-944f-42d1-944f-5cc9b322d180', '1vTDuII4LdtkAZLWBJVD_d2DDNNG4lemE'],
+  ];
+
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2], fileId = j[3];
+    // 토큰-문서번호 대조: 한 건이라도 어긋나면 그 건만 건너뛴다(오기입 방지).
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return poNo + ' → SKIP / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return poNo + ' → SKIP / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return poNo + ' → SKIP / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return poNo + ' → SKIP / 이미 FINAL 마감됨';
+    }
+    var res = markInspPdfDone(token, fileId);
+    return poNo + ' → ' + (res.ok ? 'OK' : 'FAIL') + ' / ' + res.message;
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
