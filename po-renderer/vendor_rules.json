@@ -31,6 +31,8 @@
     "샘플온":          { "shipper": "샘플온", "payment": "익월말 현금 결제 조건" },
     "파이버피아":      { "shipper": "㈜파이버피아", "remark": "QUO NO." },
     "아마다웰드테크코리아": { "shipper": "아마다웰드테크코리아", "remark": "QUO NO." },
+    "디씨피":          { "shipper": "디씨피 주식회사", "file": "디씨피", "remark": "QUO NO." },
+    "rfmtl":          { "shipper": "RFMTL(RF Materials)", "file": "RFMTL" },
     "한국생산기술연구원": { "shipper": "한국생산기술연구원" },
     "viadcad":        { "shipper": "VIADCAD", "remark": "견적일자" },
     "coherent":       { "shipper": "COHERENT", "file": "Coherent", "base": "fx" },
