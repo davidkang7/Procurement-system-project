@@ -651,3 +651,29 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-09-29 생성분 마감 — TO-PO-26-291 / 292.
+ *  주문서 폴더 업로드 완료:
+ *    TO-PO-26-291_Castech.xlsx + .pdf   (CASTECH Inc. / MLC60 Optics G1 / USD 2,800)
+ *    TO-PO-26-292_Optowide.xlsx + .pdf  (Optowide Technologies / MLC60 Optics YVO4 / USD 8,700)
+ */
+function _tmp_markPoDone_20260929() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일 ID]
+    ['TO-PO-26-291', 'd072f6b3-462a-473b-a22e-e5dc321bcf70', '1zXi7DvhXB8wK9i_ab47L37oYoNftMPc-'],
+    ['TO-PO-26-292', 'e803bddd-869e-4e8d-92e4-f59e8d83d068', '1S0vIbg_U8KHt02AR60GagVeNfwm_Fbhc'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}

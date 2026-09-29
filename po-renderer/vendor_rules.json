@@ -37,6 +37,7 @@
     "hitronics":      { "shipper": "HI-TRONICS", "file": "Hitronics", "base": "fx" },
     "everprox":       { "shipper": "EverproX", "file": "EverproX", "base": "fx" },
     "optowide":       { "shipper": "Optowide", "file": "Optowide", "base": "fx" },
+    "castech":        { "shipper": "CASTECH", "file": "Castech", "base": "fx" },
     "kmco":           { "shipper": "Kawashima Manufacturing Co.,Ltd.(KMCO)", "file": "KMCO",
                         "remark": "Quotation No", "base": "fx" }
   },
