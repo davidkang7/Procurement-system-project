@@ -58,7 +58,7 @@ cd "...\po-renderer"
 | `render_po.py` | CLI · Drive 입출력 · Excel COM 호출 · 인쇄 설정 선택 |
 | `po_form.py` | 양식 지식(셀 맵·통화 서식·레터헤드), 채우기, 검증 |
 | `po_source.py` | 매니페스트 / DB 백업 → 공통 주문 데이터 변환 |
-| `vendor_rules.json` | 업체별 Shipper 표기·REMARK 라벨·결제조건 — **신규 업체는 여기만 수정** |
+| `vendor_rules.json` | 업체별 Shipper 표기·REMARK 라벨·결제조건 — **신규 업체는 여기만 수정** · 업체 합의 거래조건 수정본(`terms_overrides`) |
 | `excel_finalize.ps1` | Excel COM 재계산·저장·PDF 내보내기 (ASCII 전용) |
 | `templates/po_base_krw.xlsx` | 내자 기준 양식 (TO-PO-26-261_태성테크, 국문 거래조건 2p) |
 | `templates/po_base_fx.xlsx` | 외자 기준 양식 (TO-PO-26-264_Coherent, 영문 거래조건 2p) |

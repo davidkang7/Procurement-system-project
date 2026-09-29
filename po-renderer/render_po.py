@@ -223,6 +223,9 @@ def render_one(order: PoOrder, rules: VendorRules, args) -> dict:
         order.payment_terms_raw = args.payment
 
     warnings = po_form.fill(layout, order, rules)
+    if layout.terms_applied:
+        print(f"  · 거래조건: 업체 합의 수정본 '{layout.terms_applied[0]}' 적용 — "
+              + " / ".join(layout.terms_applied[1]))
     errors = po_form.verify(layout, order)
     if errors and not args.force:
         for e in errors:

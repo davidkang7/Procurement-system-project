@@ -125,6 +125,7 @@ class VendorRules:
         self.vendors = {_norm_vendor(k): v for k, v in data.get("vendors", {}).items()}
         self.payment_alias = data.get("payment_alias", {})
         self.defaults = data.get("defaults", {})
+        self.terms_overrides = data.get("terms_overrides", {})
 
     def get(self, vendor_name: str) -> dict:
         """업체 규칙 조회. 품의서 업체명에는 법인격·수식어가 붙어 오므로
@@ -154,6 +155,18 @@ class VendorRules:
 
     def base_override(self, vendor_name: str) -> str:
         return self.get(vendor_name).get("base") or ""
+
+    def terms_override(self, vendor_name: str) -> tuple:
+        """업체와 합의한 표준거래조건 수정본 (키, 교체 목록). 없으면 ("", []).
+        업체 규칙의 terms 키가 terms_overrides 항목을 가리킨다 — 키만 있고 본문이 없으면 오류로 세운다
+        (조용히 원안으로 발행되면 업체와 합의한 조건이 어긋난다)."""
+        key = self.get(vendor_name).get("terms") or ""
+        if not key:
+            return "", []
+        items = self.terms_overrides.get(key)
+        if not isinstance(items, list) or not items:
+            raise SystemExit(f"[오류] 업체 규칙 terms='{key}' 에 해당하는 terms_overrides 본문이 없습니다: {RULES_FILE}")
+        return key, items
 
     def payment_terms(self, vendor_name: str, raw: str, kind: str) -> str:
         """품의서 구매조건/구매방법 → 주문서 Payment Terms 표기."""
@@ -243,6 +256,7 @@ class FormLayout:
     template: Path
     wb: object = field(repr=False, default=None)
     images: list = field(repr=False, default_factory=list)   # 로고·서명 원본 바이트
+    terms_applied: tuple = ()                                 # (거래조건 수정본 키, 적용 내역) — 로그용
 
 
 def load_form(kind: str, base_path=None) -> FormLayout:
@@ -333,8 +347,45 @@ def fix_row_heights(layout: FormLayout):
             ws.row_dimensions[row].height = need     # height 설정 자체가 customHeight를 켠다
 
 
+def apply_terms_overrides(layout: FormLayout, items: list) -> list:
+    """2페이지 표준거래조건의 특정 조항을 업체 합의 문안으로 교체한다.
+    위치는 행 번호가 아니라 A열 문구로 찾는다(양식이 바뀌어도 엉뚱한 줄을 덮지 않게).
+    못 찾으면 중단 — 일부만 바뀐 거래조건이 나가는 것이 원안보다 나쁘다.
+    반환값은 적용 내역(로그용)."""
+    ws = layout.sheet
+    applied = []
+    for it in items:
+        target = None
+        if it.get("after_heading"):
+            key = str(it["after_heading"]).strip()
+            for r in range(layout.sum_row + 1, ws.max_row + 1):
+                if str(ws.cell(r, 1).value or "").strip() == key:
+                    target = r + 1
+                    break
+            label = key
+        elif it.get("starts_with"):
+            key = str(it["starts_with"])
+            for r in range(layout.sum_row + 1, ws.max_row + 1):
+                if str(ws.cell(r, 1).value or "").startswith(key):
+                    target = r
+                    break
+            label = key[:40] + "…"
+        else:
+            raise SystemExit(f"[오류] terms_overrides 항목에 after_heading/starts_with 가 없습니다: {it}")
+        if not target or not str(ws.cell(target, 1).value or "").strip():
+            raise SystemExit(f"[오류] 거래조건 교체 위치를 찾지 못함: {label}")
+        ws.cell(target, 1).value = it["text"]
+        h = float(it.get("height") or 0)
+        cur = ws.row_dimensions[target].height or 0
+        if h and h > cur:
+            ws.row_dimensions[target].height = h
+        applied.append(f"{label} → {target}행")
+    return applied
+
+
 def _clear_body(layout: FormLayout):
-    """품목 구간만 비운다. 2페이지 거래조건 블록·푸터·서명은 절대 건드리지 않는다."""
+    """품목 구간만 비운다. 2페이지 거래조건 블록·푸터·서명은 절대 건드리지 않는다
+    (업체 합의 문안 교체는 apply_terms_overrides 가 문구 기준으로만 한다)."""
     ws = layout.sheet
     for r in range(layout.item_first, layout.item_last + 1):
         for col in range(1, COL_REMARK + 1):
@@ -395,6 +446,10 @@ def fill(layout: FormLayout, order: PoOrder, rules: VendorRules):
 
     _set(ws, f"G{layout.sum_row}", f"=SUM(G{layout.item_first}:G{layout.item_last})")
     ws.cell(layout.sum_row, COL_AMT).number_format = fmt
+
+    terms_key, terms_items = rules.terms_override(order.vendor_name)
+    if terms_items:
+        layout.terms_applied = (terms_key, apply_terms_overrides(layout, terms_items))
 
     layout.wb.active = layout.wb.worksheets.index(ws)
     return warnings

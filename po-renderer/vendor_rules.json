@@ -41,7 +41,39 @@
     "optowide":       { "shipper": "Optowide", "file": "Optowide", "base": "fx" },
     "castech":        { "shipper": "CASTECH", "file": "Castech", "base": "fx" },
     "kmco":           { "shipper": "Kawashima Manufacturing Co.,Ltd.(KMCO)", "file": "KMCO",
-                        "remark": "Quotation No", "base": "fx" }
+                        "remark": "Quotation No", "base": "fx", "terms": "kmco-2026-09" }
+  },
+  "terms_overrides": {
+    "_comment": [
+      "업체별로 합의된 표준거래조건 수정본. 업체 규칙의 terms 키가 여기 키를 가리킨다.",
+      "각 항목은 2페이지 거래조건 블록(A열)에서 위치를 찾아 문장을 통째로 바꾼다.",
+      "  after_heading = 이 제목 행의 바로 아랫줄 본문을 교체 / starts_with = 이 문구로 시작하는 행을 교체",
+      "  height = 교체 후 행 높이 최소값(pt). 문장이 길어지면 잘리므로 원 발행본에서 실측한 값을 둔다.",
+      "kmco-2026-09: 2026-09-03 KMCO(m_hashimoto) 요청 제2·7·12조 → 2026-09-14 David 수락, TO-PO-26-269 수정본 발송.",
+      "  이후 KMCO 발주는 이 문안으로 발행한다(사용자 지시 2026-09-29)."
+    ],
+    "kmco-2026-09": [
+      {
+        "starts_with": "These General Terms and Conditions of Purchase (the \"Terms\")",
+        "height": 49.5,
+        "text": "These General Terms and Conditions of Purchase (the \"Terms\") apply to and form part of each purchase order (\"PO\") issued by InLC Technology Inc. (\"Buyer\") to the supplier (\"Supplier\"). An individual contract incorporating these Terms is formed when the Supplier, after receiving a PO, issues an order acknowledgment."
+      },
+      {
+        "after_heading": "Article 2 (Formation of Contract; Deemed Acceptance)",
+        "height": 49.5,
+        "text": "The PO constitutes an offer. The Supplier's issuance of an order acknowledgment constitutes acceptance and forms the individual contract. By issuing an order acknowledgment, the Supplier is deemed to have reviewed and agreed to these Terms; no separate signature is required for these Terms to be effective. The Supplier shall promptly return an order acknowledgment upon receipt of a PO."
+      },
+      {
+        "after_heading": "Article 7 (Warranty; Return; Replacement)",
+        "height": 49.5,
+        "text": "Goods that fail to meet the acceptance criteria or are defective shall be returned, replaced, or reworked at the Supplier's cost and responsibility. The Supplier shall be liable for damages incurred by Buyer arising from such defects. Notwithstanding the foregoing, the Supplier's liability for damages shall be limited to the price of the affected goods, and the Supplier shall not be liable for any other damages incurred by Buyer. Any claim for return, replacement, or damages must be made within one (1) year after delivery of the goods, and no claim made thereafter shall be accepted."
+      },
+      {
+        "after_heading": "Article 12 (Governing Law; Dispute Resolution)",
+        "height": 49.5,
+        "text": "These Terms shall be governed by the laws of Japan. Any dispute arising out of or in connection with these Terms shall be finally settled by arbitration under the Rules of the Japan Commercial Arbitration Association (JCAA) in Tokyo, Japan, conducted in the Japanese language, or as otherwise agreed in the PO."
+      }
+    ]
   },
   "payment_alias": {
     "_comment": "품의서 구매조건 원문 → 주문서 Payment Terms 표기. 외자(fx)는 fx 맵을 먼저 본다.",

@@ -664,7 +664,7 @@ function _checkPoOrderFolder() {
  *    TO-PO-26-292_Optowide.xlsx + .pdf  (Optowide Technologies / MLC60 Optics YVO4 / USD 8,700)
  *    TO-PO-26-293_Coherent.xlsx + .pdf  (Coherent / MLC60 Optics 13종 / USD 67,330)
  *    TO-PO-26-294_태성테크.xlsx + .pdf   (태성테크 / U-Mount 외 5종 / KRW 34,250,000)
- *    TO-PO-26-295_KMCO.xlsx + .pdf      (KMCO / 48CH Fiber Array + Feedthrough / JPY 5,468,250)
+ *    TO-PO-26-295_KMCO.xlsx + .pdf      (KMCO / 48CH Fiber Array + Feedthrough / JPY 5,468,250 — 거래조건 KMCO 합의본 재생성)
  *    TO-PO-26-296_RFMTL.xlsx + .pdf     (RFMTL(RF Materials) / Lid / KRW 3,000,000)
  *    TO-PO-26-297_디씨피.xlsx + .pdf     (디씨피 / PI Mask / KRW 1,500,000)
  */
@@ -675,7 +675,7 @@ function _tmp_markPoDone_20260929() {
     ['TO-PO-26-292', 'e803bddd-869e-4e8d-92e4-f59e8d83d068', '1S0vIbg_U8KHt02AR60GagVeNfwm_Fbhc'],
     ['TO-PO-26-293', 'c8b26f46-6738-478b-8680-3f4a23ebe8ec', '1QaqBLbAznh_I0hiOUhba51wMtC2PoxFy'],
     ['TO-PO-26-294', '9021d593-17da-4e4f-a167-23284757d091', '1i6ket-ioedregbgNxhCZ8ALr9INXMsLL'],
-    ['TO-PO-26-295', '5a1cd776-ee53-4fc2-b85d-f38bc64ce530', '1oiVFJPIAz0_cYZa7lnn671xlWgyeDtHn'],
+    ['TO-PO-26-295', '5a1cd776-ee53-4fc2-b85d-f38bc64ce530', '19jHhzAU68aVjSf3OC2jVNdrzgg07IZ85'],
     ['TO-PO-26-296', 'dafd4552-68a2-4e93-8fa9-d5843f422d99', '1W0OYmFl7Ivx1PnYEqrXHIp3122t7E8SI'],
     ['TO-PO-26-297', '4c03ce67-2a14-4f1f-90dc-10dd355c217c', '1Ws5Ku3mkLvYqYQ7hrSIDrYsWRJkqYhZt'],
   ];
