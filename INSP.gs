@@ -1955,16 +1955,16 @@ function testInspStep1() {
 // ================================================================
 
 /**
- * 2026-09-30 2차 — PENDING_PDF 1건 마감 (TO-PO-26-232 2회차·최종 검수).
+ * 2026-09-30 3차 — PENDING_PDF 1건 마감 (TO-PO-26-250).
  *  로컬 렌더러로 렌더 → 각 PO 폴더 업로드 완료:
- *    INSP_TO-AP-26-004-02_20260930_1158.pdf  (TO-PO-26-232)
- *  판정 '합격' · 2회차 · 최종 검수 · 사진 임베드 확인. → moveStatus를 FINAL로 마감한다.
+ *    INSP_TO-AP-26-012-01_20260930_1732.pdf  (TO-PO-26-250)
+ *  판정 '합격' · 1회차 · 사진 임베드 확인. → moveStatus를 FINAL로 마감한다.
  *  (테스트 행 PRQ-2026-001-01/Test_123은 대상 제외)
  */
-function _tmp_markInspPdfDone_20260930_batch2() {
+function _tmp_markInspPdfDone_20260930_batch3() {
   var jobs = [
     // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
-    ['TO-PO-26-232', 'TO-AP-26-004-02', '8880f8ff-38d3-4128-b154-9467b906a705', '1fUy1KheM9ZhxHMKxCIm2Kvi_2_St5bfz'],
+    ['TO-PO-26-250', 'TO-AP-26-012-01', 'b5726586-87cf-43b1-bc1b-34c2737c791e', '1iKMV4UEUQMuChs-71n2ux2QCPmmzB_wT'],
   ];
 
   var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
