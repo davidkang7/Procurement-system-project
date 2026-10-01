@@ -3833,7 +3833,11 @@ function getRequisitionForViewer(token, urlIdxHint) {
 
     // [QUO] 관리자가 폴더에 직접 올린 견적서 PDF가 있으면 여기서 Y열에 등록
     //  quick: PENDING 건에서만, 현재 폴더만(Drive 호출 ≤2). 그 외(평소)는 JSON 파싱 비용뿐 — 결재자 화면 지연 없음.
-    if (reconcileQuotePdf(sheet, rowNum, r, { quick: true })) r = readRow(sheet, rowNum);
+    //  폴더 쓰기 권한이 있는 계정(관리자·구매팀)이 열 때만 — 타 부서 결재자 계정으로는 공유 설정이 실패한 채
+    //  DONE 으로 굳어 버리므로(이후 재점검 없음) 등록하지 않는다. 결재자 화면은 기존 Y열 그대로.
+    var viewerActor = getActiveUserEmail();
+    var canReconcile = isAdminUser(viewerActor) || isProcurementUser(viewerActor);
+    if (canReconcile && reconcileQuotePdf(sheet, rowNum, r, { quick: true })) r = readRow(sheet, rowNum);
 
     var attachmentsRaw = parseAttachments(r[COL.ATTACH_LIST]);
     var attachments = attachmentsRaw.map(_attachMetaForClient_);
@@ -3865,7 +3869,7 @@ function getRequisitionForViewer(token, urlIdxHint) {
             });
           }
           // 원본 REQ의 첨부(견적서 등) 메타 조회
-          if (reconcileQuotePdf(sheet, parentRowNum, pr, { quick: true })) pr = readRow(sheet, parentRowNum);
+          if (canReconcile && reconcileQuotePdf(sheet, parentRowNum, pr, { quick: true })) pr = readRow(sheet, parentRowNum);
           parentAttachments = parseAttachments(pr[COL.ATTACH_LIST]).map(_attachMetaForClient_);
         }
       } catch(_) { /* 부모 조회 실패는 viewer 본 기능에 영향 없음 */ }
@@ -4612,29 +4616,36 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
 // 15. Drive 폴더 / 파일 관리
 // ================================================================
 
-function getOrCreateFolder(docNo, issueDate, type) {
-  var rootId = (type === 'final') ? CONFIG.FINAL_ROOT_ID : CONFIG.STAGING_ROOT_ID;
-  var root   = DriveApp.getFolderById(rootId);
-  var date   = issueDate ? new Date(issueDate) : new Date();
+// 폴더 경로 조각: ROOT/{yyyy}/{MM월}/{docNo} — getOrCreateFolder(생성)와 findFolderByPath(조회)가 같은 계산을 쓴다
+function _folderPathParts_(docNo, issueDate, type) {
+  var date = issueDate ? new Date(issueDate) : new Date();
   if (isNaN(date.getTime())) date = new Date();
-  var year   = date.getFullYear().toString();
-  var month  = ('0' + (date.getMonth() + 1)).slice(-2) + '월';
+  return {
+    rootId: (type === 'final') ? CONFIG.FINAL_ROOT_ID : CONFIG.STAGING_ROOT_ID,
+    names:  [date.getFullYear().toString(), ('0' + (date.getMonth() + 1)).slice(-2) + '월', String(docNo)],
+  };
+}
 
-  var yearFolder  = getOrCreateSubFolder(root, year);
-  var monthFolder = getOrCreateSubFolder(yearFolder, month);
-  var docFolder   = getOrCreateSubFolder(monthFolder, docNo);
-  return docFolder;
+function getOrCreateFolder(docNo, issueDate, type) {
+  var p = _folderPathParts_(docNo, issueDate, type);
+  var folder = DriveApp.getFolderById(p.rootId);
+  for (var i = 0; i < p.names.length; i++) folder = getOrCreateSubFolder(folder, p.names[i]);
+  return folder;
+}
+
+// ⚠ getFoldersByName은 휴지통에 있는 폴더도 반환한다.
+//   그대로 쓰면 삭제된 폴더를 재사용해 파일이 휴지통 안으로 들어간다 → 살아있는 것만 채택.
+function _findLiveSubFolder_(parent, name) {
+  var it = parent.getFoldersByName(name);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) return f;
+  }
+  return null;
 }
 
 function getOrCreateSubFolder(parent, name) {
-  var iter = parent.getFoldersByName(name);
-  // ⚠ getFoldersByName은 휴지통에 있는 폴더도 반환한다.
-  //   그대로 쓰면 삭제된 폴더를 재사용해 파일이 휴지통 안으로 들어간다 → 살아있는 것만 채택.
-  while (iter.hasNext()) {
-    var f = iter.next();
-    if (!f.isTrashed()) return f;
-  }
-  return parent.createFolder(name);
+  return _findLiveSubFolder_(parent, name) || parent.createFolder(name);
 }
 
 function createFileInFolder(folder, fileName, content, mimeType) {
@@ -4797,6 +4808,7 @@ function parseAttachments(json) {
 
 var QUOTE_PDF_CONVERTIBLE_EXTS = ['xlsx', 'xls', 'docx', 'doc', 'pptx', 'jpg', 'jpeg', 'png'];
 var QUOTE_PDF_REQUEUE_AFTER_MS = 15 * 60 * 1000;   // QUEUED 가 이 시간 넘게 남아 있으면 큐 재등록(자가 치유)
+var QUOTE_PDF_QUEUED_STALE_MS  = 10 * 60 * 1000;   // QUEUED 가 이 시간 넘게 남아 있으면 관리자 목록에 '변환 지연'으로 표시
 // 관리자 처리 대기 목록에서 제외할 테스트 행 (실 업무 건 아님 — 2026-08-28 사용자 확정)
 var ADMIN_TASK_EXCLUDE_DOCNOS = ['PRQ-2026-001-01'];
 
@@ -4808,11 +4820,8 @@ function safeFileToken(s) {
 function quotePdfFileName(docNo) { return 'QUO_' + safeFileToken(docNo) + '.pdf'; }
 
 function _trashLiveFilesByName_(folder, name) {
-  var it = folder.getFilesByName(name);
-  while (it.hasNext()) {
-    var f = it.next();
-    if (!f.isTrashed()) { try { f.setTrashed(true); } catch(_) {} }
-  }
+  var f;
+  while ((f = _findLiveFileByName(folder, name))) { try { f.setTrashed(true); } catch(_) { break; } }
 }
 
 function _findQuoteSrc_(list) {
@@ -4931,7 +4940,10 @@ function _processQuotePdfJob(job) {
   // ── 변환 (락 밖, 수 초~15초) — 예외는 큐 재시도로
   var pdfBlob = convertToQuotePdf(srcFile.getBlob(), ext, fileName);
 
-  var folder  = DriveApp.getFolderById(String(r[COL.DRIVE_ID] || ''));
+  // 변환에 수 초~수십 초가 걸리므로 폴더는 변환 '뒤'에 다시 읽는다(그 사이 FINAL 통합 이동이 끝났을 수 있다).
+  //  그래도 남는 틈은 _registerQuotePdf_ 가 락 안에서 행의 현재 폴더와 대조해 파일을 옮겨 메운다.
+  var folderId = String(readRow(sheet, rowNum)[COL.DRIVE_ID] || r[COL.DRIVE_ID] || '');
+  var folder   = DriveApp.getFolderById(folderId);
   _trashLiveFilesByName_(folder, fileName);
   var pdfFile = folder.createFile(pdfBlob);
   _shareFileDomainView_(pdfFile, fileName);
@@ -4941,7 +4953,7 @@ function _processQuotePdfJob(job) {
   };
 
   // ── Y열 등록 (락 안, 재조회) — 그 사이 반려로 첨부가 교체됐으면 방금 만든 PDF는 버린다
-  var reg = _registerQuotePdf_(job.token, pdfMeta);
+  var reg = _registerQuotePdf_(job.token, pdfMeta, false, folderId);
   if (!reg.ok) {
     try { pdfFile.setTrashed(true); } catch(_) {}
     return { ok: true, skipped: true, message: reg.message };
@@ -4969,8 +4981,9 @@ function _quoteRowInfo_(r, rowNum) {
 /**
  * QUO_ PDF 를 Y열에 등록 (quote 항목 추가/교체 + quote-src DONE). 락 안에서 행을 재조회한다.
  *  lockHeld=true 면 호출자가 이미 전역 락을 쥐고 있다(withLock 은 재진입 불가) — 그대로 쓴다.
+ *  pdfFolderId: PDF 를 만든 폴더. 락 안에서 행의 현재 DRIVE_ID 와 다르면(변환 중 FINAL 이동) 파일을 그 폴더로 옮긴다.
  */
-function _registerQuotePdf_(token, pdfMeta, lockHeld) {
+function _registerQuotePdf_(token, pdfMeta, lockHeld, pdfFolderId) {
   var work = function() {
     var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
@@ -4980,6 +4993,12 @@ function _registerQuotePdf_(token, pdfMeta, lockHeld) {
     var list = parseAttachments(r[COL.ATTACH_LIST]);
     var src  = _findQuoteSrc_(list);
     if (!src) return { ok: false, message: '견적서 원본 항목 없음(반려로 첨부 교체됨)' };
+
+    var curFolderId = String(r[COL.DRIVE_ID] || '');
+    if (pdfFolderId && curFolderId && pdfFolderId !== curFolderId) {
+      try { _moveFileToFolder_(pdfMeta.id, curFolderId); Logger.log('[QUO] 변환 중 폴더 이동 감지 → PDF 를 현재 폴더로 이동: ' + pdfMeta.name); }
+      catch(e) { Logger.log('[QUO] PDF 폴더 보정 실패 ' + pdfMeta.name + ': ' + e); }
+    }
 
     var next = list.filter(function(f) { return !(f && f.role === 'quote'); });
     next.push(pdfMeta);
@@ -5063,7 +5082,7 @@ function _sendQuotePdfHandoffEmail_(info, src) {
       ])
     + '</table>'
     + '<p style="margin-top:14px;font-size:13px;">· 위 폴더에 <b>정확히 이 파일명</b>으로 업로드하면 시스템이 자동 인식해 첨부 목록에 등록합니다. 별도 마감 실행은 필요 없습니다.<br>'
-    + '· 결재가 끝나 FINAL로 이동한 뒤라면 FINAL 폴더에 올려도 되고, STAGING 폴더에 올려도 자동으로 옮겨집니다.<br>'
+    + '· 결재가 끝나 FINAL로 이동한 뒤라면 FINAL 폴더에 올려 주세요. STAGING 폴더에 올린 경우에도 관리자 홈을 열면 자동으로 FINAL로 옮겨집니다.<br>'
     + '· 미처리 건은 관리자 홈 상단 배너와 GAS <b>listPendingQuotePdf()</b> 에서 확인할 수 있습니다.</p>'
     + '</div>';
   var plain = '견적서 PDF 생성 요청\n품의번호: ' + info.docNo + '\n기안자: ' + info.drafter + '\n품의제목: ' + info.subject
@@ -5094,7 +5113,7 @@ function _sendQuotePdfReviewEmail_(info, pdfMeta, src) {
       ])
     + '</table>'
     + '<p style="margin-top:14px;font-size:13px;">· 품질이 나쁘면 원본으로 PDF를 다시 만든 뒤, 위 변환 PDF 파일에서 Drive <b>버전 관리 → 새 버전 업로드</b>로 교체하세요(링크·등록 그대로 유지, 추가 조치 없음).<br>'
-    + '· 또는 변환 PDF를 휴지통으로 보내고 같은 이름(<b>' + escapeHtml(pdfMeta.name) + '</b>)으로 다시 올려도 FINAL 이동 시 자동 재연결됩니다.</p>'
+    + '· 휴지통으로 보내고 같은 이름으로 다시 올리는 방식은 PRC 최종승인(FINAL 통합 이동) 시점에만 재연결되므로 버전 업로드를 권장합니다.</p>'
     + '</div>';
   var plain = '견적서 PDF 변환 완료 — 확인 요망\n품의번호: ' + info.docNo + '\n품의제목: ' + info.subject
     + '\n변환 PDF: ' + pdfUrl + '\n원본: ' + origUrl + '\n폴더: ' + folderUrl
@@ -5102,27 +5121,14 @@ function _sendQuotePdfReviewEmail_(info, pdfMeta, src) {
   sendEmailWithRetry(toList.join(','), subj, plain, html);
 }
 
-/** getOrCreateFolder 와 같은 경로 계산이되 생성하지 않는 조회 전용. 없으면 null. */
+/** getOrCreateFolder 와 같은 경로(_folderPathParts_)를 생성 없이 조회. 없으면 null. */
 function findFolderByPath(docNo, issueDate, type) {
   try {
-    var rootId = (type === 'final') ? CONFIG.FINAL_ROOT_ID : CONFIG.STAGING_ROOT_ID;
-    var root   = DriveApp.getFolderById(rootId);
-    var date   = issueDate ? new Date(issueDate) : new Date();
-    if (isNaN(date.getTime())) date = new Date();
-    var year   = date.getFullYear().toString();
-    var month  = ('0' + (date.getMonth() + 1)).slice(-2) + '월';
-    var y = _findLiveSubFolder_(root, year); if (!y) return null;
-    var m = _findLiveSubFolder_(y, month);   if (!m) return null;
-    return _findLiveSubFolder_(m, docNo);
+    var p = _folderPathParts_(docNo, issueDate, type);
+    var folder = DriveApp.getFolderById(p.rootId);
+    for (var i = 0; i < p.names.length && folder; i++) folder = _findLiveSubFolder_(folder, p.names[i]);
+    return folder || null;
   } catch(_) { return null; }
-}
-function _findLiveSubFolder_(parent, name) {
-  var it = parent.getFoldersByName(name);
-  while (it.hasNext()) {
-    var f = it.next();
-    if (!f.isTrashed()) return f;
-  }
-  return null;
 }
 
 /** 파일 1건을 다른 폴더로 이동 (부모 교체 — _moveAllFilesToFolder 와 같은 방식) */
@@ -5141,7 +5147,7 @@ function _moveFileToFolder_(fileId, dstFolderId) {
  *  동작 조건(그 외 즉시 return false — 비용 0):
  *   · quote-src 가 있고 quotePdf 가 QUEUED/PENDING (PDF 미등록)
  *   · opts.checkReplaced: 등록된 PDF가 휴지통에 갔는지도 확인(품질 불량 교체 케이스). Drive 호출 1회가 들므로
- *     뷰어에서는 끄고 FINAL 이동·관리자 목록에서만 켠다.
+ *     FINAL 통합 이동(consolidateToFinalByPrc)에서만 켠다. 권장 교체 방법은 '버전 관리 → 새 버전 업로드'(id 유지).
  *  탐색: 현재 DRIVE_ID 폴더 → 없으면 STAGING 경로(조회 전용). STAGING에서 찾았는데 행이 FINAL이면 FINAL로 옮긴다.
  *  opts.lockHeld: 호출자가 전역 락을 쥔 상태(moveAttachmentsToFinal 등) — withLock 재진입 금지.
  *  opts.quick: 뷰어(결재자·기안자가 여는 화면)용 — PENDING 일 때만, 현재 폴더 1곳만 본다(Drive 호출 ≤2).
@@ -5226,11 +5232,24 @@ function listPendingQuotePdf(rows) {
       //  enqueueJob 이 token+type 으로 중복을 걸러 주므로 이미 대기 중이면 아무 일도 없다.
       var qAt = new Date(src.quoteQueuedAt || 0).getTime();
       if (!qAt || Date.now() - qAt > QUOTE_PDF_REQUEUE_AFTER_MS) {
-        try { enqueueJob({ type: 'quote_pdf', token: token, docNo: docNo, docType: 'REQ' }); }
-        catch(e) { Logger.log('[QUO] 재등록 실패 ' + docNo + ': ' + e); }
+        try {
+          if (_hasQueueJob_(token, 'quote_pdf', ['failed'])) {
+            // 큐에서는 이미 최종 실패했는데 Y열이 QUEUED 로 남은 상태(핸드오프 기록이 유실된 경우) —
+            // 재등록하면 같은 실패를 되풀이하므로 바로 PENDING + 핸드오프로 보낸다.
+            _markQuotePdfPending(token, '큐 최종 실패 후 상태 미반영 — 관리자 확인 필요');
+            src.quotePdf = 'PENDING';
+          } else {
+            enqueueJob({ type: 'quote_pdf', token: token, docNo: docNo, docType: 'REQ' });
+          }
+        } catch(e) { Logger.log('[QUO] 재등록 실패 ' + docNo + ': ' + e); }
       }
     }
     if (ADMIN_TASK_EXCLUDE_DOCNOS.indexOf(docNo) >= 0) continue;
+    if (src.quotePdf === 'QUEUED') {
+      // 갓 제출돼 큐가 곧 처리할 건은 관리자 할 일이 아니다 — 10분 넘게 QUEUED 인 것(큐 정체)만 올린다
+      var qAt2 = new Date(src.quoteQueuedAt || 0).getTime();
+      if (qAt2 && Date.now() - qAt2 < QUOTE_PDF_QUEUED_STALE_MS) continue;
+    }
     out.push({
       docNo:    docNo,
       token:    token,
@@ -6110,6 +6129,14 @@ function enqueueJob(job) {
   });
 }
 
+/** 같은 토큰·타입의 job 이 주어진 상태들 중 하나로 큐에 있는가 (락 없이 읽기 전용) */
+function _hasQueueJob_(token, type, statuses) {
+  try {
+    var queue = JSON.parse(PropertiesService.getScriptProperties().getProperty(QUEUE_KEY) || '[]');
+    return queue.some(function(j) { return j.token === token && j.type === type && statuses.indexOf(j.status) >= 0; });
+  } catch(_) { return false; }
+}
+
 /**
  * 큐 전체 조회 (관리자 모니터링용)
  */
@@ -6178,7 +6205,10 @@ function processQueueTrigger() {
     // 실제 작업 수행 (락 밖)
     var result = { ok: false, message: '' };
     try {
-      if (job.type === 'pdf_only') {
+      if (job.staleExhausted) {
+        // _claimNextJob 이 '재시도 소진 + 실행 정체'로 판정한 job — 다시 돌리지 않고 실패로 마감
+        result = { ok: false, message: '실행 시간 한도 초과 추정(processing 정체) — 마지막 시작 ' + (job.lastStartedAt || '?') };
+      } else if (job.type === 'pdf_only') {
         result = _processPdfOnlyJob(job);
       } else if (job.type === 'pdf_and_consolidate') {
         result = _processPdfAndConsolidateJob(job);
@@ -6285,14 +6315,15 @@ function _claimNextJob() {
     var now = Date.now();
     for (var i = 0; i < queue.length; i++) {
       if (_isJobStaleProcessing(queue[i], now)) {
-        // 죽은 실행이 남긴 job — 재시도 한도를 넘었으면 failed 로 닫고(관리자 알림은 _finalizeJob 경로와 동일하게),
-        // 아니면 다시 집는다.
+        // 죽은 실행이 남긴 job. 재시도 한도를 넘었으면 '실행하지 않고' 실패로 집어 돌려준다 —
+        //  processQueueTrigger 가 staleExhausted 를 보고 작업 대신 실패 결과를 만들어 _finalizeJob 에 넘기므로
+        //  관리자 알림(일반 job)·핸드오프(quote_pdf)가 정상 실패와 똑같이 나간다(조용한 failed 금지).
         Logger.log('[Queue] stale processing 회수: ' + queue[i].id + ' (' + queue[i].type + ' ' + queue[i].docNo + ') attempts=' + queue[i].attempts);
         if ((queue[i].attempts || 0) >= QUEUE_MAX_ATTEMPTS) {
-          queue[i].status = 'failed';
-          queue[i].lastError = '실행 시간 한도 초과 추정 (processing 정체)';
+          queue[i].staleExhausted = true;
+          queue[i].lastStartedAt = new Date().toISOString();
           props.setProperty(QUEUE_KEY, JSON.stringify(queue));
-          continue;
+          return queue[i];
         }
       } else {
         if (queue[i].status !== 'pending') continue;

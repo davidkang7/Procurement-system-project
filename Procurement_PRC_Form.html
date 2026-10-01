@@ -952,7 +952,8 @@ function validateFile(f){
 }
 function getParentSize(){
   var n = 0;
-  parentAttachments.forEach(function(a){ n += (a.size || 0); });
+  // 시스템이 만든 견적서 PDF(role:'quote')는 합산(30MB)에서 제외 — 서버(getPrefill/_submitPrcCore)와 같은 기준
+  parentAttachments.forEach(function(a){ if(a && a.role !== 'quote') n += (a.size || 0); });
   return n;
 }
 function getCurrentTotalSize(){
