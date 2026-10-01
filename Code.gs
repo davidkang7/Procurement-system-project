@@ -1104,6 +1104,7 @@ function _submitCore(data) {
     } catch(e) {
       notifyAdminError('이메일 발송 실패 (제출): ' + data.docNo + ' / ' + e.toString());
       _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.token, data.docNo);
+      _notifyQuoteMissingIfNeeded_(savedFiles, data, lockResult.folderId, '제출');
       return {
         ok:       true,
         rowNum:   lockResult.rowNum,
@@ -1118,6 +1119,8 @@ function _submitCore(data) {
   //  그 대기가 결재 요청 메일을 늦추면 안 되기 때문. 등록 실패(락 타임아웃)는 관리자 알림만 하고
   //  listPendingQuotePdf 가 15분 뒤 자동 재등록한다(QUEUED 자가 치유).
   _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.token, data.docNo);
+  // 견적서 미지정 제출 → 관리자 알림 (결재 메일 뒤, 비차단)
+  _notifyQuoteMissingIfNeeded_(savedFiles, data, lockResult.folderId, '제출');
 
   return {
     ok:       true,
@@ -1854,6 +1857,7 @@ function _resubmitCore(payload) {
 
   // 견적서 PDF 변환 큐 등록 — 결재 메일 뒤 (_submitCore 6단계와 같은 이유)
   _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.newToken, payload.data.docNo);
+  _notifyQuoteMissingIfNeeded_(savedFiles, payload.data, lockResult.folderId, '재상신');
 
   return {
     ok: true,
@@ -4833,6 +4837,56 @@ function _findQuoteSrc_(list) {
 function _findQuoteEntry_(list) {
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].role === 'quote') return list[i];
   return null;
+}
+
+/**
+ * 제출·재상신 직후: 견적서가 지정되지 않은 채 기안이 올라갔으면 관리자에게 알린다.
+ *  기안자는 모달에서 '계속 제출'로 넘어올 수 있으므로(견적서 없는 품의도 있음), 막지는 않고 관리자가 알게만 한다.
+ *  메일 실패는 제출에 영향 없음(try/catch).
+ * @param savedFiles  Y열 메타
+ * @param data        제출 데이터(docNo·drafter·subject)
+ * @param folderId    품의 폴더 id
+ * @param kind        '제출' | '재상신'
+ */
+function _notifyQuoteMissingIfNeeded_(savedFiles, data, folderId, kind) {
+  var hasQuote = (savedFiles || []).some(function(f) { return f && (f.role === 'quote' || f.role === 'quote-src'); });
+  if (hasQuote) return false;
+  try {
+    _sendQuoteMissingEmail_({
+      docNo: String(data.docNo || ''), drafter: String(data.drafter || ''), subject: String(data.subject || ''),
+      dept: String(data.dept || ''), folderId: folderId || '', kind: kind || '제출',
+      files: (savedFiles || []).map(function(f) { return f && f.name ? f.name : ''; }).filter(Boolean),
+    });
+  } catch(e) {
+    notifyAdminError('견적서 미지정 알림 메일 실패: ' + data.docNo + ' / ' + e.toString());
+  }
+  return true;
+}
+
+function _sendQuoteMissingEmail_(info) {
+  var toList = CONFIG.ADMIN_NOTIFY_EMAILS || [];
+  if (!toList.length) return;
+  var folderUrl = info.folderId ? 'https://drive.google.com/drive/folders/' + info.folderId : '';
+  var subj = '[견적서 미지정 ' + info.kind + '] ' + info.docNo + ' - ' + info.subject;
+  var html = '<div style="font-family:sans-serif;max-width:620px;">'
+    + '<h2 style="color:#B86A00;">견적서가 지정되지 않은 채 기안이 ' + escapeHtml(info.kind) + '되었습니다</h2>'
+    + '<p>기안자가 첨부 중 견적서를 지정하지 않고 ' + escapeHtml(info.kind) + '했습니다. 회계용 QUO_ PDF 가 만들어지지 않으니 '
+    + '필요하면 기안자에게 견적서를 확인해 주세요. 결재 진행에는 영향이 없습니다.</p>'
+    + '<table style="border-collapse:collapse;font-size:14px;">'
+    + _quoteMailRows_([
+        ['품의번호', escapeHtml(info.docNo)],
+        ['기안자',   escapeHtml(info.drafter) + (info.dept ? ' (' + escapeHtml(info.dept) + ')' : '')],
+        ['품의제목', escapeHtml(info.subject)],
+        ['첨부',     info.files.length ? escapeHtml(info.files.join(', ')) : '<span style="color:#c0392b;">첨부 없음</span>'],
+        ['품의 폴더', folderUrl ? '<a href="' + folderUrl + '">' + folderUrl + '</a>' : '-'],
+      ])
+    + '</table>'
+    + '<p style="margin-top:14px;font-size:13px;">· 견적서가 첨부 중에 있다면 관리자가 PDF로 만들어 위 폴더에 <b style="font-family:monospace;">' + escapeHtml(quotePdfFileName(info.docNo)) + '</b> 이름으로 올리면 됩니다(자동 인식).<br>'
+    + '· 견적서 자체가 없는 품의라면 조치할 것이 없습니다.</p>'
+    + '</div>';
+  var plain = '견적서 미지정 ' + info.kind + '\n품의번호: ' + info.docNo + '\n기안자: ' + info.drafter + '\n품의제목: ' + info.subject
+    + '\n첨부: ' + (info.files.join(', ') || '없음') + (folderUrl ? '\n폴더: ' + folderUrl : '');
+  sendEmailWithRetry(toList.join(','), subj, plain, html);
 }
 
 /** 제출·재상신 직후: QUEUED 견적서가 있으면 큐에 등록 (실패해도 제출은 성공 — 관리자에게만 알림) */
