@@ -3174,7 +3174,9 @@ function getPrefillDataForClient(parentToken) {
     // 품목 파싱
     var items = parseItemsSummary(String(r[COL.ITEMS] || ''));
 
-    // 첨부 메타
+    // 첨부 메타 — [QUO] 관리자가 폴더에 올려 둔 견적서 PDF가 아직 Y열에 없으면 여기서 등록(PENDING 건만, 현재 폴더만).
+    //  PRC 폼은 구매팀·관리자만 열므로(위 점유 검사) 공유 설정 권한 문제 없음. 구매 담당자가 PDF를 보고 PRC 를 작성한다.
+    if ((isAdminUser(actor) || isProcurementUser(actor)) && reconcileQuotePdf(sheet, rowNum, r, { quick: true })) r = readRow(sheet, rowNum);
     var attachmentsRaw = parseAttachments(r[COL.ATTACH_LIST]);
     var attachments = attachmentsRaw.map(_attachMetaForClient_);
 
