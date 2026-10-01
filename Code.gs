@@ -30,7 +30,7 @@ var CONFIG = {
 
   // 견적서 PDF (QUO_{품의번호}.pdf) — 섹션 15-1
   QUOTE_PDF_MAX_BYTES:        10 * 1024 * 1024,  // 이보다 큰 원본은 변환 시도 없이 관리자 핸드오프
-  QUOTE_PDF_NOTIFY_ON_SUCCESS: true,             // 자동 변환 성공 시에도 관리자에게 품질 확인 메일
+  QUOTE_PDF_NOTIFY_ON_SUCCESS: false,            // 자동 변환 성공 메일은 보내지 않는다(실패 핸드오프만) — 2026-10-01 사용자 결정. 품질 점검이 필요하면 true
 
   // 락
   LOCK_WAIT_MS:          30000,             // LockService 대기 (NFR/FR-51)
