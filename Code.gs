@@ -1084,7 +1084,6 @@ function _submitCore(data) {
     var ss2    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet2 = getOrCreateSheet(ss2, CONFIG.SHEET_NAME);
     sheet2.getRange(lockResult.rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(savedFiles));
-    _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.token, data.docNo);
 
     // 요약 파일 저장 (오류 시에도 진행)
     try {
@@ -1104,6 +1103,7 @@ function _submitCore(data) {
       sendApprovalEmailWithRetry(approvers[0], data, lockResult.token, lockResult.rowNum, 0);
     } catch(e) {
       notifyAdminError('이메일 발송 실패 (제출): ' + data.docNo + ' / ' + e.toString());
+      _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.token, data.docNo);
       return {
         ok:       true,
         rowNum:   lockResult.rowNum,
@@ -1113,6 +1113,11 @@ function _submitCore(data) {
       };
     }
   }
+
+  // 6단계: 견적서 PDF 변환 큐 등록 — 결재 메일 '뒤'에 둔다. 전역 락이 바쁘면 여기서 기다리게 되는데,
+  //  그 대기가 결재 요청 메일을 늦추면 안 되기 때문. 등록 실패(락 타임아웃)는 관리자 알림만 하고
+  //  listPendingQuotePdf 가 15분 뒤 자동 재등록한다(QUEUED 자가 치유).
+  _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.token, data.docNo);
 
   return {
     ok:       true,
@@ -1824,7 +1829,6 @@ function _resubmitCore(payload) {
   var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
   var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
   sheet.getRange(lockResult.rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(savedFiles));
-  _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.newToken, payload.data.docNo);
 
   // 재상신 요약 파일
   try {
@@ -1847,6 +1851,9 @@ function _resubmitCore(payload) {
       notifyAdminError('이메일 발송 실패 (재상신): ' + payload.data.docNo + ' / ' + e.toString());
     }
   }
+
+  // 견적서 PDF 변환 큐 등록 — 결재 메일 뒤 (_submitCore 6단계와 같은 이유)
+  _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.newToken, payload.data.docNo);
 
   return {
     ok: true,
@@ -3172,7 +3179,8 @@ function getPrefillDataForClient(parentToken) {
     var attachments = attachmentsRaw.map(_attachMetaForClient_);
 
     var totalSize = 0;
-    attachments.forEach(function(a) { totalSize += a.size; });
+    // 시스템이 만든 견적서 PDF(role:'quote')는 사용자 업로드 합산(30MB)에 넣지 않는다 — 변환본 때문에 PRC 첨부가 막히면 안 됨
+    attachments.forEach(function(a) { if (a.role !== 'quote') totalSize += a.size; });
 
     // 부모 REQ의 결재자 내역 (PRC 폼에 표시용)
     var parentApprCount = parseInt(r[COL.APPR_COUNT]) || 0;
@@ -3265,7 +3273,7 @@ function _submitPrcCore(data) {
   // 사전 검증 (원본 REQ의 기존 첨부 + 신규 첨부 합산)
   try {
     var existingSize = 0;
-    (data.existingAttachments || []).forEach(function(a) { existingSize += Number(a.size) || 0; });
+    (data.existingAttachments || []).forEach(function(a) { if (a && a.role !== 'quote') existingSize += Number(a.size) || 0; });
     validateTotalAttachmentSize(data.attachments || [], existingSize);
   } catch(e) {
     return { ok: false, message: e.message };
@@ -3823,8 +3831,9 @@ function getRequisitionForViewer(token, urlIdxHint) {
       });
     }
 
-    // [QUO] 관리자가 폴더에 직접 올린 견적서 PDF가 있으면 여기서 Y열에 등록(대기 건에서만 동작 — 평소 비용 0)
-    if (reconcileQuotePdf(sheet, rowNum, r)) r = readRow(sheet, rowNum);
+    // [QUO] 관리자가 폴더에 직접 올린 견적서 PDF가 있으면 여기서 Y열에 등록
+    //  quick: PENDING 건에서만, 현재 폴더만(Drive 호출 ≤2). 그 외(평소)는 JSON 파싱 비용뿐 — 결재자 화면 지연 없음.
+    if (reconcileQuotePdf(sheet, rowNum, r, { quick: true })) r = readRow(sheet, rowNum);
 
     var attachmentsRaw = parseAttachments(r[COL.ATTACH_LIST]);
     var attachments = attachmentsRaw.map(_attachMetaForClient_);
@@ -3856,7 +3865,7 @@ function getRequisitionForViewer(token, urlIdxHint) {
             });
           }
           // 원본 REQ의 첨부(견적서 등) 메타 조회
-          if (reconcileQuotePdf(sheet, parentRowNum, pr)) pr = readRow(sheet, parentRowNum);
+          if (reconcileQuotePdf(sheet, parentRowNum, pr, { quick: true })) pr = readRow(sheet, parentRowNum);
           parentAttachments = parseAttachments(pr[COL.ATTACH_LIST]).map(_attachMetaForClient_);
         }
       } catch(_) { /* 부모 조회 실패는 viewer 본 기능에 영향 없음 */ }
@@ -4718,7 +4727,7 @@ function saveAttachmentsToFolder(folder, attachments, opts) {
         var file = folder.createFile(Utilities.newBlob(bytes, att.type || 'application/octet-stream', finalName));
         _shareFileDomainView_(file, finalName);
         meta = { name: finalName, id: file.getId(), size: att.size || bytes.length, type: att.type || '' };
-        if (isQuote) { meta.role = 'quote-src'; meta.quotePdf = 'QUEUED'; }
+        if (isQuote) { meta.role = 'quote-src'; meta.quotePdf = 'QUEUED'; meta.quoteQueuedAt = new Date().toISOString(); }
       }
       if (isQuote) quoteTaken = true;
       saved.push(meta);
@@ -4787,6 +4796,7 @@ function parseAttachments(json) {
 // ================================================================
 
 var QUOTE_PDF_CONVERTIBLE_EXTS = ['xlsx', 'xls', 'docx', 'doc', 'pptx', 'jpg', 'jpeg', 'png'];
+var QUOTE_PDF_REQUEUE_AFTER_MS = 15 * 60 * 1000;   // QUEUED 가 이 시간 넘게 남아 있으면 큐 재등록(자가 치유)
 // 관리자 처리 대기 목록에서 제외할 테스트 행 (실 업무 건 아님 — 2026-08-28 사용자 확정)
 var ADMIN_TASK_EXCLUDE_DOCNOS = ['PRQ-2026-001-01'];
 
@@ -4891,6 +4901,10 @@ function _processQuotePdfJob(job) {
   if (rowNum < 0) return { ok: true, skipped: true, message: '행 없음 — 견적서 변환 생략' };
 
   var r    = readRow(sheet, rowNum);
+  var st   = String(r[COL.STATUS] || '');
+  if (st === '폐기' || st === '반려') {
+    return { ok: true, skipped: true, message: '문서 상태 ' + st + ' — 견적서 변환 생략' };
+  }
   var list = parseAttachments(r[COL.ATTACH_LIST]);
   var src  = _findQuoteSrc_(list);
   if (!src || src.quotePdf !== 'QUEUED') {
@@ -5130,6 +5144,8 @@ function _moveFileToFolder_(fileId, dstFolderId) {
  *     뷰어에서는 끄고 FINAL 이동·관리자 목록에서만 켠다.
  *  탐색: 현재 DRIVE_ID 폴더 → 없으면 STAGING 경로(조회 전용). STAGING에서 찾았는데 행이 FINAL이면 FINAL로 옮긴다.
  *  opts.lockHeld: 호출자가 전역 락을 쥔 상태(moveAttachmentsToFinal 등) — withLock 재진입 금지.
+ *  opts.quick: 뷰어(결재자·기안자가 여는 화면)용 — PENDING 일 때만, 현재 폴더 1곳만 본다(Drive 호출 ≤2).
+ *     QUEUED(변환 중, 수 분)는 큐가 곧 처리하므로 보지 않고, STAGING 경로 탐색(폴더 4단계)은 FINAL 이동·관리자 목록에만 둔다.
  * @returns {boolean} Y열을 갱신했으면 true (호출자는 행을 다시 읽어야 한다)
  */
 function reconcileQuotePdf(sheet, rowNum, r, opts) {
@@ -5146,6 +5162,8 @@ function reconcileQuotePdf(sheet, rowNum, r, opts) {
       if (alive) return false;
     } else if (src.quotePdf !== 'QUEUED' && src.quotePdf !== 'PENDING') {
       return false;
+    } else if (opts.quick && src.quotePdf !== 'PENDING') {
+      return false;
     }
 
     var docNo    = String(r[COL.DOC_NO] || '');
@@ -5155,7 +5173,7 @@ function reconcileQuotePdf(sheet, rowNum, r, opts) {
     if (folderId) {
       try { found = _findLiveFileByName(DriveApp.getFolderById(folderId), fileName); } catch(_) {}
     }
-    if (!found) {
+    if (!found && !opts.quick) {
       var stg = findFolderByPath(docNo, r[COL.ISSUE_DATE], 'staging');
       if (stg && stg.getId() !== folderId) {
         found = _findLiveFileByName(stg, fileName);
@@ -5199,18 +5217,29 @@ function listPendingQuotePdf(rows) {
     var list = parseAttachments(r[COL.ATTACH_LIST]);
     var src  = _findQuoteSrc_(list);
     if (!src || !src.quotePdf || src.quotePdf === 'DONE') continue;
-    if (reconcileQuotePdf(sheet, i + 1, r)) continue;
     var docNo = String(r[COL.DOC_NO] || '');
+    var token = String(r[COL.TOKEN] || '');
+    if (src.quotePdf === 'PENDING') {
+      if (reconcileQuotePdf(sheet, i + 1, r)) continue;
+    } else if (src.quotePdf === 'QUEUED') {
+      // 큐 등록이 유실된 건(제출 시 락 타임아웃 등) 자가 치유 — 15분 넘게 QUEUED면 다시 등록.
+      //  enqueueJob 이 token+type 으로 중복을 걸러 주므로 이미 대기 중이면 아무 일도 없다.
+      var qAt = new Date(src.quoteQueuedAt || 0).getTime();
+      if (!qAt || Date.now() - qAt > QUOTE_PDF_REQUEUE_AFTER_MS) {
+        try { enqueueJob({ type: 'quote_pdf', token: token, docNo: docNo, docType: 'REQ' }); }
+        catch(e) { Logger.log('[QUO] 재등록 실패 ' + docNo + ': ' + e); }
+      }
+    }
     if (ADMIN_TASK_EXCLUDE_DOCNOS.indexOf(docNo) >= 0) continue;
     out.push({
       docNo:    docNo,
-      token:    String(r[COL.TOKEN]   || ''),
+      token:    token,
       drafter:  String(r[COL.DRAFTER] || ''),
       subject:  String(r[COL.SUBJECT] || ''),
       status:   String(r[COL.STATUS]  || ''),
       state:    src.quotePdf,                       // 'QUEUED' | 'PENDING'
       reason:   String(src.quoteReason || ''),
-      since:    String(src.quotePendingAt || ''),
+      since:    String(src.quotePendingAt || src.quoteQueuedAt || ''),
       folderId: String(r[COL.DRIVE_ID] || ''),
       origName: String(src.name || ''),
       origId:   String(src.id || ''),
@@ -6027,6 +6056,17 @@ var QUEUE_SAFETY_MARGIN_MS = 30 * 1000;     // 다음 job 진입 여유 (30초)
 //    1분은 트리거 간격과 같은 최소 단위(그보다 짧게 잡아도 어차피 다음 트리거),
 //    2회차 5분은 같은 장애 구간에서 또 소진되지 않도록 확실히 벌린 값이다.
 var QUEUE_RETRY_DELAYS_MS = [60 * 1000, 5 * 60 * 1000];
+// processing 인 채 이 시간이 지난 job 은 실행이 죽은 것(Apps Script 6분 한도·크래시)으로 보고 다시 집는다.
+//  한도 때문에 죽은 실행은 _finalizeJob 에 못 가므로 job 이 영원히 processing 으로 남는다(큐 정체).
+//  attempts 는 이미 _claimNextJob 에서 올라가 있어 재시도 횟수 계산은 그대로 맞는다.
+var QUEUE_STALE_PROCESSING_MS = 10 * 60 * 1000;
+
+function _isJobStaleProcessing(job, now) {
+  if (!job || job.status !== 'processing' || !job.lastStartedAt) return false;
+  var t = new Date(job.lastStartedAt).getTime();
+  if (isNaN(t)) return false;
+  return now - t > QUEUE_STALE_PROCESSING_MS;
+}
 
 /**
  * 작업을 큐에 추가
@@ -6217,6 +6257,7 @@ function _hasPendingJobUnlocked() {
     var queue = JSON.parse(PropertiesService.getScriptProperties().getProperty(QUEUE_KEY) || '[]');
     var now = Date.now();
     for (var i = 0; i < queue.length; i++) {
+      if (_isJobStaleProcessing(queue[i], now)) return true;
       if (queue[i].status !== 'pending') continue;
       if (_isJobDeferred(queue[i], now)) continue;
       return true;
@@ -6243,8 +6284,20 @@ function _claimNextJob() {
     //  notBefore가 아직인 job은 건너뛴다 — 그 job이 앞에 있어도 뒤의 job은 정상 처리된다.
     var now = Date.now();
     for (var i = 0; i < queue.length; i++) {
-      if (queue[i].status !== 'pending') continue;
-      if (_isJobDeferred(queue[i], now)) continue;
+      if (_isJobStaleProcessing(queue[i], now)) {
+        // 죽은 실행이 남긴 job — 재시도 한도를 넘었으면 failed 로 닫고(관리자 알림은 _finalizeJob 경로와 동일하게),
+        // 아니면 다시 집는다.
+        Logger.log('[Queue] stale processing 회수: ' + queue[i].id + ' (' + queue[i].type + ' ' + queue[i].docNo + ') attempts=' + queue[i].attempts);
+        if ((queue[i].attempts || 0) >= QUEUE_MAX_ATTEMPTS) {
+          queue[i].status = 'failed';
+          queue[i].lastError = '실행 시간 한도 초과 추정 (processing 정체)';
+          props.setProperty(QUEUE_KEY, JSON.stringify(queue));
+          continue;
+        }
+      } else {
+        if (queue[i].status !== 'pending') continue;
+        if (_isJobDeferred(queue[i], now)) continue;
+      }
       queue[i].status = 'processing';
       queue[i].attempts = (queue[i].attempts || 0) + 1;
       queue[i].lastStartedAt = new Date().toISOString();
