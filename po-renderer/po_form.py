@@ -61,6 +61,7 @@ NUMBER_FORMATS = {
     "USD": '_-[$$-409]* #,##0.00_ ;_-[$$-409]* \\-#,##0.00\\ ;_-[$$-409]* \\-??_ ;_-@_ ',
     "JPY": '_-[$¥-411]* #,##0_-;\\-[$¥-411]* #,##0_-;_-[$¥-411]* "-"_-;_-@_-',
     "EUR": '_-[$€-2]* #,##0.00_ ;_-[$€-2]* \\-#,##0.00\\ ;_-[$€-2]* \\-??_ ;_-@_ ',
+    "CNY": '_ [$¥-804]* #,##0.00_ ;_ [$¥-804]* \\-#,##0.00_ ;_ [$¥-804]* "-"??_ ;_ @_ ',   # Motek 237
 }
 DATE_FORMAT = "yyyy-mm-dd"
 
@@ -102,7 +103,7 @@ LETTERHEAD = {
 # 품목내역 둘째 필드가 이 목록에 들어맞으면 '단위'로, 아니면 '규격'으로 취급한다.
 UNIT_WORDS = {
     "ea", "pc", "pcs", "set", "sets", "box", "roll", "lot", "kg", "g", "m", "mm", "cm",
-    "hr", "hour", "md", "spl", "unit", "units", "pack",
+    "hr", "hour", "md", "spl", "unit", "units", "pack", "bt/l", "btl",
     "개", "대", "매", "권", "본", "세트", "조", "식", "회", "건", "박스", "롤", "장", "병",
     "캔", "통", "쌍", "년", "월", "일",
 }
@@ -237,7 +238,7 @@ def split_unit_spec(second_field: str):
     s = str(second_field or "").strip()
     if not s or re.fullmatch(r"\d+(?:\.\d+)?", s):   # 빈칸 또는 숫자만("1") → 단위 기본값
         return DEFAULT_UNIT, ""
-    m = re.fullmatch(r"(?:(\d+(?:\.\d+)?)\s*)?([A-Za-z가-힣]{1,4})", s)
+    m = re.fullmatch(r"(?:(\d+(?:\.\d+)?)\s*)?([A-Za-z가-힣/]{1,4})", s)    # '/' = BT/L(가스 용기)
     if m and m.group(2).lower() in UNIT_WORDS and (m.group(1) is None or float(m.group(1)) == 1):
         return m.group(2), ""
     return DEFAULT_UNIT, s
@@ -409,13 +410,18 @@ def fill(layout: FormLayout, order: PoOrder, rules: VendorRules):
     if order.issue_date:
         _set(ws, CELL_DATE, order.issue_date)
         ws[CELL_DATE].number_format = DATE_FORMAT
-    _set(ws, CELL_PAYMENT, rules.payment_terms(order.vendor_name, order.payment_terms_raw, kind))
+    payment = rules.payment_terms(order.vendor_name, order.payment_terms_raw, kind)
+    _set(ws, CELL_PAYMENT, payment)
+    if kind == "fx" and re.search(r"[가-힣]", payment or ""):
+        warnings.append(f"외자 주문서 Payment Terms가 국문입니다('{payment}') — --payment \"NET 30\" 등 영문으로 지정하세요.")
     _set(ws, CELL_DEST, order.destination or rules.destination(kind))
     _set(ws, CELL_REFERENCE, order.reference or None)      # 관례상 공란
     _set(ws, CELL_SHIPPER, rules.shipper(order.vendor_name))
     _set(ws, CELL_AMOUNT, f"=G{layout.sum_row}")
 
-    fmt = NUMBER_FORMATS.get(str(order.currency).upper(), NUMBER_FORMATS["KRW"])
+    fmt = NUMBER_FORMATS.get(str(order.currency).upper())
+    if fmt is None:     # 미등록 통화를 ₩ 서식으로 발행하지 않는다
+        raise SystemExit(f"[오류] 통화 서식 미등록: {order.currency} — po_form.NUMBER_FORMATS 에 추가하세요.")
     ws[CELL_AMOUNT].number_format = fmt      # 기준 양식의 통화($ 등)가 그대로 남지 않게
     remark_label = rules.remark_label(order.vendor_name)
 

@@ -34,12 +34,14 @@
     "디씨피":          { "shipper": "디씨피 주식회사", "file": "디씨피", "remark": "QUO NO." },
     "rfmtl":          { "shipper": "RFMTL(RF Materials)", "file": "RFMTL" },
     "한국생산기술연구원": { "shipper": "한국생산기술연구원" },
+    "미르글로벌테크":   { "shipper": "미르글로벌테크" },
     "viadcad":        { "shipper": "VIADCAD", "remark": "견적일자" },
     "coherent":       { "shipper": "COHERENT", "file": "Coherent", "base": "fx" },
     "hitronics":      { "shipper": "HI-TRONICS", "file": "Hitronics", "base": "fx" },
     "everprox":       { "shipper": "EverproX", "file": "EverproX", "base": "fx" },
     "optowide":       { "shipper": "Optowide", "file": "Optowide", "base": "fx" },
     "castech":        { "shipper": "CASTECH", "file": "Castech", "base": "fx" },
+    "motek":          { "shipper": "MOTEK", "file": "Motek", "remark": "Quotation Date", "base": "fx" },
     "kmco":           { "shipper": "Kawashima Manufacturing Co.,Ltd.(KMCO)", "file": "KMCO",
                         "remark": "Quotation No", "base": "fx", "terms": "kmco-2026-09" }
   },
@@ -76,11 +78,17 @@
     ]
   },
   "payment_alias": {
-    "_comment": "품의서 구매조건 원문 → 주문서 Payment Terms 표기. 외자(fx)는 fx 맵을 먼저 본다.",
+    "_comment": [
+      "품의서 구매조건 원문 → 주문서 Payment Terms 표기. 외자(fx)는 fx 맵을 먼저 본다.",
+      "외자 주문서에 국문 결제조건을 쓰지 않는다(2026-09-23 사용자 지시) — 품의서 '익월말'은 NET 30으로 발행."
+    ],
     "fx": {
       "NET 30": "T/T(NET 30 day)",
       "NET 60": "T/T(NET 60 day)",
-      "현금": "T/T in advance"
+      "현금": "T/T in advance",
+      "익월말": "T/T(NET 30 day)",
+      "익월말 현금": "T/T(NET 30 day)",
+      "익월말 현금 결제 조건": "T/T(NET 30 day)"
     },
     "krw": {
       "익월말": "익월말 현금 결제 조건",
