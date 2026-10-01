@@ -34,6 +34,16 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
 .result .msg{font-size:16px;font-weight:700;color:#111;margin-bottom:6px;}
 .result .sub{font-size:13px;color:#888;}
 .spinner{display:none;text-align:center;padding:20px 0;font-size:13px;color:#888;}
+/* 경고 모달 (브라우저 alert 대신) — 다른 화면의 pm-* 모달과 같은 모양 */
+.pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
+.pm-backdrop.show{display:flex;}
+.pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:360px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;word-break:keep-all;overflow-wrap:break-word;}
+.pm-x{width:54px;height:54px;border-radius:50%;background:#d64541;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+@keyframes pm-pop{0%{transform:scale(0);}50%{transform:scale(1.15);}100%{transform:scale(1);}}
+.pm-msg{font-size:15px;font-weight:700;color:#111;margin-bottom:6px;}
+.pm-sub{font-size:12px;color:#888;line-height:1.5;}
+.pm-confirm{margin-top:22px;padding:9px 32px;border-radius:8px;border:none;background:#83161A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-confirm:hover{background:#6B1115;}
 </style>
 </head>
 <body>
@@ -55,6 +65,16 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
       </div>
     </div>
     <div id="result-area" style="display:none"></div>
+  </div>
+</div>
+
+<!-- 경고 모달 (브라우저 alert 대신) -->
+<div class="pm-backdrop" id="pm-backdrop">
+  <div class="pm-card">
+    <div class="pm-x">!</div>
+    <div class="pm-msg" id="pm-msg"></div>
+    <div class="pm-sub" id="pm-sub"></div>
+    <div id="pm-actions"><button class="pm-confirm" id="pm-ok-btn">확인</button></div>
   </div>
 </div>
 
@@ -117,8 +137,7 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
     var comment   = commentEl ? commentEl.value.trim() : '';
 
     if(decision === 'reject' && !comment) {
-      alert('반려 시 사유를 입력해 주세요.');
-      if(commentEl) commentEl.focus();
+      showAlertModal('반려 시 사유를 입력해 주세요.', '', function(){ if(commentEl) commentEl.focus(); });
       return;
     }
 
@@ -150,6 +169,19 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
     } else {
       runner.processDecisionFromClient(payload);
     }
+  }
+
+  // 경고는 브라우저 alert 대신 모달 + 백그라운드로 (전 화면 공통 규칙). onClose는 확인을 누른 뒤 실행한다.
+  function showAlertModal(msg, sub, onClose) {
+    document.getElementById('pm-msg').textContent = msg;
+    document.getElementById('pm-sub').textContent = sub || '';
+    var ok = document.getElementById('pm-ok-btn');
+    ok.onclick = function(){ closeModal(); if(onClose) onClose(); };
+    document.getElementById('pm-backdrop').classList.add('show');
+    ok.focus();
+  }
+  function closeModal() {
+    document.getElementById('pm-backdrop').classList.remove('show');
   }
 
   function showResult(decision, res) {

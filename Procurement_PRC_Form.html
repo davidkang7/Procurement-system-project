@@ -112,7 +112,7 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 /* 처리 모달 (InLC 와인레드 스피너 + 회색 백그라운드) — Form과 동일 */
 .pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
 .pm-backdrop.show{display:flex;}
-.pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:360px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;}
+.pm-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:360px;max-width:calc(100vw - 32px);padding:32px 26px 28px;text-align:center;word-break:keep-all;overflow-wrap:break-word;}
 .pm-spinner{width:46px;height:46px;border:4px solid #eee;border-top-color:#83161A;border-radius:50%;animation:pm-spin .8s linear infinite;margin:0 auto 18px;}
 @keyframes pm-spin{to{transform:rotate(360deg);}}
 .pm-check{width:54px;height:54px;border-radius:50%;background:#27ae60;color:#fff;font-size:30px;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
@@ -122,6 +122,10 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .pm-sub{font-size:12px;color:#888;line-height:1.5;}
 .pm-confirm{margin-top:22px;padding:9px 32px;border-radius:8px;border:none;background:#83161A;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
 .pm-confirm:hover{background:#6B1115;}
+/* 확인창 (브라우저 confirm 대신) — Reject의 폐기 확인과 같은 ? 아이콘 + [취소][확인] */
+.pm-q{width:54px;height:54px;border-radius:50%;background:#83161A;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
+.pm-cancel{margin:22px 10px 0 0;padding:9px 28px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#555;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
+.pm-cancel:hover{background:#f3f3f3;}
 
 .status-banner{display:none;text-align:center;padding:14px;border-radius:6px;margin-top:12px;font-size:14px;font-weight:600;}
 .status-banner.loading{background:#fff8eb;color:#d97706;border:1px solid #f0d98f;}
@@ -736,7 +740,7 @@ function addRow(prefill){
 }
 function removeRow(btn){
   var rows = document.getElementById('items-body').children;
-  if(rows.length <= 1){ alert('최소 1개의 품목은 필요합니다.'); return; }
+  if(rows.length <= 1){ showAlertModal('최소 1개의 품목은 필요합니다.'); return; }
   btn.closest('tr').remove();
   calcTotal();
 }
@@ -1058,6 +1062,26 @@ function showErrorModal(detail){
 function closeModal(){
   document.getElementById('pm-backdrop').classList.remove('show');
 }
+// 확인창 — 브라우저 confirm() 대신 같은 pm-backdrop 안에서 [취소][확인]을 받는다 (Form과 동일).
+// subHtml은 호출부에서 escHtml 처리한 HTML. 확인을 누르면 모달을 닫고 onOk를 실행한다 (이어지는 처리 모달은 onOk가 다시 연다).
+function showConfirmModal(msg, subHtml, onOk, okLabel){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-q">?</div>';
+  document.getElementById('pm-msg').textContent = msg;
+  document.getElementById('pm-sub').innerHTML = subHtml || '';
+  document.getElementById('pm-actions').innerHTML =
+    '<button class="pm-cancel" onclick="closeModal()">취소</button>' +
+    '<button class="pm-confirm" id="pm-ok-btn">' + escHtml(okLabel || '확인') + '</button>';
+  document.getElementById('pm-ok-btn').onclick = function(){ closeModal(); onOk(); };
+  document.getElementById('pm-backdrop').classList.add('show');
+}
+// 경고 — 브라우저 alert() 대신
+function showAlertModal(msg, sub){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-x">!</div>';
+  document.getElementById('pm-msg').textContent = msg;
+  document.getElementById('pm-sub').textContent = sub || '';
+  document.getElementById('pm-actions').innerHTML = '<button class="pm-confirm" onclick="closeModal()">확인</button>';
+  document.getElementById('pm-backdrop').classList.add('show');
+}
 
 // ─── PRC 제출 ─────────────────────────────
 function submitForm(){
@@ -1132,11 +1156,16 @@ function submitForm(){
     }
   }
   if(dupNames.length > 0){
-    if(!confirm('동일한 결재자가 여러 단계에 배정되어 있습니다:\n· ' + dupNames.join('\n· ') + '\n\n이대로 제출하시겠습니까?')){
-      return;
-    }
+    showConfirmModal('동일한 결재자가 여러 단계에 배정되어 있습니다.',
+      dupNames.map(function(n){ return '· ' + escHtml(n); }).join('<br>') + '<br><br>이대로 제출하시겠습니까?',
+      function(){ submitFormConfirmed(docNo, subject, approvers); }, '계속 제출');
+    return;
   }
+  submitFormConfirmed(docNo, subject, approvers);
+}
 
+// 결재자 중복 확인 이후 단계 — 모달 응답이 비동기라 분리했다. 검증·페이로드는 분리 전과 동일.
+function submitFormConfirmed(docNo, subject, approvers){
   // 품목
   var items = [];
   document.querySelectorAll('#items-body tr').forEach(function(tr){
