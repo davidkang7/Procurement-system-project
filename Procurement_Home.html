@@ -238,12 +238,6 @@
   .spinner { width: 36px; height: 36px; border: 3px solid var(--line); border-top-color: var(--brand); border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 12px 22px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 2000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
-  .toast.show { opacity: 1; }
-  .toast.ok { background: var(--ok); color: #fff; }
-  .toast.err { background: var(--danger); color: #fff; }
-  .toast.info { background: var(--ink); color: #fff; }
-
   /* ─── PRC 픽업 모달 ─────────────────────────────────── */
   .pkmodal-backdrop { position: fixed; inset: 0; background: rgba(26,26,26,0.55); display: flex; align-items: center; justify-content: center; z-index: 3000; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
   .pkmodal-backdrop.show { opacity: 1; pointer-events: auto; }
@@ -328,7 +322,6 @@
   .seq-flag { color: var(--ink-mute); font-weight: 600; font-size: 10.5px; }
   .btn-insp { background: #0e7d72; color: #fff; border: none; border-radius: var(--radius-btn); padding: 6px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
   .btn-insp:hover { filter: brightness(1.08); }
-  .btn-insp.pending-feature { background: #aab4be; }
 </style>
 </head>
 <body>
@@ -359,8 +352,6 @@
     <div class="empty"><div class="spinner" style="margin:0 auto 8px;"></div>대시보드 데이터 로딩 중...</div>
   </main>
 </div>
-
-<div class="toast" id="toast"></div>
 
 <!-- ─── PRC 픽업 모달 ─────────────────────────────────── -->
 <div class="pkmodal-backdrop" id="pkmodal-backdrop" aria-hidden="true">
@@ -498,9 +489,6 @@ function apprSegments(node){
     { key:'approver', label:APPROVAL_SEGS[2].label, rows: rows.filter(function(x){ return stage(x) >= 1; }) },
   ];
 }
-
-// [INSP Step 2] 검수보고서 작성 화면 활성 여부 — Step 3 배포 시 true로 변경
-var INSP_FORM_ENABLED = true;   // [INSP Step 3] 작성 화면 활성화
 
 // ─── 부팅 ─────────────────────────────
 function boot(){
@@ -888,10 +876,6 @@ function attachContentHandlers(){
   Array.from(document.querySelectorAll('[data-insp-form]')).forEach(function(el){
     el.addEventListener('click', function(ev){
       ev.stopPropagation();
-      if(!INSP_FORM_ENABLED){
-        toast('info', '검수보고서 작성 기능은 다음 업데이트에서 활성화됩니다.');
-        return;
-      }
       var prcToken = el.getAttribute('data-insp-form');
       var resub = el.getAttribute('data-insp-resub') || '';
       window.top.location.href = WEBAPP_URL + '?action=insp_form&token=' + encodeURIComponent(prcToken)
@@ -1827,7 +1811,7 @@ function inspSubRows(x){
     x.insps.forEach(function(s){
       var act = '';
       if(s.status === '반려' && canSubmit){
-        act = '<button class="btn-insp' + (INSP_FORM_ENABLED ? '' : ' pending-feature') + '"'
+        act = '<button class="btn-insp"'
             + ' data-insp-form="' + escAttr(x.prcToken) + '" data-insp-resub="' + escAttr(s.token) + '">수정 재상신</button>';
       }
       var stTxt = s.status;
@@ -1859,7 +1843,7 @@ function inspSubRows(x){
   } else {
     var nextSeq = 1;
     (x.insps || []).forEach(function(s){ if(s.seq >= nextSeq) nextSeq = s.seq + 1; });
-    footer = '<button class="btn-insp' + (INSP_FORM_ENABLED ? '' : ' pending-feature') + '" style="margin-top:9px;"'
+    footer = '<button class="btn-insp" style="margin-top:9px;"'
       + ' data-insp-form="' + escAttr(x.prcToken) + '">+ 검수보고서 제출 (' + (nextSeq < 10 ? '0' + nextSeq : nextSeq) + '회차)</button>';
   }
 
@@ -2400,12 +2384,6 @@ function escHtml(s){
 }
 function escAttr(s){ return escHtml(s).replace(/'/g, '&#39;'); }
 
-function toast(type, msg){
-  var el = document.getElementById('toast');
-  el.className = 'toast ' + type + ' show';
-  el.textContent = msg;
-  setTimeout(function(){ el.className = 'toast'; }, 3000);
-}
 function showError(msg){
   document.getElementById('content').innerHTML =
     '<div class="role-empty-state"><h3>오류 발생</h3><div>' + escHtml(msg) + '</div>'

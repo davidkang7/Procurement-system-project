@@ -121,11 +121,13 @@
   .empty-state::before { content: '🔓'; display: block; font-size: 28px; margin-bottom: 10px; }
   .error-state { padding: 24px; text-align: center; color: var(--danger); font-size: 13px; background: var(--danger-soft); border-radius: 4px; }
 
-  /* 토스트 */
-  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 11px 22px; border-radius: 6px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none; max-width: 80%; }
-  .toast.show { opacity: 1; }
-  .toast.ok { background: var(--ok); color: #fff; }
-  .toast.err { background: var(--danger); color: #fff; }
+  /* 처리 결과 모달 — 토스트 대신 모달 + 백그라운드 (전 화면 공통 규칙). 확인 모달과 같은 틀, 머리 색만 결과별 */
+  .result-modal { max-width: 420px; }
+  .modal-head.ok { background: var(--ok-soft); }
+  .modal-head.ok .modal-title { color: #1c7a44; }
+  .modal-head.err { background: var(--danger-soft); }
+  .modal-head.err .modal-title { color: var(--danger); }
+  .result-body { word-break: keep-all; overflow-wrap: break-word; }
 
   /* 진행 인디케이터 (모달 안) */
   .progress-overlay { display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.85); align-items: center; justify-content: center; z-index: 10; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
@@ -212,7 +214,14 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- 처리 결과 모달 (토스트 대신) -->
+<div class="modal-overlay" id="result-modal">
+  <div class="modal result-modal">
+    <div class="modal-head" id="result-head"><div class="modal-title" id="result-title"></div></div>
+    <div class="modal-body result-body" id="result-body"></div>
+    <div class="modal-foot"><button class="btn btn-primary" id="result-ok" onclick="closeResult()">확인</button></div>
+  </div>
+</div>
 
 <script>
 // ============================================================
@@ -467,7 +476,7 @@ function executeRelease() {
 
   if (typeof google === 'undefined' || !google.script || !google.script.run) {
     closeConfirm();
-    toast('Google Apps Script 환경에서만 동작합니다.', 'err');
+    showResult('Google Apps Script 환경에서만 동작합니다.', 'err');
     return;
   }
 
@@ -496,14 +505,14 @@ function executeRelease() {
             msg += ' (점유자 ' + res.previousClaimer.split('@')[0] + '에게 통지)';
           }
         }
-        toast(msg, 'ok');
+        showResult(msg, 'ok');
       } else {
-        toast('해제 실패: ' + (res && res.message || '알 수 없는 오류'), 'err');
+        showResult('해제 실패: ' + (res && res.message || '알 수 없는 오류'), 'err');
       }
     })
     .withFailureHandler(function(err) {
       closeConfirm();
-      toast('해제 실패: ' + (err && err.message ? err.message : err), 'err');
+      showResult('해제 실패: ' + (err && err.message ? err.message : err), 'err');
     })
     .adminForceReleaseLockForClient({
       token:  sel.token,
@@ -514,11 +523,17 @@ function executeRelease() {
 // ============================================================
 // 유틸
 // ============================================================
-function toast(msg, type) {
-  var t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast show ' + (type || 'ok');
-  setTimeout(function() { t.classList.remove('show'); }, 3500);
+// 처리 결과 — 토스트 대신 모달 + 백그라운드로 띄우고 [확인]으로 닫는다 (전 화면 공통 규칙)
+function showResult(msg, type) {
+  var ok = type !== 'err';
+  document.getElementById('result-head').className = 'modal-head ' + (ok ? 'ok' : 'err');
+  document.getElementById('result-title').textContent = ok ? '✓ 처리 완료' : '✕ 처리 실패';
+  document.getElementById('result-body').textContent = msg;
+  document.getElementById('result-modal').classList.add('show');
+  document.getElementById('result-ok').focus();
+}
+function closeResult() {
+  document.getElementById('result-modal').classList.remove('show');
 }
 
 function escHtml(s) {
