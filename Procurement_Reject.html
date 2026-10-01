@@ -51,6 +51,11 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .attach-zone p{font-size:11px;color:#777;}
 .attach-item{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#666;padding:4px 0;border-bottom:1px solid #eee;}
 .attach-item.err{color:#c0392b;}
+.attach-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.quote-pick{display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#555;cursor:pointer;white-space:nowrap;}
+.quote-pick input{margin:0;cursor:pointer;}
+.quote-pick.off{color:#bbb;cursor:not-allowed;}
+.quote-pick.off input{cursor:not-allowed;}
 .action-bar{display:flex;gap:12px;justify-content:center;margin-top:4px;}
 .btn{padding:10px 32px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
 .btn-resubmit{background:#1a6fc4;color:#fff;border:1px solid #1a6fc4;}
@@ -84,7 +89,7 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .pm-cancel:hover{background:#f3f3f3;}
 @media print{
   body{background:#fff;padding:0;}
-  .action-bar,.status-msg,.attach-zone,.add-row-btn,.del-btn,.home-btn,.pm-backdrop{display:none!important;}
+  .action-bar,.status-msg,.attach-zone,.add-row-btn,.del-btn,.quote-pick,.home-btn,.pm-backdrop{display:none!important;}
   @page{size:A4 portrait;margin:10mm;}
 }
 </style>
@@ -153,8 +158,9 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
     </div>
   </div>
   <div class="form-card">
-    <div class="form-card-head">첨부파일 <span style="font-size:10px;color:#888;font-weight:400;">— 허용: pdf, jpg, png, xlsx, docx, pptx, hwp, zip / 파일당 최대 25MB</span></div>
+    <div class="form-card-head">첨부파일 <span style="font-size:10px;color:#888;font-weight:400;">— 허용: pdf, jpg, jpeg, png, xlsx, xls, docx, doc, pptx, hwp, zip / 파일당 최대 25MB</span></div>
     <div class="form-card-body">
+      <div style="padding:0 0 6px;font-size:10px;color:#777;line-height:1.5;">반려 시 이전 첨부는 삭제되었습니다. 첨부 중 <b>견적서 1건</b>을 지정해 주세요. 재상신 후 자동으로 PDF 변환되어 <b>QUO_{품의번호}.pdf</b>로 함께 보관됩니다(hwp/zip 제외).</div>
       <div class="attach-zone" onclick="document.getElementById('file-in').click()">
         <input type="file" id="file-in" multiple style="display:none" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.doc,.pptx,.hwp,.zip" onchange="handleFiles(this.files)">
         <p>클릭하여 파일 추가 (견적서 등 — PDF, XLSX, DOCX)</p>
@@ -185,6 +191,7 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 <script>
 var MAX_FILE_SIZE = 25 * 1024 * 1024;
 var ALLOWED_EXTS  = ['pdf','jpg','jpeg','png','xlsx','xls','docx','doc','pptx','hwp','zip'];
+var QUOTE_PICK_EXTS = ['pdf','xlsx','xls','docx','doc','pptx','jpg','jpeg','png'];   // 견적서로 지정 가능(PDF 변환 가능) — hwp/zip 제외
 
 var TOKEN = '<?= token ?>';
 var DOC_NO = '<?= docNo ?>';
@@ -316,8 +323,10 @@ function handleFiles(files){
     } else {
       attachedFiles.push(f);
       idx = attachedFiles.length - 1;
-      d.innerHTML = '<span>'+escHtml(f.name)+' <span style="font-size:10px;color:#aaa">('+sz+')</span></span>'+
-        '<button class="del-btn" onclick="removeFile('+idx+',this)">×</button>';
+      var ext = (f.name.split('.').pop() || '').toLowerCase();
+      d.innerHTML = '<span>'+escHtml(f.name)+' <span style="font-size:10px;color:#aaa">('+sz+')</span></span>'
+        +'<span class="attach-actions">' + quotePickLabel(idx, ext)
+        +'<button class="del-btn" onclick="removeFile('+idx+',this)">×</button></span>';
     }
     list.appendChild(d);
   });
@@ -325,7 +334,33 @@ function handleFiles(files){
 }
 function removeFile(idx, btn){
   attachedFiles[idx] = null;
-  btn.parentElement.remove();
+  btn.closest('.attach-item').remove();   // 라디오도 행과 함께 사라진다
+}
+
+// ─── 견적서 지정 ─────────────────────────────
+// 첨부 목록의 '견적서' 라디오 1건 → 서버가 QUO_{품의번호}.pdf 로 변환·보관한다(제출 후 비동기, 제출 시간 영향 없음).
+function quotePickLabel(idx, ext){
+  var ok = QUOTE_PICK_EXTS.indexOf(ext) >= 0;
+  return '<label class="quote-pick' + (ok ? '' : ' off') + '"'
+    + (ok ? '' : ' title="hwp·zip은 PDF로 변환할 수 없어 견적서로 지정할 수 없습니다"') + '>'
+    + '<input type="radio" name="quote-pick" value="' + idx + '"' + (ok ? '' : ' disabled') + '> 견적서</label>';
+}
+// 지정된 첨부의 attachedFiles 인덱스, 없으면 -1
+function getQuotePickIdx(){
+  var el = document.querySelector('input[name="quote-pick"]:checked');
+  if(!el) return -1;
+  var idx = parseInt(el.value, 10);
+  return (isNaN(idx) || !attachedFiles[idx]) ? -1 : idx;
+}
+// 서버 페이로드(fileData)는 validFiles 순서 — 지정 파일에 isQuote 플래그를 붙인다(정확히 1건)
+function flagQuoteFile(validFiles, fileData){
+  var idx = getQuotePickIdx();
+  if(idx < 0) return fileData;
+  var target = attachedFiles[idx];
+  for(var i = 0; i < validFiles.length; i++){
+    if(validFiles[i] === target && fileData[i]){ fileData[i].isQuote = true; break; }
+  }
+  return fileData;
 }
 
 function readFileAsBase64(file){
@@ -381,6 +416,17 @@ function showErrorModal(msg, detail){
 function closeModal(){
   document.getElementById('pm-backdrop').classList.remove('show');
 }
+// 확인창 — 브라우저 confirm() 대신 같은 모달(? 아이콘 + 취소/확인). 모달은 비동기라 이후 로직은 onOk 콜백으로.
+function showConfirmModal(msg, subHtml, onOk, okLabel){
+  document.getElementById('pm-icon').innerHTML = '<div class="pm-q">?</div>';
+  document.getElementById('pm-msg').textContent = msg;
+  document.getElementById('pm-sub').innerHTML = subHtml || '';
+  document.getElementById('pm-actions').innerHTML =
+    '<button class="pm-cancel" onclick="closeModal()">취소</button>' +
+    '<button class="pm-confirm" id="pm-ok-btn">' + escHtml(okLabel || '확인') + '</button>';
+  document.getElementById('pm-ok-btn').onclick = function(){ closeModal(); onOk(); };
+  document.getElementById('pm-backdrop').classList.add('show');
+}
 
 function collectData(){
   var items = [];
@@ -422,7 +468,18 @@ function doResubmit(){
     showStatus('error','결재자 정보를 불러오지 못했습니다. 페이지를 새로고침 해주세요.');
     return;
   }
+  // 견적서 미지정 확인 (모달) → 계속이면 proceedResubmit
+  if(getQuotePickIdx() < 0){
+    showConfirmModal('견적서로 지정된 첨부가 없습니다.',
+      '견적서를 지정하면 QUO_{품의번호}.pdf로 자동 변환·보관됩니다(회계 자료용).<br><br>이대로 재상신하시겠습니까?',
+      proceedResubmit, '계속 재상신');
+    return;
+  }
+  proceedResubmit();
+}
 
+// 견적서 확인 이후 단계 — 모달 응답이 비동기라 분리했다. 검증·페이로드는 분리 전과 동일.
+function proceedResubmit(){
   var btnR = document.getElementById('resubmit-btn');
   var btnD = document.getElementById('discard-btn');
   btnR.disabled = true;
@@ -457,7 +514,7 @@ function doResubmit(){
     showProgressSub('서버로 업로드 중입니다...');
 
     var data = collectData();
-    data.attachments = fileData;
+    data.attachments = flagQuoteFile(validFiles, fileData);   // 견적서 지정 1건 → isQuote
     var payload = {action: 'resubmit', token: TOKEN, data: data};
 
     google.script.run

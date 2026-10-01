@@ -90,6 +90,12 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .resub-btn{margin-left:12px;padding:7px 18px;border-radius:6px;border:1px solid #F57F17;background:#F57F17;color:#fff;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;vertical-align:middle;white-space:nowrap;}
 .resub-btn:hover{background:#e06d0a;border-color:#e06d0a;}
 .readonly-badge{display:inline-block;font-size:10px;background:#f0f0f0;color:#888;padding:2px 8px;border-radius:10px;margin-left:8px;vertical-align:middle;}
+/* 견적서 PDF(QUO_) 상태 배지 */
+.quote-badge{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin-left:6px;vertical-align:middle;white-space:nowrap;}
+.quote-badge.done{background:#e8f6ee;color:#27ae60;}
+.quote-badge.wait{background:#fef3e2;color:#d97706;}
+.quote-badge.pending{background:#fdecec;color:#d64541;}
+.attach-orig{font-size:10px;color:#999;margin-left:4px;}
 .loading-wrap{text-align:center;padding:60px;color:#888;font-size:14px;}
 /* 승인/반려 처리 모달 (InLC 와인레드 스피너 + 회색 백그라운드) */
 .pm-backdrop{position:fixed;inset:0;background:rgba(70,70,70,.55);display:none;align-items:center;justify-content:center;z-index:9000;}
@@ -264,9 +270,19 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
         var ic = getFileIconClass(f.name);
         var it = getFileIconText(f.name);
         var viewUrl = f.viewUrl || '';
+        // 견적서(QUO_) 상태: 변환본은 '견적서', 원본은 변환 진행 상태만 표시(DONE이면 배지 없음)
+        var badge = '';
+        if(f.role === 'quote'){
+          badge = '<span class="quote-badge done">견적서</span>'
+            + (f.origName ? '<span class="attach-orig">(원본: '+escHtml(f.origName)+')</span>' : '');
+        } else if(f.role === 'quote-src' && f.quotePdf === 'QUEUED'){
+          badge = '<span class="quote-badge wait">견적서 원본 · PDF 변환 중</span>';
+        } else if(f.role === 'quote-src' && f.quotePdf === 'PENDING'){
+          badge = '<span class="quote-badge pending">견적서 원본 · PDF 생성 대기(관리자)</span>';
+        }
         return '<div class="attach-item">'
           +'<div class="attach-icon '+ic+'">'+escHtml(it)+'</div>'
-          +'<span class="attach-name">'+escHtml(f.name)+(f.size ? '<span class="attach-size">('+fmtSize(f.size)+')</span>' : '')+'</span>'
+          +'<span class="attach-name">'+escHtml(f.name)+(f.size ? '<span class="attach-size">('+fmtSize(f.size)+')</span>' : '')+badge+'</span>'
           +'<div class="attach-btns">'
           + (viewUrl ? '<a class="attach-btn primary" href="'+viewUrl+'" target="_blank" rel="noopener">첨부 파일 확인 및 다운로드</a>' : '')
           +'</div></div>';

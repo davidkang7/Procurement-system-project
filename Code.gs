@@ -28,6 +28,10 @@ var CONFIG = {
   MAX_TOTAL_SIZE:        30 * 1024 * 1024,  // REQ+PRC 합산 30MB (FR-09a)
   ALLOWED_EXTS:          ['pdf','jpg','jpeg','png','xlsx','xls','docx','doc','pptx','hwp','zip'],
 
+  // 견적서 PDF (QUO_{품의번호}.pdf) — 섹션 15-1
+  QUOTE_PDF_MAX_BYTES:        10 * 1024 * 1024,  // 이보다 큰 원본은 변환 시도 없이 관리자 핸드오프
+  QUOTE_PDF_NOTIFY_ON_SUCCESS: true,             // 자동 변환 성공 시에도 관리자에게 품질 확인 메일
+
   // 락
   LOCK_WAIT_MS:          30000,             // LockService 대기 (NFR/FR-51)
   LOCK_HELD_WARN_MS:     5000,              // 이 시간 넘게 락을 쥔 실행은 실행 로그에 경고 기록
@@ -579,6 +583,10 @@ var AUDIT_EVENT = {
   PO_GENERATED:    'PO_GENERATED',    // 주문서 xlsx/PDF 생성·업로드 완료 마감
   PO_SKIPPED:      'PO_SKIPPED',      // 주문서 발행 불요 처리(사유 기록)
 
+  // 견적서 PDF (QUO_) — 섹션 15-1
+  QUOTE_PDF_GENERATED: 'QUOTE_PDF_GENERATED',   // 자동 변환 또는 관리자 업로드본 등록
+  QUOTE_PDF_PENDING:   'QUOTE_PDF_PENDING',     // 변환 실패 → 관리자 핸드오프
+
   // 추후 확장 자리:
   // DOC_SUBMIT, PRC_CLAIM, PRC_RELEASE, PRC_SUBMIT,
   // DRIVE_SAVE_FAIL, LINK_INVALID_ACCESS
@@ -1058,10 +1066,10 @@ function _submitCore(data) {
 
   var savedFiles = [];
   try {
-    savedFiles = saveAttachmentsToFolder(folder, data.attachments || []);
+    // 견적서(isQuote) 지정분은 여기서 변환하지 않는다 — 원본만 저장하고 큐에 넘긴다(기안자 대기 시간 불변).
+    savedFiles = saveAttachmentsToFolder(folder, data.attachments || [], { quoteDocNo: data.docNo });
   } catch(e) {
-    // 업로드 실패 시 행은 남기고 사용자에게 안내
-    rollbackFiles(savedFiles);
+    // 업로드 실패 시 행은 남기고 사용자에게 안내 (생성된 파일 롤백은 saveAttachmentsToFolder 내부에서 수행)
     // 시트 상태를 ERROR로 표시
     try {
       var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
@@ -1076,6 +1084,7 @@ function _submitCore(data) {
     var ss2    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet2 = getOrCreateSheet(ss2, CONFIG.SHEET_NAME);
     sheet2.getRange(lockResult.rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(savedFiles));
+    _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.token, data.docNo);
 
     // 요약 파일 저장 (오류 시에도 진행)
     try {
@@ -1806,9 +1815,8 @@ function _resubmitCore(payload) {
 
   var savedFiles = [];
   try {
-    savedFiles = saveAttachmentsToFolder(folder, payload.data.attachments || []);
+    savedFiles = saveAttachmentsToFolder(folder, payload.data.attachments || [], { quoteDocNo: payload.data.docNo });
   } catch(e) {
-    rollbackFiles(savedFiles);
     return { ok: false, message: '첨부파일 업로드 실패: ' + e.toString() };
   }
 
@@ -1816,6 +1824,7 @@ function _resubmitCore(payload) {
   var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
   var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
   sheet.getRange(lockResult.rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(savedFiles));
+  _enqueueQuotePdfIfNeeded_(savedFiles, lockResult.newToken, payload.data.docNo);
 
   // 재상신 요약 파일
   try {
@@ -3160,15 +3169,7 @@ function getPrefillDataForClient(parentToken) {
 
     // 첨부 메타
     var attachmentsRaw = parseAttachments(r[COL.ATTACH_LIST]);
-    var attachments = attachmentsRaw.map(function(f) {
-      return {
-        name: String(f.name || ''),
-        id:   String(f.id   || ''),
-        size: Number(f.size) || 0,
-        type: String(f.type || ''),
-        viewUrl:     'https://drive.google.com/file/d/' + f.id + '/view',
-      };
-    });
+    var attachments = attachmentsRaw.map(_attachMetaForClient_);
 
     var totalSize = 0;
     attachments.forEach(function(a) { totalSize += a.size; });
@@ -3364,7 +3365,6 @@ function _submitPrcCore(data) {
   try {
     savedFiles = saveAttachmentsToFolder(folder, data.attachments || []);
   } catch(e) {
-    rollbackFiles(savedFiles);
     return { ok: false, message: '구매 문서 첨부파일 업로드 실패: ' + e.toString() };
   }
 
@@ -3692,6 +3692,8 @@ function getHomeDataForClient() {
       // 누산 시점에 이미 isAdmin으로 걸렀지만, 삼항을 한 번 더 두어 서버측 권한 백스톱으로 삼는다.
       allPending:     isAdmin ? allPending : [],
       allInspPending: isAdmin ? (inspMenus.allInspPending || []) : [],
+      // [관리자 처리 대기 배너] 견적서 PDF · 주문서 · 검수보고서 PDF — 시트 상태가 근거(메일을 놓쳐도 홈에 남는다)
+      adminTasks:     isAdmin ? _collectAdminTasks_(rows) : null,
       // [설정 유지] 마지막 컬럼 필터 설정. 홈은 서버를 원래 1회만 부르므로 여기에 실어
       //   보내면 왕복이 늘지 않고, 화면이 이 응답을 받은 뒤에야 그려지므로 깜빡임도 없다.
       prefs: _readUserPrefs(),
@@ -3699,6 +3701,23 @@ function getHomeDataForClient() {
   } catch(err) {
     return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
   }
+}
+
+/**
+ * 관리자 홈 배너용 처리 대기 목록. 각 소스는 독립적으로 실패해도 홈 로딩을 막지 않는다.
+ * @param rows 홈이 이미 읽은 품의서목록 전체 행(헤더 포함) — 견적서는 재읽기 없이 여기서 추출
+ */
+function _collectAdminTasks_(rows) {
+  var t = { quotePdf: [], po: [], insp: [] };
+  try { t.quotePdf = listPendingQuotePdf(rows); }
+  catch(e) { Logger.log('[AdminTasks] 견적서 목록 실패: ' + e); }
+  try { t.po = (typeof listPoPending === 'function') ? listPoPending() : []; }
+  catch(e) { Logger.log('[AdminTasks] 주문서 목록 실패: ' + e); }
+  try {
+    t.insp = ((typeof listInspAwaitingPdf === 'function') ? listInspAwaitingPdf() : [])
+      .filter(function(x) { return ADMIN_TASK_EXCLUDE_DOCNOS.indexOf(String(x.docNo || '')) < 0; });
+  } catch(e) { Logger.log('[AdminTasks] 검수보고서 목록 실패: ' + e); }
+  return t;
 }
 
 // ================================================================
@@ -3804,17 +3823,11 @@ function getRequisitionForViewer(token, urlIdxHint) {
       });
     }
 
+    // [QUO] 관리자가 폴더에 직접 올린 견적서 PDF가 있으면 여기서 Y열에 등록(대기 건에서만 동작 — 평소 비용 0)
+    if (reconcileQuotePdf(sheet, rowNum, r)) r = readRow(sheet, rowNum);
+
     var attachmentsRaw = parseAttachments(r[COL.ATTACH_LIST]);
-    var attachments = attachmentsRaw.map(function(f) {
-      return {
-        name: String(f.name || ''),
-        id:   String(f.id   || ''),
-        size: Number(f.size) || 0,
-        type: String(f.type || ''),
-        viewUrl:     'https://drive.google.com/file/d/' + f.id + '/view',
-        downloadUrl: 'https://drive.google.com/uc?export=download&id=' + f.id,
-      };
-    });
+    var attachments = attachmentsRaw.map(_attachMetaForClient_);
 
     // ── PRC 문서이면 부모 REQ의 결재 내역 + 원본 첨부도 함께 조회 ──
     // (PRC viewer에서 1차 결재 현황 및 원본 REQ 견적서 등을 보여주기 위함)
@@ -3843,16 +3856,8 @@ function getRequisitionForViewer(token, urlIdxHint) {
             });
           }
           // 원본 REQ의 첨부(견적서 등) 메타 조회
-          parentAttachments = parseAttachments(pr[COL.ATTACH_LIST]).map(function(f) {
-            return {
-              name: String(f.name || ''),
-              id:   String(f.id   || ''),
-              size: Number(f.size) || 0,
-              type: String(f.type || ''),
-              viewUrl:     'https://drive.google.com/file/d/' + f.id + '/view',
-              downloadUrl: 'https://drive.google.com/uc?export=download&id=' + f.id,
-            };
-          });
+          if (reconcileQuotePdf(sheet, parentRowNum, pr)) pr = readRow(sheet, parentRowNum);
+          parentAttachments = parseAttachments(pr[COL.ATTACH_LIST]).map(_attachMetaForClient_);
         }
       } catch(_) { /* 부모 조회 실패는 viewer 본 기능에 영향 없음 */ }
     }
@@ -4627,53 +4632,118 @@ function createFileInFolder(folder, fileName, content, mimeType) {
   return folder.createFile(fileName, content, mimeType);
 }
 
+// 폴더에 같은 이름의 '살아있는' 파일이 있으면 반환, 없으면 null.
+//  ⚠ getFilesByName은 휴지통 파일도 반환한다(getOrCreateSubFolder와 같은 함정).
+//    반려 시 첨부를 휴지통으로 보내므로, 그대로 쓰면 재상신 때 '원본(1).xlsx'처럼
+//    불필요한 접미사가 붙고 QUO_ 파일명이 흔들린다 → 살아있는 것만 충돌로 본다.
+function _findLiveFileByName(folder, name) {
+  var it = folder.getFilesByName(name);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) return f;
+  }
+  return null;
+}
+
 function uniqueFileName(folder, name) {
-  if (!folder.getFilesByName(name).hasNext()) return name;
+  if (!_findLiveFileByName(folder, name)) return name;
   var dot = name.lastIndexOf('.');
   var base = dot > 0 ? name.substring(0, dot) : name;
   var ext  = dot > 0 ? name.substring(dot)    : '';
   for (var i = 1; i < 100; i++) {
     var candidate = base + '(' + i + ')' + ext;
-    if (!folder.getFilesByName(candidate).hasNext()) return candidate;
+    if (!_findLiveFileByName(folder, candidate)) return candidate;
   }
   return base + '_' + Date.now() + ext;
 }
 
-function saveAttachmentsToFolder(folder, attachments) {
+// 폴더(구매팀 전용) 권한과 무관하게, 결재 라인의 타 부서 기안자/결재자가
+// 링크로 열람할 수 있도록 파일 단위로 도메인 링크 공유(읽기)를 부여.
+// 도메인 정책으로 막히면 조용히 무시(업로드 자체는 계속 진행).
+function _shareFileDomainView_(file, label) {
+  try {
+    file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch(e) {
+    Logger.log('[첨부 공유 실패] ' + label + ' (id: ' + file.getId() + '): ' + e);
+  }
+}
+
+/**
+ * 첨부 저장 (REQ 제출 · 재상신 · PRC 제출 공통)
+ * @param folder       저장할 Drive 폴더
+ * @param attachments  [{name,type,size,data(base64),isQuote?}]
+ * @param opts         { quoteDocNo } — 있으면 isQuote 첨부를 견적서로 취급(섹션 15-1)
+ *                     · pdf 원본: 변환 불필요 → QUO_{docNo}.pdf 로 바로 저장 (role:'quote', DONE)
+ *                     · 그 외   : 원본 그대로 저장 + role:'quote-src', quotePdf:'QUEUED' → 큐가 변환
+ *                     · hwp/zip : 변환 불가 → 거부
+ *                     여기서는 변환을 하지 않는다 — 제출 응답 시간을 늘리지 않기 위함.
+ * @returns 저장된 메타 배열 (Y열 JSON). 실패 시 이 호출에서 만든 파일을 전부 휴지통으로 보내고 throw.
+ */
+function saveAttachmentsToFolder(folder, attachments, opts) {
+  opts = opts || {};
+  var quoteDocNo = opts.quoteDocNo ? String(opts.quoteDocNo) : '';
+  var quoteTaken = false;
   var saved = [];
-  (attachments || []).forEach(function(att) {
-    if (!att || !att.data) return;
+  try {
+    (attachments || []).forEach(function(att) {
+      if (!att || !att.data) return;
 
-    if (att.size && att.size > CONFIG.MAX_FILE_SIZE) {
-      throw new Error('파일 크기 초과 (' + att.name + '): 최대 ' + (CONFIG.MAX_FILE_SIZE / 1024 / 1024) + 'MB');
-    }
-    var ext = (att.name || '').split('.').pop().toLowerCase();
-    if (CONFIG.ALLOWED_EXTS.indexOf(ext) < 0) {
-      throw new Error('허용되지 않는 파일 형식: ' + att.name);
-    }
+      if (att.size && att.size > CONFIG.MAX_FILE_SIZE) {
+        throw new Error('파일 크기 초과 (' + att.name + '): 최대 ' + (CONFIG.MAX_FILE_SIZE / 1024 / 1024) + 'MB');
+      }
+      var ext = (att.name || '').split('.').pop().toLowerCase();
+      if (CONFIG.ALLOWED_EXTS.indexOf(ext) < 0) {
+        throw new Error('허용되지 않는 파일 형식: ' + att.name);
+      }
 
-    var bytes    = Utilities.base64Decode(att.data);
-    var finalName = uniqueFileName(folder, att.name);
-    var blob     = Utilities.newBlob(bytes, att.type || 'application/octet-stream', finalName);
-    var file     = folder.createFile(blob);
+      // 견적서는 1건만 — 둘 이상 지정돼 와도 첫 번째만 채택(클라이언트 우회 방어)
+      var isQuote = !!(quoteDocNo && att.isQuote === true && !quoteTaken);
+      if (isQuote && ext !== 'pdf' && QUOTE_PDF_CONVERTIBLE_EXTS.indexOf(ext) < 0) {
+        throw new Error('견적서는 PDF·이미지·Office 파일만 지정할 수 있습니다: ' + att.name);
+      }
 
-    // 폴더(구매팀 전용) 권한과 무관하게, 결재 라인의 타 부서 기안자/결재자가
-    // 링크로 열람할 수 있도록 파일 단위로 도메인 링크 공유(읽기)를 부여.
-    // 도메인 정책으로 막히면 조용히 무시(업로드 자체는 계속 진행).
-    try {
-      file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
-    } catch(e) {
-      Logger.log('[첨부 공유 실패] ' + finalName + ' (id: ' + file.getId() + '): ' + e);
-    }
-
-    saved.push({
-      name: finalName,
-      id:   file.getId(),
-      size: att.size || bytes.length,
-      type: att.type || '',
+      var bytes = Utilities.base64Decode(att.data);
+      var meta;
+      if (isQuote && ext === 'pdf') {
+        var quoteName = quotePdfFileName(quoteDocNo);
+        _trashLiveFilesByName_(folder, quoteName);
+        var qfile = folder.createFile(Utilities.newBlob(bytes, 'application/pdf', quoteName));
+        _shareFileDomainView_(qfile, quoteName);
+        meta = {
+          name: quoteName, id: qfile.getId(), size: att.size || bytes.length, type: 'application/pdf',
+          role: 'quote', origName: att.name, quotePdf: 'DONE', source: 'upload',
+        };
+      } else {
+        var finalName = uniqueFileName(folder, att.name);
+        var file = folder.createFile(Utilities.newBlob(bytes, att.type || 'application/octet-stream', finalName));
+        _shareFileDomainView_(file, finalName);
+        meta = { name: finalName, id: file.getId(), size: att.size || bytes.length, type: att.type || '' };
+        if (isQuote) { meta.role = 'quote-src'; meta.quotePdf = 'QUEUED'; }
+      }
+      if (isQuote) quoteTaken = true;
+      saved.push(meta);
     });
-  });
+  } catch(e) {
+    // 호출부의 savedFiles는 아직 []라 거기서 롤백하면 아무것도 지워지지 않는다 → 여기서 지운다.
+    rollbackFiles(saved);
+    throw e;
+  }
   return saved;
+}
+
+// 첨부 메타 → 화면 전달용 (뷰어 · PRC 폼 공용)
+function _attachMetaForClient_(f) {
+  return {
+    name: String(f.name || ''),
+    id:   String(f.id   || ''),
+    size: Number(f.size) || 0,
+    type: String(f.type || ''),
+    role:     String(f.role || ''),        // 'quote' | 'quote-src' | ''
+    origName: String(f.origName || ''),
+    quotePdf: String(f.quotePdf || ''),    // 'QUEUED' | 'PENDING' | 'DONE' | ''
+    viewUrl:     'https://drive.google.com/file/d/' + f.id + '/view',
+    downloadUrl: 'https://drive.google.com/uc?export=download&id=' + f.id,
+  };
 }
 
 function rollbackFiles(savedFiles) {
@@ -4694,6 +4764,461 @@ function parseAttachments(json) {
     var parsed = JSON.parse(json || '[]');
     return Array.isArray(parsed) ? parsed : [];
   } catch(_) { return []; }
+}
+
+// ================================================================
+// 15-1. 견적서 PDF — QUO_{품의번호}.pdf
+// ================================================================
+//  목적: 회계팀이 FINAL 폴더에서 견적서를 일관된 파일명·확장자로 가져갈 수 있게 한다.
+//  흐름:
+//   제출(동기)   saveAttachmentsToFolder — pdf면 QUO_로 바로 저장, 그 외는 원본 저장 + QUEUED
+//                → _enqueueQuotePdfIfNeeded_ → 큐 job 'quote_pdf'  (기안자·결재자 대기 시간에 영향 없음)
+//   큐(비동기)   _processQuotePdfJob — 원본을 Drive에서 읽어 Google 문서/시트 경유 PDF 변환(락 밖)
+//                성공 → QUO_ 저장 + Y열 등록(DONE) + 관리자 품질확인 메일
+//                용량 초과 → 재시도 없이 PENDING + 관리자 핸드오프 메일
+//                변환 예외 → 큐 재시도(1분·5분) → 3회째 processQueueTrigger 가 PENDING 처리
+//   관리자       원본으로 PDF를 만들어 품의 폴더(STAGING 또는 FINAL)에 QUO_{docNo}.pdf 로 업로드
+//                (품질 불량 교체는 기존 파일의 Drive '버전 관리 → 새 버전 업로드' — id가 유지되어 추가 조치 없음)
+//   자동 인식    reconcileQuotePdf — 뷰어 열람·FINAL 이동·관리자 홈/listPendingQuotePdf 시점에
+//                폴더의 QUO_ 파일을 Y열에 등록. STAGING에 남아 있으면 FINAL로 옮긴다.
+//  Y열 메타: 원본 {role:'quote-src', quotePdf:'QUEUED'|'PENDING'|'DONE', quoteReason?, quotePendingAt?}
+//            PDF  {role:'quote', origName, quotePdf:'DONE', source:'upload'|'auto'|'admin'}
+//  ⚠ FINAL 이동은 Y열이 아니라 STAGING 폴더의 모든 파일을 옮기므로(섹션 19) 원본·PDF가 함께 간다.
+// ================================================================
+
+var QUOTE_PDF_CONVERTIBLE_EXTS = ['xlsx', 'xls', 'docx', 'doc', 'pptx', 'jpg', 'jpeg', 'png'];
+// 관리자 처리 대기 목록에서 제외할 테스트 행 (실 업무 건 아님 — 2026-08-28 사용자 확정)
+var ADMIN_TASK_EXCLUDE_DOCNOS = ['PRQ-2026-001-01'];
+
+// 파일명에 못 쓰는 문자 치환 (품의번호는 자유 입력)
+function safeFileToken(s) {
+  var t = String(s || '').replace(/[\\\/:*?"<>|\x00-\x1f]/g, '_').trim();
+  return t || 'UNKNOWN';
+}
+function quotePdfFileName(docNo) { return 'QUO_' + safeFileToken(docNo) + '.pdf'; }
+
+function _trashLiveFilesByName_(folder, name) {
+  var it = folder.getFilesByName(name);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) { try { f.setTrashed(true); } catch(_) {} }
+  }
+}
+
+function _findQuoteSrc_(list) {
+  for (var i = 0; i < list.length; i++) if (list[i] && list[i].role === 'quote-src') return list[i];
+  return null;
+}
+function _findQuoteEntry_(list) {
+  for (var i = 0; i < list.length; i++) if (list[i] && list[i].role === 'quote') return list[i];
+  return null;
+}
+
+/** 제출·재상신 직후: QUEUED 견적서가 있으면 큐에 등록 (실패해도 제출은 성공 — 관리자에게만 알림) */
+function _enqueueQuotePdfIfNeeded_(savedFiles, token, docNo) {
+  var queued = (savedFiles || []).some(function(f) { return f && f.role === 'quote-src' && f.quotePdf === 'QUEUED'; });
+  if (!queued) return;
+  try {
+    enqueueJob({ type: 'quote_pdf', token: token, docNo: docNo, docType: 'REQ' });
+  } catch(e) {
+    notifyAdminError('견적서 PDF 큐 등록 실패: ' + docNo + ' / ' + e.toString());
+  }
+}
+
+/**
+ * 원본 blob → PDF blob. Google 문서/시트/프레젠테이션으로 임시 변환 후 PDF로 내보낸다(INSP와 같은 경로).
+ *  · xlsx/xls: getAs(PDF)는 페이지 설정을 못 줘 넓은 시트가 잘린다 → export URL(가로·폭맞춤)로 받고, 실패 시 getAs 폴백
+ *  · 이미지  : <img data URI> HTML → Google 문서 → PDF (newBlob(html).getAs(PDF)는 img를 못 그림 — GAS_PDF_이미지렌더링_노트.md)
+ *  임시 파일은 finally에서 삭제. 예외는 호출자(큐)가 재시도 판단에 쓰므로 그대로 던진다.
+ */
+function convertToQuotePdf(blob, ext, fileName) {
+  ext = String(ext || '').toLowerCase();
+  var tmpId = null, pdf;
+  try {
+    if (ext === 'xlsx' || ext === 'xls') {
+      tmpId = Drive.Files.create({ name: 'QUO_TMP_' + fileName, mimeType: MimeType.GOOGLE_SHEETS }, blob, { supportsAllDrives: true }).id;
+      pdf = _exportSheetAsPdf_(tmpId);
+    } else if (ext === 'docx' || ext === 'doc') {
+      tmpId = Drive.Files.create({ name: 'QUO_TMP_' + fileName, mimeType: MimeType.GOOGLE_DOCS }, blob, { supportsAllDrives: true }).id;
+      pdf = DriveApp.getFileById(tmpId).getAs(MimeType.PDF);
+    } else if (ext === 'pptx') {
+      tmpId = Drive.Files.create({ name: 'QUO_TMP_' + fileName, mimeType: MimeType.GOOGLE_SLIDES }, blob, { supportsAllDrives: true }).id;
+      pdf = DriveApp.getFileById(tmpId).getAs(MimeType.PDF);
+    } else if (ext === 'jpg' || ext === 'jpeg' || ext === 'png') {
+      var mime = (ext === 'png') ? 'image/png' : 'image/jpeg';
+      var html = '<html><body style="margin:0;"><img src="data:' + mime + ';base64,'
+               + Utilities.base64Encode(blob.getBytes()) + '" style="max-width:100%;"></body></html>';
+      var htmlBlob = Utilities.newBlob(html, MimeType.HTML, fileName + '.html');
+      tmpId = Drive.Files.create({ name: 'QUO_TMP_' + fileName, mimeType: MimeType.GOOGLE_DOCS }, htmlBlob, { supportsAllDrives: true }).id;
+      pdf = DriveApp.getFileById(tmpId).getAs(MimeType.PDF);
+    } else {
+      throw new Error('PDF 변환을 지원하지 않는 형식: ' + ext);
+    }
+  } finally {
+    if (tmpId) { try { Drive.Files.remove(tmpId); } catch(_) {} }
+  }
+  pdf.setName(fileName);
+  return pdf;
+}
+
+function _exportSheetAsPdf_(fileId) {
+  var url = 'https://docs.google.com/spreadsheets/d/' + fileId + '/export'
+          + '?format=pdf&size=A4&portrait=false&fitw=true&gridlines=false'
+          + '&sheetnames=false&printtitle=false&pagenumbers=false&fzr=false';
+  try {
+    var res = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() === 200) return res.getBlob();
+    Logger.log('[QUO] 시트 export ' + res.getResponseCode() + ' → getAs 폴백');
+  } catch(e) {
+    Logger.log('[QUO] 시트 export 실패 → getAs 폴백: ' + e);
+  }
+  return DriveApp.getFileById(fileId).getAs(MimeType.PDF);
+}
+
+/**
+ * 큐 job 'quote_pdf' 처리 (processQueueTrigger에서 호출, 락 밖)
+ *  반환 ok:false 는 '재시도하면 될 수도 있는' 실패(변환 예외)에만 쓴다 — 큐가 1분·5분 뒤 다시 집고,
+ *  3회째에는 processQueueTrigger 가 _markQuotePdfPending 으로 관리자 핸드오프한다.
+ *  용량 초과·원본 소실처럼 재시도가 무의미한 경우는 여기서 바로 PENDING 처리하고 ok:true.
+ */
+function _processQuotePdfJob(job) {
+  var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+  var rowNum = findRowNumByToken(sheet, job.token);
+  if (rowNum < 0) return { ok: true, skipped: true, message: '행 없음 — 견적서 변환 생략' };
+
+  var r    = readRow(sheet, rowNum);
+  var list = parseAttachments(r[COL.ATTACH_LIST]);
+  var src  = _findQuoteSrc_(list);
+  if (!src || src.quotePdf !== 'QUEUED') {
+    return { ok: true, skipped: true, message: '변환 대기 견적서 없음(반려·재상신·기처리)' };
+  }
+  var docNo    = String(r[COL.DOC_NO] || job.docNo || '');
+  var fileName = quotePdfFileName(docNo);
+
+  var srcFile = null;
+  try { srcFile = DriveApp.getFileById(src.id); if (srcFile.isTrashed()) srcFile = null; } catch(_) { srcFile = null; }
+  if (!srcFile) {
+    _markQuotePdfPending(job.token, '원본 파일을 찾을 수 없음 (' + src.name + ')');
+    return { ok: true, message: '원본 없음 → 관리자 핸드오프' };
+  }
+
+  var size = srcFile.getSize();
+  if (size > CONFIG.QUOTE_PDF_MAX_BYTES) {
+    _markQuotePdfPending(job.token, '용량 초과 ' + (Math.round(size / 1024 / 1024 * 10) / 10) + 'MB (자동 변환 한도 '
+      + Math.round(CONFIG.QUOTE_PDF_MAX_BYTES / 1024 / 1024) + 'MB)');
+    return { ok: true, message: '용량 초과 → 관리자 핸드오프' };
+  }
+
+  var ext = String(src.name || '').split('.').pop().toLowerCase();
+  // ── 변환 (락 밖, 수 초~15초) — 예외는 큐 재시도로
+  var pdfBlob = convertToQuotePdf(srcFile.getBlob(), ext, fileName);
+
+  var folder  = DriveApp.getFolderById(String(r[COL.DRIVE_ID] || ''));
+  _trashLiveFilesByName_(folder, fileName);
+  var pdfFile = folder.createFile(pdfBlob);
+  _shareFileDomainView_(pdfFile, fileName);
+  var pdfMeta = {
+    name: fileName, id: pdfFile.getId(), size: pdfFile.getSize(), type: 'application/pdf',
+    role: 'quote', origName: src.name, quotePdf: 'DONE', source: 'auto',
+  };
+
+  // ── Y열 등록 (락 안, 재조회) — 그 사이 반려로 첨부가 교체됐으면 방금 만든 PDF는 버린다
+  var reg = _registerQuotePdf_(job.token, pdfMeta);
+  if (!reg.ok) {
+    try { pdfFile.setTrashed(true); } catch(_) {}
+    return { ok: true, skipped: true, message: reg.message };
+  }
+
+  if (CONFIG.QUOTE_PDF_NOTIFY_ON_SUCCESS) {
+    try { _sendQuotePdfReviewEmail_(reg.info, pdfMeta, src); }
+    catch(e) { Logger.log('[QUO] 품질확인 메일 실패: ' + e); }
+  }
+  return { ok: true, message: '견적서 PDF 생성: ' + fileName, fileId: pdfFile.getId() };
+}
+
+/** 행 메타(메일·목록용) */
+function _quoteRowInfo_(r, rowNum) {
+  return {
+    rowNum:    rowNum,
+    docNo:     String(r[COL.DOC_NO]  || ''),
+    token:     String(r[COL.TOKEN]   || ''),
+    subject:   String(r[COL.SUBJECT] || ''),
+    drafter:   String(r[COL.DRAFTER] || ''),
+    folderId:  String(r[COL.DRIVE_ID] || ''),
+  };
+}
+
+/**
+ * QUO_ PDF 를 Y열에 등록 (quote 항목 추가/교체 + quote-src DONE). 락 안에서 행을 재조회한다.
+ *  lockHeld=true 면 호출자가 이미 전역 락을 쥐고 있다(withLock 은 재진입 불가) — 그대로 쓴다.
+ */
+function _registerQuotePdf_(token, pdfMeta, lockHeld) {
+  var work = function() {
+    var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+    var rowNum = findRowNumByToken(sheet, token);
+    if (rowNum < 0) return { ok: false, message: '행 없음(토큰 교체·폐기)' };
+    var r    = readRow(sheet, rowNum);
+    var list = parseAttachments(r[COL.ATTACH_LIST]);
+    var src  = _findQuoteSrc_(list);
+    if (!src) return { ok: false, message: '견적서 원본 항목 없음(반려로 첨부 교체됨)' };
+
+    var next = list.filter(function(f) { return !(f && f.role === 'quote'); });
+    next.push(pdfMeta);
+    src.quotePdf = 'DONE';
+    delete src.quoteReason;
+    delete src.quotePendingAt;
+    sheet.getRange(rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(next));
+
+    var info = _quoteRowInfo_(r, rowNum);
+    try {
+      writeAuditLog({
+        eventType: AUDIT_EVENT.QUOTE_PDF_GENERATED, docNo: info.docNo, docToken: token, docType: 'REQ',
+        reason: '견적서 PDF 등록(' + (pdfMeta.source || '') + '): ' + pdfMeta.name + ' ← ' + (pdfMeta.origName || ''),
+        payload: { fileId: pdfMeta.id, source: pdfMeta.source },
+      });
+    } catch(_) {}
+    return { ok: true, info: info };
+  };
+  return lockHeld ? work() : withLock(work);
+}
+
+/** 변환 실패 → quote-src 를 PENDING 으로 표시하고 관리자에게 핸드오프 메일 (자체 락 — 락 밖에서 호출할 것) */
+function _markQuotePdfPending(token, reason) {
+  var res = withLock(function() {
+    var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+    var rowNum = findRowNumByToken(sheet, token);
+    if (rowNum < 0) return null;
+    var r    = readRow(sheet, rowNum);
+    var list = parseAttachments(r[COL.ATTACH_LIST]);
+    var src  = _findQuoteSrc_(list);
+    if (!src) return null;
+    if (src.quotePdf === 'DONE') return null;   // 그 사이 관리자가 올려 둔 경우
+    src.quotePdf       = 'PENDING';
+    src.quoteReason    = String(reason || '').substring(0, 300);
+    src.quotePendingAt = new Date().toISOString();
+    sheet.getRange(rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(list));
+    var info = _quoteRowInfo_(r, rowNum);
+    try {
+      writeAuditLog({
+        eventType: AUDIT_EVENT.QUOTE_PDF_PENDING, docNo: info.docNo, docToken: token, docType: 'REQ',
+        reason: '견적서 PDF 자동 변환 실패 → 관리자 핸드오프: ' + src.quoteReason,
+        payload: { origName: src.name, origId: src.id },
+      });
+    } catch(_) {}
+    return { info: info, src: src };
+  });
+  if (!res) return false;
+  try { _sendQuotePdfHandoffEmail_(res.info, res.src); }
+  catch(e) { notifyAdminError('견적서 PDF 핸드오프 메일 실패: ' + res.info.docNo + ' / ' + e.toString()); }
+  return true;
+}
+
+function _quoteMailRows_(pairs) {
+  return pairs.map(function(p) {
+    return '<tr><td style="color:#888;padding:4px 12px 4px 0;white-space:nowrap;">' + escapeHtml(p[0]) + '</td><td>' + p[1] + '</td></tr>';
+  }).join('');
+}
+
+/** 변환 실패 핸드오프 메일 — 관리자가 원본으로 PDF를 만들어 폴더에 올리면 자동 인식된다(수동 마감 없음) */
+function _sendQuotePdfHandoffEmail_(info, src) {
+  var toList = CONFIG.ADMIN_NOTIFY_EMAILS || [];
+  if (!toList.length) return;
+  var fileName  = quotePdfFileName(info.docNo);
+  var origUrl   = 'https://drive.google.com/file/d/' + src.id + '/view';
+  var folderUrl = 'https://drive.google.com/drive/folders/' + info.folderId;
+  var subj = '[견적서 PDF 생성 요청] ' + info.docNo + ' - ' + info.subject;
+  var html = '<div style="font-family:sans-serif;max-width:620px;">'
+    + '<h2 style="color:#83161A;">견적서 PDF 자동 변환 실패 — 수동 생성 요청</h2>'
+    + '<p>아래 품의의 견적서를 PDF로 자동 변환하지 못했습니다. 원본으로 PDF를 만들어 품의 폴더에 올려 주세요.<br>'
+    + '결재 진행에는 영향이 없습니다(결재자는 원본으로 결재합니다).</p>'
+    + '<table style="border-collapse:collapse;font-size:14px;">'
+    + _quoteMailRows_([
+        ['품의번호', escapeHtml(info.docNo)],
+        ['기안자',   escapeHtml(info.drafter)],
+        ['품의제목', escapeHtml(info.subject)],
+        ['실패 사유', '<span style="color:#c0392b;">' + escapeHtml(src.quoteReason || '') + '</span>'],
+        ['원본 파일', '<a href="' + origUrl + '">' + escapeHtml(src.name) + '</a>'],
+        ['품의 폴더', '<a href="' + folderUrl + '">' + folderUrl + '</a>'],
+        ['업로드 파일명', '<b style="font-family:monospace;">' + escapeHtml(fileName) + '</b>'],
+      ])
+    + '</table>'
+    + '<p style="margin-top:14px;font-size:13px;">· 위 폴더에 <b>정확히 이 파일명</b>으로 업로드하면 시스템이 자동 인식해 첨부 목록에 등록합니다. 별도 마감 실행은 필요 없습니다.<br>'
+    + '· 결재가 끝나 FINAL로 이동한 뒤라면 FINAL 폴더에 올려도 되고, STAGING 폴더에 올려도 자동으로 옮겨집니다.<br>'
+    + '· 미처리 건은 관리자 홈 상단 배너와 GAS <b>listPendingQuotePdf()</b> 에서 확인할 수 있습니다.</p>'
+    + '</div>';
+  var plain = '견적서 PDF 생성 요청\n품의번호: ' + info.docNo + '\n기안자: ' + info.drafter + '\n품의제목: ' + info.subject
+    + '\n실패 사유: ' + (src.quoteReason || '') + '\n원본: ' + origUrl + '\n폴더: ' + folderUrl
+    + '\n업로드 파일명: ' + fileName + '\n(같은 이름으로 폴더에 올리면 자동 인식됩니다)';
+  sendEmailWithRetry(toList.join(','), subj, plain, html);
+}
+
+/** 자동 변환 성공 — 잘림·깨짐 확인 요청 메일 */
+function _sendQuotePdfReviewEmail_(info, pdfMeta, src) {
+  var toList = CONFIG.ADMIN_NOTIFY_EMAILS || [];
+  if (!toList.length) return;
+  var pdfUrl    = 'https://drive.google.com/file/d/' + pdfMeta.id + '/view';
+  var origUrl   = 'https://drive.google.com/file/d/' + src.id + '/view';
+  var folderUrl = 'https://drive.google.com/drive/folders/' + info.folderId;
+  var subj = '[견적서 PDF 변환 완료·확인 요망] ' + info.docNo + ' - ' + info.subject;
+  var html = '<div style="font-family:sans-serif;max-width:620px;">'
+    + '<h2 style="color:#0e7d72;">견적서 PDF 자동 변환 완료</h2>'
+    + '<p>엑셀·오피스 문서를 Google 변환기로 PDF화했습니다. 표가 잘리거나 깨지지 않았는지 한 번 확인해 주세요.</p>'
+    + '<table style="border-collapse:collapse;font-size:14px;">'
+    + _quoteMailRows_([
+        ['품의번호', escapeHtml(info.docNo)],
+        ['기안자',   escapeHtml(info.drafter)],
+        ['품의제목', escapeHtml(info.subject)],
+        ['변환 PDF', '<a href="' + pdfUrl + '">' + escapeHtml(pdfMeta.name) + '</a>'],
+        ['원본 파일', '<a href="' + origUrl + '">' + escapeHtml(src.name) + '</a>'],
+        ['품의 폴더', '<a href="' + folderUrl + '">' + folderUrl + '</a>'],
+      ])
+    + '</table>'
+    + '<p style="margin-top:14px;font-size:13px;">· 품질이 나쁘면 원본으로 PDF를 다시 만든 뒤, 위 변환 PDF 파일에서 Drive <b>버전 관리 → 새 버전 업로드</b>로 교체하세요(링크·등록 그대로 유지, 추가 조치 없음).<br>'
+    + '· 또는 변환 PDF를 휴지통으로 보내고 같은 이름(<b>' + escapeHtml(pdfMeta.name) + '</b>)으로 다시 올려도 FINAL 이동 시 자동 재연결됩니다.</p>'
+    + '</div>';
+  var plain = '견적서 PDF 변환 완료 — 확인 요망\n품의번호: ' + info.docNo + '\n품의제목: ' + info.subject
+    + '\n변환 PDF: ' + pdfUrl + '\n원본: ' + origUrl + '\n폴더: ' + folderUrl
+    + '\n품질 불량 시: 해당 PDF 파일에서 버전 관리 → 새 버전 업로드';
+  sendEmailWithRetry(toList.join(','), subj, plain, html);
+}
+
+/** getOrCreateFolder 와 같은 경로 계산이되 생성하지 않는 조회 전용. 없으면 null. */
+function findFolderByPath(docNo, issueDate, type) {
+  try {
+    var rootId = (type === 'final') ? CONFIG.FINAL_ROOT_ID : CONFIG.STAGING_ROOT_ID;
+    var root   = DriveApp.getFolderById(rootId);
+    var date   = issueDate ? new Date(issueDate) : new Date();
+    if (isNaN(date.getTime())) date = new Date();
+    var year   = date.getFullYear().toString();
+    var month  = ('0' + (date.getMonth() + 1)).slice(-2) + '월';
+    var y = _findLiveSubFolder_(root, year); if (!y) return null;
+    var m = _findLiveSubFolder_(y, month);   if (!m) return null;
+    return _findLiveSubFolder_(m, docNo);
+  } catch(_) { return null; }
+}
+function _findLiveSubFolder_(parent, name) {
+  var it = parent.getFoldersByName(name);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) return f;
+  }
+  return null;
+}
+
+/** 파일 1건을 다른 폴더로 이동 (부모 교체 — _moveAllFilesToFolder 와 같은 방식) */
+function _moveFileToFolder_(fileId, dstFolderId) {
+  var meta = Drive.Files.get(fileId, { supportsAllDrives: true, fields: 'id,name,parents' });
+  Drive.Files.update({}, fileId, null, {
+    supportsAllDrives: true,
+    addParents:    dstFolderId,
+    removeParents: (meta.parents || []).join(','),
+    fields:        'id,parents',
+  });
+}
+
+/**
+ * 관리자가 폴더에 직접 올린 QUO_{docNo}.pdf 를 Y열에 등록(자동 인식).
+ *  동작 조건(그 외 즉시 return false — 비용 0):
+ *   · quote-src 가 있고 quotePdf 가 QUEUED/PENDING (PDF 미등록)
+ *   · opts.checkReplaced: 등록된 PDF가 휴지통에 갔는지도 확인(품질 불량 교체 케이스). Drive 호출 1회가 들므로
+ *     뷰어에서는 끄고 FINAL 이동·관리자 목록에서만 켠다.
+ *  탐색: 현재 DRIVE_ID 폴더 → 없으면 STAGING 경로(조회 전용). STAGING에서 찾았는데 행이 FINAL이면 FINAL로 옮긴다.
+ *  opts.lockHeld: 호출자가 전역 락을 쥔 상태(moveAttachmentsToFinal 등) — withLock 재진입 금지.
+ * @returns {boolean} Y열을 갱신했으면 true (호출자는 행을 다시 읽어야 한다)
+ */
+function reconcileQuotePdf(sheet, rowNum, r, opts) {
+  opts = opts || {};
+  try {
+    var list = parseAttachments(r[COL.ATTACH_LIST]);
+    var src  = _findQuoteSrc_(list);
+    if (!src) return false;
+    var cur = _findQuoteEntry_(list);
+    if (cur) {
+      if (!opts.checkReplaced) return false;
+      var alive = false;
+      try { alive = !DriveApp.getFileById(cur.id).isTrashed(); } catch(_) {}
+      if (alive) return false;
+    } else if (src.quotePdf !== 'QUEUED' && src.quotePdf !== 'PENDING') {
+      return false;
+    }
+
+    var docNo    = String(r[COL.DOC_NO] || '');
+    var fileName = quotePdfFileName(docNo);
+    var folderId = String(r[COL.DRIVE_ID] || '');
+    var found = null;
+    if (folderId) {
+      try { found = _findLiveFileByName(DriveApp.getFolderById(folderId), fileName); } catch(_) {}
+    }
+    if (!found) {
+      var stg = findFolderByPath(docNo, r[COL.ISSUE_DATE], 'staging');
+      if (stg && stg.getId() !== folderId) {
+        found = _findLiveFileByName(stg, fileName);
+        if (found && folderId && String(r[COL.MOVE_STATUS] || '') === 'FINAL') {
+          try { _moveFileToFolder_(found.getId(), folderId); }
+          catch(e) { Logger.log('[QUO] STAGING→FINAL 이동 실패 ' + fileName + ': ' + e); }
+        }
+      }
+    }
+    if (!found) return false;
+    if (cur && cur.id === found.getId()) return false;
+
+    _shareFileDomainView_(found, fileName);
+    var meta = {
+      name: fileName, id: found.getId(), size: found.getSize(), type: 'application/pdf',
+      role: 'quote', origName: src.name, quotePdf: 'DONE', source: 'admin',
+    };
+    var reg = _registerQuotePdf_(String(r[COL.TOKEN] || ''), meta, !!opts.lockHeld);
+    if (reg.ok) Logger.log('[QUO] 관리자 업로드 PDF 자동 인식: ' + docNo);
+    return !!reg.ok;
+  } catch(e) {
+    Logger.log('[QUO] reconcile 실패 (row ' + rowNum + '): ' + e);
+    return false;
+  }
+}
+
+/**
+ * 견적서 PDF 미처리 목록 (관리자 홈 배너 · GAS 편집기 워크리스트)
+ *  · Y열 quote-src.quotePdf 가 QUEUED/PENDING 인 행. 폐기 행 제외.
+ *  · 각 행에 reconcileQuotePdf 를 먼저 시도 — 올려만 두고 아무도 열지 않은 건은 여기서 마감된다.
+ * @param {Array=} rows 홈이 이미 읽은 품의서목록 전체 행(헤더 포함). 없으면 직접 읽는다.
+ */
+function listPendingQuotePdf(rows) {
+  var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+  if (!rows) rows = (sheet.getLastRow() < 2) ? [] : sheet.getDataRange().getValues();
+  var out = [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r[COL.STATUS] || '') === '폐기') continue;
+    var list = parseAttachments(r[COL.ATTACH_LIST]);
+    var src  = _findQuoteSrc_(list);
+    if (!src || !src.quotePdf || src.quotePdf === 'DONE') continue;
+    if (reconcileQuotePdf(sheet, i + 1, r)) continue;
+    var docNo = String(r[COL.DOC_NO] || '');
+    if (ADMIN_TASK_EXCLUDE_DOCNOS.indexOf(docNo) >= 0) continue;
+    out.push({
+      docNo:    docNo,
+      token:    String(r[COL.TOKEN]   || ''),
+      drafter:  String(r[COL.DRAFTER] || ''),
+      subject:  String(r[COL.SUBJECT] || ''),
+      status:   String(r[COL.STATUS]  || ''),
+      state:    src.quotePdf,                       // 'QUEUED' | 'PENDING'
+      reason:   String(src.quoteReason || ''),
+      since:    String(src.quotePendingAt || ''),
+      folderId: String(r[COL.DRIVE_ID] || ''),
+      origName: String(src.name || ''),
+      origId:   String(src.id || ''),
+      fileName: quotePdfFileName(docNo),
+    });
+  }
+  Logger.log('[QUO] 미처리 ' + out.length + '건: ' + out.map(function(x) { return x.docNo + '(' + x.state + ')'; }).join(', '));
+  return out;
 }
 
 // ================================================================
@@ -5072,6 +5597,9 @@ function moveAttachmentsToFinal(token) {
       sheet.getRange(rowNum, COL.DRIVE_ID + 1, 1, 1).setValue(finalFolderId);
       sheet.getRange(rowNum, COL.MOVE_STATUS + 1, 1, 1).setValue('FINAL');
 
+      // [QUO] 관리자가 올려 둔 견적서 PDF(폴더째 함께 이동됨)를 Y열에 등록. 락을 쥔 상태라 lockHeld.
+      try { reconcileQuotePdf(sheet, rowNum, readRow(sheet, rowNum), { checkReplaced: true, lockHeld: true }); } catch(_) {}
+
       if (failedFiles.length > 0) {
         return {
           ok: true,
@@ -5156,6 +5684,9 @@ function consolidateToFinalByPrc(prcToken) {
       sheet.getRange(prcRowNum, COL.MOVE_STATUS + 1, 1, 1).setValue('FINAL');
       sheet.getRange(reqRowNum, COL.DRIVE_ID + 1, 1, 1).setValue(finalFolderId);
       sheet.getRange(reqRowNum, COL.MOVE_STATUS + 1, 1, 1).setValue('FINAL');
+
+      // [QUO] REQ 견적서 PDF(관리자 업로드분 포함)를 Y열에 등록. 락을 쥔 상태라 lockHeld.
+      try { reconcileQuotePdf(sheet, reqRowNum, readRow(sheet, reqRowNum), { checkReplaced: true, lockHeld: true }); } catch(_) {}
 
       var totalMoved = prcResult.moved + reqResult.moved;
       var totalFailed = (prcResult.failed || []).concat(reqResult.failed || []);
@@ -5472,6 +6003,7 @@ function regeneratePdfForClient(payload) {
 // Job 구조:     { id, type, token, docNo, docType, attempts, status, enqueuedAt, lastError?, notBefore? }
 // Job 타입:     'pdf_only'              REQ 최종승인 → PDF 생성만
 //               'pdf_and_consolidate'   PRC 최종승인 → PDF + FINAL 통합 이동
+//               'quote_pdf'             REQ 제출/재상신 → 견적서 원본을 QUO_{품의번호}.pdf 로 변환 (섹션 15-1)
 // 처리 주기:    Time-based Trigger, 1분 간격 — installQueueTrigger() 1회 호출하여 설치
 // 한 트리거당:  while 루프로 시간 한도 안에 최대한 많이 처리
 //               (예: 4분 한도 - 30초 안전 마진 → 12초/건 시 약 17건 가능)
@@ -5509,9 +6041,11 @@ function enqueueJob(job) {
     try { queue = JSON.parse(queueStr); }
     catch(_) { queue = []; }
 
-    // 중복 방지: 같은 토큰의 pending job이 이미 있으면 추가하지 않음
+    // 중복 방지: 같은 토큰·같은 타입의 pending job이 이미 있으면 추가하지 않음
+    //  ⚠ 토큰만 비교하면 quote_pdf(제출 직후)가 대기 중일 때 같은 REQ의 pdf_only(최종승인)가
+    //    '중복'으로 조용히 버려져 결재 PDF가 생성되지 않는다 → 타입까지 비교.
     var existing = queue.filter(function(j) {
-      return j.token === job.token && j.status !== 'done' && j.status !== 'failed';
+      return j.token === job.token && j.type === job.type && j.status !== 'done' && j.status !== 'failed';
     });
     if (existing.length > 0) {
       Logger.log('[Queue] 중복 enqueue 스킵: ' + job.docNo);
@@ -5608,6 +6142,8 @@ function processQueueTrigger() {
         result = _processPdfOnlyJob(job);
       } else if (job.type === 'pdf_and_consolidate') {
         result = _processPdfAndConsolidateJob(job);
+      } else if (job.type === 'quote_pdf') {
+        result = _processQuotePdfJob(job);
       } else if (job.type === 'insp_pdf') {
         // [이관됨] INSP PDF는 로컬 파이썬(코워크)이 생성. 신규 enqueue는 없으며,
         //  큐에 남은 과거 insp_pdf job은 _processInspPdfJob(무력화)이 조용히 배수한다.
@@ -5624,6 +6160,12 @@ function processQueueTrigger() {
     // 결과에 따라 큐 업데이트 (락 안)
     _finalizeJob(job.id, result);
     processedCount++;
+
+    // [QUO] 견적서 변환 최종 실패 → 관리자 핸드오프 (락 밖 — _markQuotePdfPending 이 자체 락을 쓴다)
+    if (job.type === 'quote_pdf' && !result.ok && job.attempts >= QUEUE_MAX_ATTEMPTS) {
+      try { _markQuotePdfPending(job.token, '자동 변환 ' + job.attempts + '회 실패: ' + (result.message || '')); }
+      catch(e) { notifyAdminError('견적서 PDF 핸드오프 실패: ' + job.docNo + ' / ' + e.toString()); }
+    }
 
     var jobElapsed = Date.now() - startTime;
     Logger.log('[Queue] processing 완료: ' + job.id + ' / ' + result.ok +
@@ -5748,10 +6290,15 @@ function _finalizeJob(jobId, result) {
       job.status = 'failed';
       job.notBefore = '';
       props.setProperty(QUEUE_KEY, JSON.stringify(queue));
-      notifyAdminError('큐 작업 최종 실패: ' + job.docNo + ' (' + job.type + ')\n' +
-                       'job ID: ' + job.id + '\n' +
-                       '시도 횟수: ' + job.attempts + '\n' +
-                       '마지막 오류: ' + job.lastError);
+      if (job.type !== 'quote_pdf') {
+        notifyAdminError('큐 작업 최종 실패: ' + job.docNo + ' (' + job.type + ')\n' +
+                         'job ID: ' + job.id + '\n' +
+                         '시도 횟수: ' + job.attempts + '\n' +
+                         '마지막 오류: ' + job.lastError);
+      }
+      // quote_pdf 는 결재에 영향이 없으므로 일반 오류 메일 대신 관리자 핸드오프(원본·폴더 링크)로 —
+      //  여기는 withLock 안이고 _markQuotePdfPending 도 자체 락을 쓰므로(재진입 불가),
+      //  호출자 processQueueTrigger 가 락 밖에서 처리한다.
     } else {
       // 다시 pending으로 되돌리되, notBefore를 붙여 '다음 트리거 이후'로 미룬다.
       //  이 한 줄이 없으면 while 루프가 곧바로 같은 job을 다시 집어 3회가 몇 초 만에 소진된다.
