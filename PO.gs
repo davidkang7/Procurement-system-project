@@ -651,39 +651,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
-//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-10-01 생성분 마감 — TO-PO-26-298 ~ 304 (7건).
- *  주문서 폴더 업로드 완료 (xlsx + pdf, 전부 2페이지):
- *    TO-PO-26-298_대전산업가스     초고순도 알곤(N60)          KRW 110,000
- *    TO-PO-26-299_미르글로벌테크   A3H7 USB 허브               KRW 570,000
- *    TO-PO-26-300_Hitronics        Small Mirror(M1) 외 3건     USD 12,699.00  (T/T NET 30)
- *    TO-PO-26-301_신광정보통신     리본Fanout-1.5m-LC/UPC      KRW 6,580,000
- *    TO-PO-26-302_태성테크         MLC CTC QDC 자재 및 JIG     KRW 15,630,000
- *    TO-PO-26-303_Motek            Re/De ribbon fanout         CNY 8,200.00   (T/T NET 30)
- *    TO-PO-26-304_아이비전         10월 소모품                 KRW 3,399,100
- */
-function _tmp_markPoDone_20261001() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일 ID]
-    ['TO-PO-26-298', '597a816b-ad83-4493-bd0d-b03225bfcddb', '1AxGFUgncx6HMiMwI5IrFgnXPEevad_9W'],
-    ['TO-PO-26-299', 'f20602fa-670c-4499-9895-2e28dc6fe3d1', '1LRUzSdnnzQvkQu-qZOnnszBy-5QxXu65'],
-    ['TO-PO-26-300', 'c44de19f-f26b-4e3a-a921-9ef9f10da919', '1IPH5CgnWW9n7X3FnncXTxQNzVx2G1sJu'],
-    ['TO-PO-26-301', 'af14a3d4-17ad-4238-8cb6-43412d9f855e', '1vmyDY08k2VVv5DMVJcDn_AfXRSlvBYwR'],
-    ['TO-PO-26-302', '1a93a016-d167-45d6-b746-5d666080c719', '1K5OILv0eAIvJWzJ2KohRnMem_Hf8n0xj'],
-    ['TO-PO-26-303', 'ec5277e2-1c1d-4eab-b1ea-22a334080670', '1ndD6ydI01iev2E_m4w5EIZrrkcf5W4s0'],
-    ['TO-PO-26-304', '4f271114-596c-45a9-b627-c48a01241834', '12yJN52x0hqrY-CfqN6U5iq23ZAF-28DC'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
