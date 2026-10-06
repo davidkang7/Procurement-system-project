@@ -651,3 +651,31 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-10-06 생성분 2차 마감 — TO-PO-26-306~308 (3건).
+ *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지):
+ *    TO-PO-26-306_이에이텍         O-BOX Inner PCB             KRW 5,600,000
+ *    TO-PO-26-307_Coherent         HWP 외 1종                  USD 41,460.00
+ *    TO-PO-26-308_태성테크         E-BOX 외 1종                KRW 39,000,000
+ */
+function _tmp_markPoDone_20261006_batch2() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일 ID]
+    ['TO-PO-26-306', '79e11bb7-bfbc-4674-850f-3439846e1332', '1XdWMZKuKkeNfD78aoddAVzb3-1_JSjF8'],
+    ['TO-PO-26-307', '37e8cc0e-1d98-4672-a334-8ca2a18e1921', '1hjBmiCZxyB8T3fiHctjwCNuyn9AD1WsX'],
+    ['TO-PO-26-308', '714700c7-bdfc-4fc3-b42c-645410209bd3', '1H_r-QTE1rGkTRVfM-cgDz4DWoHPpob7v'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
