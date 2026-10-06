@@ -397,11 +397,13 @@ def _remove_terms_item(layout: FormLayout, it: dict) -> str:
     항목 블록 = under_heading 제목 바로 아래부터 번호(①… 또는 1.)로 시작하는 연속 행.
     행 높이도 문장과 함께 옮긴다 — 문장만 올리면 두 줄짜리 문장이 한 줄 높이 행에 들어가
     뒷부분이 잘린다(2026-10-06 TO-PO-26-306 수작업 수정본에서 4M 항목 '받는다.'가 잘렸다).
-    비게 된 마지막 행은 숨긴다(행을 지우면 병합·페이지나눔이 어긋난다)."""
+    비게 된 마지막 행은 숨긴다(행을 지우면 병합·페이지나눔이 어긋난다).
+    renumber 형식의 {c}는 원문자(①②…), {n}은 숫자(1,2…) 자리다."""
     ws = layout.sheet
     heading = str(it.get("under_heading") or "").strip()
     prefix = str(it["remove_item"])
     fmt = it.get("renumber") or ""
+    num = lambda n: fmt.format(n=n, c=_CIRCLED[n - 1])
     head = next((r for r in range(layout.sum_row + 1, ws.max_row + 1)
                  if str(ws.cell(r, 1).value or "").strip() == heading), None)
     if not head:
@@ -420,13 +422,13 @@ def _remove_terms_item(layout: FormLayout, it: dict) -> str:
     del texts[k], heights[k]
     for n, (r, text, h) in enumerate(zip(block, texts, heights), start=1):
         if fmt:
-            text = fmt.format(n=n) + _ITEM_NO.sub("", str(text), count=1)
+            text = num(n) + _ITEM_NO.sub("", str(text), count=1)
         ws.cell(r, 1).value = text
         ws.row_dimensions[r].height = h
     last = block[-1]
     ws.cell(last, 1).value = None
     ws.row_dimensions[last].hidden = True
-    numbered = f", 번호 {fmt.format(n=1).strip()}~{fmt.format(n=len(texts)).strip()}" if fmt else ""
+    numbered = f", 번호 {num(1).strip()}~{num(len(texts)).strip()}" if fmt else ""
     moved = f"{block[0]}~{block[-2]}행{numbered}, " if len(block) > 1 else ""
     return f"{heading} '{prefix}' 항목 삭제 → {moved}{last}행 숨김"
 
