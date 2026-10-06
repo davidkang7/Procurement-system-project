@@ -48,6 +48,7 @@ cd "...\po-renderer"
 | `--base <xlsx>` | 다른 양식을 기준으로 사용(옛 업체 양식 — 권장하지 않음) |
 | `--scale 95` | 인쇄 배율 고정(기본은 2페이지가 되도록 자동 선택) |
 | `--payment`, `--destination` | Payment Terms(C10) / Destination(G10) 덮어쓰기 |
+| `--delivery-date [YYYY-MM-DD]` | DEL'Y DATE 기재. **기본은 공란** — 값 없이 쓰면 품의서 납기일, 날짜를 주면 그 날짜 |
 | `--allow-unapproved` | `--db` 사용 시 결재 미완료 건도 허용 |
 | `--force` | 검증 실패에도 계속 진행(원칙적으로 쓰지 않는다) |
 
@@ -76,7 +77,7 @@ PDF 페이지 구성을 확인한다. **글자 잘림·줄바꿈은 자동으로
 | `poNo` | P/O-No (C9) | = PRC 품의번호 |
 | `issueDate` | Date (G9) | |
 | `paymentTerms` | Payment Terms (C10) | 품의서 구매조건 원문 → 렌더러가 표기 변환 |
-| `deliveryDate` | DEL'Y DATE (H열) | |
+| `deliveryDate` | DEL'Y DATE (H열) | 기본 공란 — `--delivery-date` 를 줄 때만 기재 |
 | `vendorName` | Shipper (G12) | 표기는 `vendor_rules.json` |
 | `items[]` | 품목표 (14행~) | `{name, spec, qty, price, currency}` |
 | `totalAmt` | 합계 대조값 | 불일치 시 생성 중단 |

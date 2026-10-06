@@ -222,6 +222,15 @@ def render_one(order: PoOrder, rules: VendorRules, args) -> dict:
     if args.payment:
         order.payment_terms_raw = args.payment
 
+    # DEL'Y DATE는 기본 공란(2026-10-06 사용자 지시). 요청이 있을 때만 --delivery-date 로 채운다.
+    if args.delivery_date is None:
+        order.delivery_date = None
+    elif args.delivery_date != "source":
+        order.delivery_date = po_source._to_date(args.delivery_date)
+        if not order.delivery_date:
+            raise SystemExit(f"[오류] --delivery-date 형식이 잘못됐습니다: {args.delivery_date} (예: 2026-10-08)")
+    print("  · DEL'Y DATE: " + (order.delivery_date.isoformat() if order.delivery_date else "공란(기본)"))
+
     warnings = po_form.fill(layout, order, rules)
     if layout.terms_applied:
         print(f"  · 거래조건: 업체 합의 수정본 '{layout.terms_applied[0]}' 적용 — "
@@ -310,6 +319,8 @@ def main():
     ap.add_argument("--out-dir", help="산출물 폴더(기본 ./out)")
     ap.add_argument("--destination", help="Destination(G10) 덮어쓰기")
     ap.add_argument("--payment", help="Payment Terms(C10) 덮어쓰기")
+    ap.add_argument("--delivery-date", nargs="?", const="source", metavar="YYYY-MM-DD",
+                    help="DEL'Y DATE 기재(기본은 공란). 값 없이 쓰면 품의서 납기일, 날짜를 주면 그 날짜")
     ap.add_argument("--order-folder", help="업로드 대상 Drive 폴더 ID(기본 주문서 폴더)")
     ap.add_argument("--copy-to", help="Drive 업로드 대신 이 경로로 복사 (예: G:\\...\\주문서)")
     ap.add_argument("--no-upload", action="store_true", help="업로드/복사 없이 로컬 생성만")
