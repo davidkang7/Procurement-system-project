@@ -356,6 +356,9 @@ def apply_terms_overrides(layout: FormLayout, items: list) -> list:
     ws = layout.sheet
     applied = []
     for it in items:
+        if it.get("remove_item"):
+            applied.append(_remove_terms_item(layout, it))
+            continue
         target = None
         if it.get("after_heading"):
             key = str(it["after_heading"]).strip()
@@ -372,7 +375,7 @@ def apply_terms_overrides(layout: FormLayout, items: list) -> list:
                     break
             label = key[:40] + "…"
         else:
-            raise SystemExit(f"[오류] terms_overrides 항목에 after_heading/starts_with 가 없습니다: {it}")
+            raise SystemExit(f"[오류] terms_overrides 항목에 after_heading/starts_with/remove_item 이 없습니다: {it}")
         if not target or not str(ws.cell(target, 1).value or "").strip():
             raise SystemExit(f"[오류] 거래조건 교체 위치를 찾지 못함: {label}")
         ws.cell(target, 1).value = it["text"]
@@ -382,6 +385,50 @@ def apply_terms_overrides(layout: FormLayout, items: list) -> list:
             ws.row_dimensions[target].height = h
         applied.append(f"{label} → {target}행")
     return applied
+
+
+_CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+_ITEM_NO = re.compile(rf"^\s*(?:[{_CIRCLED}]|\d+\.)\s*")
+
+
+def _remove_terms_item(layout: FormLayout, it: dict) -> str:
+    """조항 안의 번호 항목 하나를 빼고 아래 항목을 한 줄씩 올린다(번호는 다시 매긴다).
+
+    항목 블록 = under_heading 제목 바로 아래부터 번호(①… 또는 1.)로 시작하는 연속 행.
+    행 높이도 문장과 함께 옮긴다 — 문장만 올리면 두 줄짜리 문장이 한 줄 높이 행에 들어가
+    뒷부분이 잘린다(2026-10-06 TO-PO-26-306 수작업 수정본에서 4M 항목 '받는다.'가 잘렸다).
+    비게 된 마지막 행은 숨긴다(행을 지우면 병합·페이지나눔이 어긋난다)."""
+    ws = layout.sheet
+    heading = str(it.get("under_heading") or "").strip()
+    prefix = str(it["remove_item"])
+    fmt = it.get("renumber") or ""
+    head = next((r for r in range(layout.sum_row + 1, ws.max_row + 1)
+                 if str(ws.cell(r, 1).value or "").strip() == heading), None)
+    if not head:
+        raise SystemExit(f"[오류] 거래조건 항목 삭제 — 조항 제목을 찾지 못함: {heading}")
+    block = []
+    r = head + 1
+    while r <= ws.max_row and _ITEM_NO.match(str(ws.cell(r, 1).value or "")):
+        block.append(r)
+        r += 1
+    victim = next((r for r in block if str(ws.cell(r, 1).value).startswith(prefix)), None)
+    if not victim:
+        raise SystemExit(f"[오류] 거래조건 항목 삭제 — '{heading}' 아래에서 '{prefix}' 항목을 찾지 못함")
+    texts = [ws.cell(r, 1).value for r in block]
+    heights = [ws.row_dimensions[r].height for r in block]
+    k = block.index(victim)
+    del texts[k], heights[k]
+    for n, (r, text, h) in enumerate(zip(block, texts, heights), start=1):
+        if fmt:
+            text = fmt.format(n=n) + _ITEM_NO.sub("", str(text), count=1)
+        ws.cell(r, 1).value = text
+        ws.row_dimensions[r].height = h
+    last = block[-1]
+    ws.cell(last, 1).value = None
+    ws.row_dimensions[last].hidden = True
+    numbered = f", 번호 {fmt.format(n=1).strip()}~{fmt.format(n=len(texts)).strip()}" if fmt else ""
+    moved = f"{block[0]}~{block[-2]}행{numbered}, " if len(block) > 1 else ""
+    return f"{heading} '{prefix}' 항목 삭제 → {moved}{last}행 숨김"
 
 
 def _clear_body(layout: FormLayout):
