@@ -651,3 +651,27 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-10-06 생성분 마감 — TO-PO-26-305 (1건).
+ *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지):
+ *    TO-PO-26-305_환화             LCoS_MAIN_V1.0 조립 외 10종  KRW 3,306,600
+ */
+function _tmp_markPoDone_20261006() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일 ID]
+    ['TO-PO-26-305', 'a03251b4-66e3-4094-8dcf-563534778dad', '1NcURTrCxNMlPZuYLH_I5qPu_ln0R1Xh1'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
