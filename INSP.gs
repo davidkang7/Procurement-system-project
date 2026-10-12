@@ -1947,3 +1947,52 @@ function testInspStep1() {
   console.log(results.join('\n'));
   return allPass;
 }
+
+
+// ================================================================
+// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-10-12 PENDING_PDF 3건 마감 (TO-PO-26-305 / 229 / 239).
+ *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료:
+ *    INSP_TH-AP-26-056-01_20261012_1221.pdf  (TO-PO-26-305 / 환화 / LCoS_MAIN_V1.0 조립 외 10종)  1회차 · 최종 검수 · 사진 6장
+ *    INSP_TO-AP-26-003-01_20261012_1221.pdf  (TO-PO-26-229 / 신광정보통신 / TLC30 팬아웃)       1회차 · 중간 · 사진 1장
+ *    INSP_TO-AP-26-009-01_20261012_1221.pdf  (TO-PO-26-239 / Hi-Tronics / Optics)              1회차 · 중간 · 사진 1장
+ *  판정 모두 '합격' · 사진 임베드 확인. → moveStatus를 FINAL로 마감한다.
+ *  (테스트 행 PRQ-2026-001-01/Test_123은 대상 제외)
+ */
+function _tmp_markInspPdfDone_20261012() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
+    ['TO-PO-26-305', 'TH-AP-26-056-01', 'c1637164-0398-44ae-9733-1a5f372be872', '1Tk1ddZmYRPjUkVO8dRxxCXCaDpdF0z4p'],
+    ['TO-PO-26-229', 'TO-AP-26-003-01', 'aef50ee6-bcb1-4717-98cc-5c5942532e04', '1KUzK4Ev8W6TLrh3b4zl2wuEpOGSWzPYY'],
+    ['TO-PO-26-239', 'TO-AP-26-009-01', '3475c941-664f-43c2-bd1e-88927f6427e3', '1i-221Dw8yvV_4iaG7evd6apg9b2tyHRv'],
+  ];
+
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2], fileId = j[3];
+    // 토큰-문서번호 대조: 한 건이라도 어긋나면 그 건만 건너뛴다(오기입 방지).
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return poNo + ' → SKIP / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return poNo + ' → SKIP / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return poNo + ' → SKIP / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return poNo + ' → SKIP / 이미 FINAL 마감됨';
+    }
+    var res = markInspPdfDone(token, fileId);
+    return poNo + ' → ' + (res.ok ? 'OK' : 'FAIL') + ' / ' + res.message;
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
