@@ -661,14 +661,14 @@ function _checkPoOrderFolder() {
  * 2026-10-12 생성분 마감 — TO-PO-26-310~312 (3건).
  *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지):
  *    TO-PO-26-310_Focuslight       F4PO1-016-A0 / MLA          USD 16,470.00 (T/T(NET 30 day))
- *    TO-PO-26-311_아이브리지닷컴    TG-A5000L 방열시트          USD 1,579.00  (T/T in advance)
+ *    TO-PO-26-311_아이브리지닷컴    TG-A5000L 방열시트          USD 1,579.00  (내자 양식 · 선입금)
  *    TO-PO-26-312_파이버링크        LC to LC adaptor            KRW 165,000
  */
 function _tmp_markPoDone_20261012() {
   var jobs = [
     // [PO번호, prcToken, xlsx 파일 ID]
     ['TO-PO-26-310', 'c35782ad-89db-4d77-958e-b01685da67b4', '1PSS541uFM-gNW_P_Dzn1ca_THk9Mt2tV'],
-    ['TO-PO-26-311', '01d447a8-de88-410c-a2f0-fdb0459a3400', '1l5L5G6gi7FWVCCW_KZxV-pg6fc446G1A'],
+    ['TO-PO-26-311', '01d447a8-de88-410c-a2f0-fdb0459a3400', '1jF-NDZAwGQFWhC7pTrat_u2H76u867Vh'],
     ['TO-PO-26-312', '190b22a7-77f3-4836-bde8-50f9cbfe94ea', '1drIcZKU7ovE30BltKogrO2tLQoRAL40K'],
   ];
   var out = jobs.map(function (j) {
