@@ -26,8 +26,8 @@
 //      INSP_RESUBMIT:  'INSP_RESUBMIT',   // 반려 후 수정 재상신
 //      INSP_FINALIZED: 'INSP_FINALIZED',  // 최종 검수 승인 → 품의 종결
 //
-// 4. 편집기에서 testInspStep1() 실행 → 로그 'ALL PASS' 확인
-//    (클라이언트 호출 함수가 없으므로 이 단계는 웹앱 재배포 불필요)
+// 4. 편집기에서 ensureInspSheet() 실행 → '검수보고서목록' 시트(51컬럼) 생성 확인
+//    (설치 확인용 테스트 함수 testInspStep1은 2026-10-14 정리 때 삭제)
 // ================================================================
 
 // ================================================================
@@ -803,26 +803,6 @@ function _sendInspApprovalEmail(approver, data, token, rowNum, idx) {
 }
 
 // ================================================================
-// [INSP Step 3] 테스트
-// ================================================================
-
-/**
- * Step 3 드라이런 — 실제 제출 없이 폼 데이터 조회만 점검
- * 사용법: 운영의 최종승인(PRC) 토큰을 인자로 넣어 실행
- *   testInspStep3('PRC토큰')  → 폼 자동채움 값/회차/권한 결과 로그
- */
-function testInspStep3(prcToken) {
-  if (!prcToken) {
-    console.log('사용법: testInspStep3("최종승인PRC의_token")');
-    console.log('힌트: debugInspStep2() 로그의 PARENT_DOC_ID가 아니라 PRC 행의 token이 필요합니다.');
-    return;
-  }
-  var res = getInspFormDataForClient(prcToken, null);
-  console.log(JSON.stringify(res, null, 2));
-}
-
-
-// ================================================================
 // [INSP Step 4] 검수보고서 결재 승인/반려 처리
 // ================================================================
 
@@ -1032,16 +1012,6 @@ function _sendInspCompletionEmail(toEmail, drafter, docNo, subject, token, isFin
   var plain = '검수보고서 최종 승인\n문서번호: ' + docNo + '\n품명: ' + subject + (isFinal ? '\n(최종 검수 — 품의 종결)' : '');
   sendEmailWithRetry(toEmail, subj, plain, html);
 }
-
-/**
- * Step 4 테스트 — 결재 메타 조회 점검
- *   testInspStep4('INSP토큰')
- */
-function testInspStep4(token) {
-  if (!token) { console.log('사용법: testInspStep4("검수보고서_token")'); return; }
-  console.log(JSON.stringify(getInspDecisionMetaForClient(token), null, 2));
-}
-
 
 // ================================================================
 // [INSP Step 5] 홈 메뉴용 — 내 검수 결재 대기 / 최종 완료(INSP)
@@ -2260,81 +2230,3 @@ function _cleanupInspPhotos(row) {
   return '사진 ' + deleted + '장 삭제';
 }
 
-/**
- * Step 6 테스트 — 최종승인된 검수보고서로 PDF 생성만 수동 실행 (사진 삭제는 안 함)
- *   testInspStep6('INSP토큰')  → PDF가 FINAL/PO폴더에 생성되는지 확인
- *   ※ 실제 큐 처리는 사진 삭제까지 수행하므로, 이 테스트는 PDF 생성 단계만 점검
- */
-function testInspStep6(token) {
-  if (!token) { console.log('사용법: testInspStep6("최종승인된_검수보고서_token")'); return; }
-  var res = generateInspPdf(token);
-  console.log(JSON.stringify(res, null, 2));
-  if (res.ok) console.log('→ FINAL 폴더에서 ' + res.fileName + ' 확인하세요. (사진 삭제는 실제 큐 처리 시 수행)');
-}
-
-
-// ================================================================
-// Step 1 테스트 — 편집기에서 직접 실행
-// ================================================================
-
-/**
- * Step 1 통합 테스트
- * 검증: ① 스키마 자가 점검 ② CONFIG 키 존재 ③ AUDIT_EVENT 확장 반영
- *       ④ 시트 생성 + 헤더 45컬럼 ⑤ 헬퍼 함수 경계값
- * 실행 후 로그에서 'ALL PASS' 확인. 실패 항목은 [FAIL]로 표시됨.
- */
-function testInspStep1() {
-  var results = [];
-  function check(name, fn) {
-    try {
-      var r = fn();
-      results.push((r ? '[PASS] ' : '[FAIL] ') + name);
-      return !!r;
-    } catch (e) {
-      results.push('[FAIL] ' + name + ' — ' + e.message);
-      return false;
-    }
-  }
-
-  check('① INSP_COL 스키마 자가 점검', function () {
-    return _inspSchemaSelfCheck();
-  });
-
-  check('② CONFIG.INSP_SHEET_NAME 정의됨', function () {
-    return CONFIG.INSP_SHEET_NAME === '검수보고서목록';
-  });
-
-  check('③ AUDIT_EVENT에 INSP 이벤트 5종 추가됨', function () {
-    return AUDIT_EVENT.INSP_SUBMIT === 'INSP_SUBMIT'
-      && AUDIT_EVENT.INSP_APPROVE === 'INSP_APPROVE'
-      && AUDIT_EVENT.INSP_REJECT === 'INSP_REJECT'
-      && AUDIT_EVENT.INSP_RESUBMIT === 'INSP_RESUBMIT'
-      && AUDIT_EVENT.INSP_FINALIZED === 'INSP_FINALIZED';
-  });
-
-  check('④ ensureInspSheet — 시트 생성 + 헤더 ' + INSP_TOTAL_COLS + '컬럼', function () {
-    var sheet = ensureInspSheet();
-    var lastCol = sheet.getLastColumn();
-    if (lastCol !== INSP_TOTAL_COLS) {
-      throw new Error('헤더 컬럼 수 ' + lastCol + ' ≠ 기대값 ' + INSP_TOTAL_COLS);
-    }
-    var h = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    if (h[INSP_COL.STATUS] !== 'status') throw new Error('STATUS 헤더 위치 불일치: ' + h[INSP_COL.STATUS]);
-    if (h[INSP_COL.APPR_START] !== 'drafter_appr_label') throw new Error('APPR_START 헤더 위치 불일치: ' + h[INSP_COL.APPR_START]);
-    return true;
-  });
-
-  check('⑤ inspApprCol 헬퍼 — 정상/경계값', function () {
-    if (inspApprCol(0, 0) !== 27) throw new Error('(0,0)=기안자 label → ' + inspApprCol(0, 0));
-    if (inspApprCol(3, 5) !== 50) throw new Error('(3,5)=결재자3 comment → ' + inspApprCol(3, 5));
-    var threw = false;
-    try { inspApprCol(4, 0); } catch (e) { threw = true; }
-    if (!threw) throw new Error('단계 범위 초과(4)가 차단되지 않음');
-    return true;
-  });
-
-  var allPass = results.every(function (r) { return r.indexOf('[PASS]') === 0; });
-  results.push(allPass ? '=== ALL PASS — Step 2 진행 가능 ===' : '=== 실패 항목 확인 필요 ===');
-  console.log(results.join('\n'));
-  return allPass;
-}
