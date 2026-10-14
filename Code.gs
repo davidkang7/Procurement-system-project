@@ -566,12 +566,23 @@ var AUDIT_EVENT = {
   INSP_REJECT:    'INSP_REJECT',     // 검수 결재 반려
   INSP_RESUBMIT:  'INSP_RESUBMIT',   // 반려 후 수정 재상신
   INSP_FINALIZED: 'INSP_FINALIZED',  // 최종 검수 승인 → 품의 종결
+  INSP_DISCARD:   'INSP_DISCARD',    // 제출자 본인 폐기 (반려 후) — 관리자 강제 폐기는 ADMIN_FORCE_DISCARD
 
   // REQ·PRC 라이프사이클 — 실제 처리자 기록(부인방지)
+  DOC_SUBMIT:     'DOC_SUBMIT',      // 품의(REQ) 신규 제출
   DOC_APPROVE:    'DOC_APPROVE',     // 결재 승인 (단계별)
   DOC_REJECT:     'DOC_REJECT',      // 결재 반려
   DOC_DISCARD:    'DOC_DISCARD',     // 기안자 본인 폐기
   DOC_RESUBMIT:   'DOC_RESUBMIT',    // 반려 후 수정 재상신
+
+  // 구매팀 픽업 → 구매(PRC) 문서 라이프사이클
+  PRC_CLAIM:      'PRC_CLAIM',       // 품의 픽업(락 점유) — 신규 점유 또는 만료 점유 인수만 (본인 재점유는 기록 안 함)
+  PRC_RELEASE:    'PRC_RELEASE',     // 픽업 회수(락 해제) — 관리자 강제 해제는 ADMIN_FORCE_RELEASE_LOCK
+  PRC_SUBMIT:     'PRC_SUBMIT',      // 구매 문서 제출 (원본 품의의 락 해제 포함)
+
+  // 장애·이상 접근 흔적 (실패 경로에서만 기록 — 정상 처리 시간에는 영향 없음)
+  DRIVE_SAVE_FAIL:     'DRIVE_SAVE_FAIL',      // 첨부·사진 업로드 / 결재 PDF 생성·FINAL 이동 최종 실패
+  LINK_INVALID_ACCESS: 'LINK_INVALID_ACCESS',  // 없는(폐기·재상신으로 바뀐) 토큰으로 화면 진입 — 같은 사람·같은 토큰은 10분에 1회
 
   // 비인가 시도 (보안 기록)
   //   결재/폐기/재상신 요청이 권한 검증에서 거부된 모든 경우.
@@ -587,9 +598,8 @@ var AUDIT_EVENT = {
   QUOTE_PDF_GENERATED: 'QUOTE_PDF_GENERATED',   // 자동 변환 또는 관리자 업로드본 등록
   QUOTE_PDF_PENDING:   'QUOTE_PDF_PENDING',     // 변환 실패 → 관리자 핸드오프
 
-  // 추후 확장 자리:
-  // DOC_SUBMIT, PRC_CLAIM, PRC_RELEASE, PRC_SUBMIT,
-  // DRIVE_SAVE_FAIL, LINK_INVALID_ACCESS
+  // 지연 기록 버퍼 항목이 깨져 원래 행으로 되살릴 수 없을 때 — 원문을 남겨 유실을 막는다
+  AUDIT_BUF_CORRUPT:   'AUDIT_BUF_CORRUPT',
 };
 
 /**
@@ -643,46 +653,310 @@ function ensureAuditLogSheet() {
  */
 function writeAuditLog(entry) {
   try {
-    if (!entry || !entry.eventType) {
+    var row = _buildAuditRow_(entry);
+    if (!row) {
       console.error('[AuditLog] eventType is required');
       return false;
     }
-
-    var sheet = ensureAuditLogSheet();
-
-    var actor = entry.actor || getActiveUserEmail() || '';
-    var role  = entry.actorRole || _deriveActorRole(actor);
-
-    var payloadStr = '';
-    if (entry.payload !== undefined && entry.payload !== null) {
-      try {
-        payloadStr = (typeof entry.payload === 'string')
-          ? entry.payload
-          : JSON.stringify(entry.payload);
-      } catch(_) {
-        payloadStr = '[unserializable]';
-      }
-    }
-
-    var row = new Array(12);
-    row[AUDIT_COL.LOG_ID]      = Utilities.getUuid();
-    row[AUDIT_COL.TIMESTAMP]   = new Date();
-    row[AUDIT_COL.ACTOR]       = actor;
-    row[AUDIT_COL.ACTOR_ROLE]  = role;
-    row[AUDIT_COL.EVENT_TYPE]  = entry.eventType;
-    row[AUDIT_COL.DOC_NO]      = entry.docNo      || '';
-    row[AUDIT_COL.DOC_TOKEN]   = entry.docToken   || '';
-    row[AUDIT_COL.DOC_TYPE]    = entry.docType    || '';
-    row[AUDIT_COL.TARGET_USER] = entry.targetUser || '';
-    row[AUDIT_COL.REASON]      = entry.reason     || '';
-    row[AUDIT_COL.PAYLOAD]     = payloadStr;
-    row[AUDIT_COL.IP_ADDRESS]  = '';  // GAS에서 IP 취득 불가, 향후 확장용
-
-    sheet.appendRow(row);
+    ensureAuditLogSheet().appendRow(row);
     return true;
   } catch (err) {
     // fail-safe: 로그 기록 실패가 본 업무를 막으면 안 됨
     console.error('[AuditLog] 기록 실패: ' + err.toString(), entry);
+    return false;
+  }
+}
+
+/**
+ * 시스템로그 한 행 조립 — 즉시 기록(writeAuditLog)과 지연 기록(writeAuditLogDeferred_)이 같은 행을 만든다.
+ *
+ * ⚠ 처리자(actor)·역할·시각·logId는 반드시 여기서, 즉 '요청을 처리하는 그 실행 안에서' 확정한다.
+ *   지연 기록을 시트에 옮기는 1분 트리거는 David 계정으로 돈다. 옮기는 시점에 actor를 채우면
+ *   처리자를 넘기지 않은 호출(예: INSP 결재 로그)이 전부 David로 기록된다.
+ *
+ * @returns {Array|null} 12열 행 (eventType이 없으면 null)
+ */
+function _buildAuditRow_(entry) {
+  if (!entry || !entry.eventType) return null;
+
+  var actor = entry.actor || getActiveUserEmail() || '';
+  var role  = entry.actorRole || _deriveActorRole(actor);
+
+  var payloadStr = '';
+  if (entry.payload !== undefined && entry.payload !== null) {
+    try {
+      payloadStr = (typeof entry.payload === 'string')
+        ? entry.payload
+        : JSON.stringify(entry.payload);
+    } catch(_) {
+      payloadStr = '[unserializable]';
+    }
+  }
+
+  var row = new Array(12);
+  row[AUDIT_COL.LOG_ID]      = Utilities.getUuid();
+  row[AUDIT_COL.TIMESTAMP]   = new Date();
+  row[AUDIT_COL.ACTOR]       = actor;
+  row[AUDIT_COL.ACTOR_ROLE]  = role;
+  row[AUDIT_COL.EVENT_TYPE]  = entry.eventType;
+  row[AUDIT_COL.DOC_NO]      = entry.docNo      || '';
+  row[AUDIT_COL.DOC_TOKEN]   = entry.docToken   || '';
+  row[AUDIT_COL.DOC_TYPE]    = entry.docType    || '';
+  row[AUDIT_COL.TARGET_USER] = entry.targetUser || '';
+  row[AUDIT_COL.REASON]      = entry.reason     || '';
+  row[AUDIT_COL.PAYLOAD]     = payloadStr;
+  row[AUDIT_COL.IP_ADDRESS]  = '';  // GAS에서 IP 취득 불가, 향후 확장용
+  return row;
+}
+
+// ----------------------------------------------------------------
+// 3-1-1. 시스템로그 지연 기록 (1분 트리거가 일괄 반영)
+// ----------------------------------------------------------------
+// 왜: writeAuditLog는 호출마다 스프레드시트를 열고 행을 추가한다. 결재·제출처럼 사용자가
+//     화면 앞에서 기다리는 처리에서는 그 시간이 그대로 응답 시간에 더해진다.
+// 방식: 요청 중에는 완성된 행을 Script Properties에 고유 키로 한 줄 저장만 하고(전역 락 없음),
+//       processQueueTrigger(1분)가 시스템로그 시트에 옮겨 적는다.
+//
+// 즉시 기록(writeAuditLog)을 그대로 쓰는 곳 — 지연하면 안 되거나, 지연할 이유가 없는 기록:
+//   · 결재자 변경(A-3): 기록 실패 시 변경을 원복하는 구조라 성공 여부를 바로 알아야 한다
+//   · 메일 발송 실패·Drive 저장 실패·잘못된 링크 접근: 장애 흔적은 트리거가 죽어도 남아야 한다
+//   · 권한 거부(ADMIN_ACCESS_DENIED / DECISION_DENIED): 보안 기록. 거부 화면이라 대기 시간도 무의미
+//   · 관리자 액션(A-1·A-4)과 백그라운드/편집기 실행(큐·PO·INSP 마감): 기다리는 일반 사용자가 없다
+//
+// 안전장치:
+//   ① actor·시각은 _buildAuditRow_가 요청 시점에 확정한다 (트리거 계정으로 바뀌지 않음)
+//   ② 시트 반영은 사용자 락(getUserLock) + tryLock(0). 전역(스크립트) 락과 별개라 결재·제출을 막지 않고,
+//      트리거가 겹쳐 돌면 나중 실행은 기다리지 않고 건너뛴다 → 같은 행이 두 번 들어가지 않는다.
+//      (2026-08-04 장애: 전역 락을 오래 쥔 실행 1건이 시스템 전체를 멈췄다 — 반영 단계는 전역 락을 절대 쓰지 않는다)
+//   ③ 반영이 마지막으로 성공한 시각(하트비트)이 15분보다 오래되면, 쓰는 쪽이 스스로 즉시 기록으로 돌아간다.
+//      트리거가 멈추거나 반영이 계속 실패해도 버퍼는 15분 분량 이상 쌓이지 않는다 (Properties 500KB 보호 —
+//      같은 저장소의 PENDING_JOB_QUEUE가 저장 실패로 깨지면 안 된다).
+//      트리거가 설치되지 않은 환경·새 코드 반영 직후처럼 하트비트가 없을 때도 즉시 기록이다.
+//   ④ 버퍼 저장이 실패하면 그 자리에서 즉시 기록한다 — 어떤 경우에도 로그를 버리지 않는다.
+//   ⑤ 시트에는 행 단위 appendRow로 쓴다. 같은 시각의 즉시 기록(appendRow)과 섞여도 서로 덮어쓰지 않는다.
+//      대신 시트의 행 순서는 시간 순서와 다를 수 있다 → timestamp 열 기준으로 정렬해서 볼 것.
+// ----------------------------------------------------------------
+var AUDIT_BUF_PREFIX      = 'AUDIT_BUF_';             // 버퍼 항목 키: 접두사 + 13자리 ms + '_' + logId
+var AUDIT_FLUSH_HEARTBEAT = 'AUDIT_FLUSH_HEARTBEAT';  // 마지막 반영 성공 시각(ms) — ⚠ AUDIT_BUF_ 접두사와 겹치면 안 된다
+var AUDIT_BUF_STALE_MS    = 15 * 60 * 1000;           // 하트비트가 이보다 오래되면 즉시 기록으로 전환
+var AUDIT_BUF_MAX_CHARS   = 2500;                     // Properties 값 한도 9KB ÷ 한글 3바이트. 넘는 행은 즉시 기록
+var AUDIT_FLUSH_MAX_ROWS  = 100;                      // 1회 반영 최대 행 수 (남으면 다음 트리거)
+var AUDIT_FLUSH_BUDGET_MS = 30 * 1000;                // 1회 반영 시간 한도 (큐 처리 시간 한도 안에서 소비)
+var AUDIT_BUF_ALERT_ROWS  = 200;                      // 반영 후에도 이만큼 남아 있으면 관리자 알림 (1시간 1회)
+
+/**
+ * 시스템로그 지연 기록 — 사용자가 기다리는 '정상 처리' 기록 전용.
+ *  반환값은 writeAuditLog와 같다(true=버퍼 저장 또는 즉시 기록 성공). 절대 throw하지 않는다.
+ *  ⚠ 기록 성공 여부로 원복을 결정하는 곳(A-3)에는 쓰지 말 것 — 버퍼 저장 성공은 시트 반영 성공이 아니다.
+ */
+function writeAuditLogDeferred_(entry) {
+  var row;
+  try {
+    row = _buildAuditRow_(entry);
+  } catch (err) {
+    console.error('[AuditLog] 행 조립 실패 → 즉시 기록 시도: ' + err.toString());
+    return writeAuditLog(entry);
+  }
+  if (!row) {
+    console.error('[AuditLog] eventType is required');
+    return false;
+  }
+
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var hb = Number(props.getProperty(AUDIT_FLUSH_HEARTBEAT) || 0);
+    if (hb > 0 && (Date.now() - hb) < AUDIT_BUF_STALE_MS) {
+      var rec = row.slice();
+      rec[AUDIT_COL.TIMESTAMP] = row[AUDIT_COL.TIMESTAMP].getTime();   // Date는 JSON 왕복이 안 되므로 ms로
+      var json = JSON.stringify(rec);
+      if (json.length <= AUDIT_BUF_MAX_CHARS) {
+        props.setProperty(AUDIT_BUF_PREFIX + _auditBufStamp_(rec[AUDIT_COL.TIMESTAMP]) + '_' + row[AUDIT_COL.LOG_ID], json);
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('[AuditLog] 버퍼 저장 실패 → 즉시 기록: ' + err.toString());
+  }
+  // 하트비트 없음/오래됨 · 행이 너무 큼 · 저장 실패 → 요청 시점에 만든 그 행을 즉시 기록 (처리자·시각 동일)
+  return _appendAuditRow_(row);
+}
+
+function _auditBufStamp_(ms) {
+  var s = String(ms);
+  while (s.length < 13) s = '0' + s;
+  return s;
+}
+
+function _appendAuditRow_(row) {
+  try {
+    ensureAuditLogSheet().appendRow(row);
+    return true;
+  } catch (err) {
+    console.error('[AuditLog] 기록 실패: ' + err.toString());
+    return false;
+  }
+}
+
+function _auditBufKeys_(keys) {
+  return (keys || []).filter(function(k) { return String(k).indexOf(AUDIT_BUF_PREFIX) === 0; });
+}
+
+/** 버퍼 항목 → 시트 행. 복원할 수 없으면 원문을 담은 AUDIT_BUF_CORRUPT 행 (유실 방지) */
+function _auditBufToRow_(key, raw) {
+  var rec = null;
+  try { rec = JSON.parse(raw); } catch (_) {}
+  if (!Array.isArray(rec) || rec.length !== 12 || typeof rec[AUDIT_COL.TIMESTAMP] !== 'number') {
+    return _auditCorruptRow_(key, raw, '형식 불일치');
+  }
+  rec[AUDIT_COL.TIMESTAMP] = new Date(rec[AUDIT_COL.TIMESTAMP]);
+  return rec;
+}
+
+function _auditCorruptRow_(key, raw, why) {
+  var row = new Array(12);
+  row[AUDIT_COL.LOG_ID]      = Utilities.getUuid();
+  row[AUDIT_COL.TIMESTAMP]   = new Date();
+  row[AUDIT_COL.ACTOR]       = '';
+  row[AUDIT_COL.ACTOR_ROLE]  = 'system';
+  row[AUDIT_COL.EVENT_TYPE]  = AUDIT_EVENT.AUDIT_BUF_CORRUPT;
+  row[AUDIT_COL.DOC_NO]      = '';
+  row[AUDIT_COL.DOC_TOKEN]   = '';
+  row[AUDIT_COL.DOC_TYPE]    = '';
+  row[AUDIT_COL.TARGET_USER] = '';
+  row[AUDIT_COL.REASON]      = '지연 기록 항목 복원 실패: ' + key + ' (' + String(why) + ')';
+  row[AUDIT_COL.PAYLOAD]     = String(raw == null ? '' : raw).slice(0, 45000);
+  row[AUDIT_COL.IP_ADDRESS]  = '';
+  return row;
+}
+
+/**
+ * 지연 기록 버퍼 → 시스템로그 시트 반영. processQueueTrigger가 매분 호출한다.
+ *  - 버퍼가 비어 있으면 하트비트만 갱신하고 끝 (락·시트 접근 없음)
+ *  - 항목이 있으면 사용자 락을 '기다리지 않고' 시도 → 이미 다른 실행이 반영 중이면 건너뜀
+ *  - 시트 쓰기가 실패하면 throw — 하트비트를 갱신하지 않으므로 15분 뒤 쓰는 쪽이 즉시 기록으로 전환된다
+ * @returns {Object} { flushed, remaining, skipped? }
+ */
+function flushAuditLogBuffer_() {
+  var props = PropertiesService.getScriptProperties();
+  var keys = _auditBufKeys_(props.getKeys());
+  if (!keys.length) {
+    props.setProperty(AUDIT_FLUSH_HEARTBEAT, String(Date.now()));
+    return { flushed: 0, remaining: 0 };
+  }
+
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(0)) return { flushed: 0, remaining: keys.length, skipped: 'busy' };
+  try {
+    // 락을 잡은 뒤 다시 읽는다 — 먼저 돈 실행이 이미 옮기고 지운 항목을 다시 쓰지 않기 위해
+    var all = props.getProperties();
+    keys = _auditBufKeys_(Object.keys(all)).sort();   // 키에 13자리 ms가 있어 사전순 = 시간순
+    var sheet = keys.length ? ensureAuditLogSheet() : null;
+    var started = Date.now();
+    var done = 0;
+    for (var i = 0; i < keys.length && done < AUDIT_FLUSH_MAX_ROWS; i++) {
+      if (Date.now() - started > AUDIT_FLUSH_BUDGET_MS) break;
+      var row = _auditBufToRow_(keys[i], all[keys[i]]);
+      try {
+        sheet.appendRow(row);
+      } catch (e) {
+        // 이 항목만의 문제인지 시트 장애인지 가른다 — 원문을 문자열 한 칸에 담아 다시 시도.
+        // 이것도 실패하면 시트 장애로 보고 그대로 throw (남은 항목은 다음 트리거에서 다시 시도)
+        sheet.appendRow(_auditCorruptRow_(keys[i], all[keys[i]], e));
+      }
+      props.deleteProperty(keys[i]);
+      done++;
+    }
+    props.setProperty(AUDIT_FLUSH_HEARTBEAT, String(Date.now()));
+    var remaining = keys.length - done;
+    if (remaining >= AUDIT_BUF_ALERT_ROWS) {
+      _auditBufAlertOnce_('시스템로그 지연 기록이 ' + remaining + '건 밀려 있습니다. 시스템로그 시트 쓰기가 느리거나 막혀 있는지 확인하세요.');
+    }
+    return { flushed: done, remaining: remaining };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 지연 기록 장애 알림 — 1시간에 1회만 (매분 도는 트리거가 메일 폭풍을 만들지 않도록) */
+function _auditBufAlertOnce_(message) {
+  try {
+    var cache = CacheService.getScriptCache();
+    if (cache.get('AUDIT_BUF_ALERTED')) return;
+    cache.put('AUDIT_BUF_ALERTED', '1', 3600);
+  } catch (_) {}
+  try { notifyAdminError('[시스템로그] ' + message); } catch (_) {}
+}
+
+/**
+ * [점검용] 지연 기록 상태 — 편집기에서 실행. 배포 직후 버퍼가 매분 비워지는지 확인할 때 쓴다.
+ *  하트비트가 1~2분 이내로 갱신되고 남은 건수가 0 근처면 정상.
+ */
+function auditLogBufferStatus() {
+  assertAdminWithLog('audit_log_buffer_status', {});
+  var props = PropertiesService.getScriptProperties();
+  var keys = _auditBufKeys_(props.getKeys()).sort();
+  var hb = Number(props.getProperty(AUDIT_FLUSH_HEARTBEAT) || 0);
+  var out = {
+    pending: keys.length,
+    oldestKey: keys[0] || '',
+    heartbeatAgeSec: hb ? Math.round((Date.now() - hb) / 1000) : null,
+    mode: (hb && (Date.now() - hb) < AUDIT_BUF_STALE_MS) ? '지연 기록' : '즉시 기록(하트비트 없음/오래됨)',
+  };
+  console.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
+/**
+ * 잘못된 링크(없는 토큰)로 화면에 들어온 흔적 — 실패 경로 전용, 즉시 기록.
+ *  같은 사람·같은 토큰은 10분에 1건만 남긴다 (한 화면이 조회 함수를 두 번 부르거나 새로고침해도 1건).
+ *  화면 응답을 깨뜨리지 않도록 어떤 예외도 밖으로 던지지 않는다.
+ * @param {string} where   진입 화면 식별자 (예: 'viewer', 'reject', 'insp_view')
+ * @param {string} token   요청에 담겨 온 토큰
+ * @param {string=} docType 'REQ' | 'INSP' | ''
+ */
+function _logInvalidLinkAccess_(where, token, docType) {
+  try {
+    var actor = getRequestUserEmail_() || '(미인증)';   // 배포 계정 폴백 없이 실제 접속자만
+    var tok = String(token == null ? '' : token);
+    var key = 'LIA_' + actor + '_' + tok.slice(0, 120);   // CacheService 키 한도 250자
+    var cache = null;
+    try { cache = CacheService.getScriptCache(); } catch (_) {}
+    try { if (cache && cache.get(key)) return false; } catch (_) {}
+    try { if (cache) cache.put(key, '1', 600); } catch (_) {}
+    return writeAuditLog({
+      eventType: AUDIT_EVENT.LINK_INVALID_ACCESS,
+      actor:     actor,
+      docToken:  tok.slice(0, 200),
+      docType:   docType || '',
+      reason:    '없는 문서 토큰으로 화면 진입 (' + where + ')',
+      payload:   { where: where, tokenLength: tok.length },
+    });
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Drive 저장 실패 흔적 — 실패 경로 전용, 즉시 기록. 절대 throw하지 않는다.
+ * @param {string} stage  'folder_access' | 'attachment_upload' | 'insp_photo' | 'queue_pdf_only' | 'queue_pdf_and_consolidate'
+ * @param {Object} info   { docNo, token, docType, actor?, actorRole?, fileCount?, jobId?, attempts? }
+ * @param {*} err
+ */
+function _logDriveSaveFail_(stage, info, err) {
+  try {
+    info = info || {};
+    var msg = String(err && err.message ? err.message : err);
+    return writeAuditLog({
+      eventType: AUDIT_EVENT.DRIVE_SAVE_FAIL,
+      actor:     info.actor || '',
+      actorRole: info.actorRole || '',
+      docNo:     info.docNo || '',
+      docToken:  info.token || '',
+      docType:   info.docType || '',
+      reason:    'Drive 저장 실패 (' + stage + '): ' + msg.slice(0, 300),
+      payload:   { stage: stage, fileCount: info.fileCount, jobId: info.jobId, attempts: info.attempts, error: msg.slice(0, 1000) },
+    });
+  } catch (_) {
     return false;
   }
 }
@@ -1056,11 +1330,26 @@ function _submitCore(data) {
 
   if (!lockResult.ok) return lockResult;
 
+  // 시스템로그: 제출 기록 — 행이 생긴 시점이 곧 제출이다(이후 업로드가 실패해도 행은 남는다).
+  //  지연 기록이라 기안자 대기 시간에 시트 쓰기가 더해지지 않는다 (§3-1-1)
+  try {
+    writeAuditLogDeferred_({
+      eventType: AUDIT_EVENT.DOC_SUBMIT,
+      actorRole: 'requester',
+      docNo:     data.docNo,
+      docToken:  lockResult.token,
+      docType:   'REQ',
+      reason:    '품의 제출',
+      payload:   { attachments: (data.attachments || []).length, approverCount: (data.approvers || []).length },
+    });
+  } catch(_) {}
+
   // 3단계: 첨부 업로드 (락 밖 — 시간이 가장 오래 걸리는 작업)
   var folder;
   try {
     folder = DriveApp.getFolderById(lockResult.folderId);
   } catch(e) {
+    _logDriveSaveFail_('folder_access', { docNo: data.docNo, token: lockResult.token, docType: 'REQ', actorRole: 'requester' }, e);
     return { ok: false, message: '폴더 접근 실패: ' + e.toString() };
   }
 
@@ -1076,6 +1365,8 @@ function _submitCore(data) {
       var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
       sheet.getRange(lockResult.rowNum, COL.STATUS + 1).setValue('업로드오류');
     } catch(_) {}
+    _logDriveSaveFail_('attachment_upload', { docNo: data.docNo, token: lockResult.token, docType: 'REQ', actorRole: 'requester',
+      fileCount: (data.attachments || []).length }, e);
     return { ok: false, message: '첨부파일 업로드 실패: ' + e.toString() };
   }
 
@@ -1385,10 +1676,11 @@ function _decisionCore_(payload) {
 
   // ── 락 밖 ②: 정상 처리 감사로그 — 실제 호출자를 남겨 부인방지 ──
   //    메일 발송보다 먼저 기록한다 (메일이 실패해도 처리 사실은 남아야 함)
+  //    지연 기록: 결재자가 기다리는 시간에서 시트 쓰기를 뺀다 (처리자·시각은 지금 확정 — §3-1-1)
   if (lockResult.auditInfo) {
     try {
       var ai = lockResult.auditInfo;
-      writeAuditLog({
+      writeAuditLogDeferred_({
         eventType:  (ai.decision === 'reject') ? AUDIT_EVENT.DOC_REJECT : AUDIT_EVENT.DOC_APPROVE,
         actor:      ai.actor || '(미인증)',
         actorRole:  ai.onBehalfOf ? 'admin' : 'approver',
@@ -1802,13 +2094,14 @@ function _resubmitCore(payload) {
 
   if (!lockResult.ok) return lockResult;
 
-  // 락 밖: 정상 재상신 감사로그 (실제 호출자 기록)
+  // 락 밖: 정상 재상신 감사로그 (실제 호출자 기록) — 지연 기록 (§3-1-1)
+  var resubDocNo = String((payload.data && payload.data.docNo) || '');
   try {
-    writeAuditLog({
+    writeAuditLogDeferred_({
       eventType: AUDIT_EVENT.DOC_RESUBMIT,
       actor:     actor || '(미인증)',
       actorRole: 'requester',
-      docNo:     String((payload.data && payload.data.docNo) || ''),
+      docNo:     resubDocNo,
       docToken:  lockResult.newToken,
       docType:   'REQ',
       reason:    lockResult.resubCount + '차 재상신',
@@ -1819,12 +2112,17 @@ function _resubmitCore(payload) {
   // 락 밖: 첨부 업로드
   var folder;
   try { folder = DriveApp.getFolderById(lockResult.folderId); }
-  catch(e) { return { ok: false, message: '폴더 접근 실패: ' + e.toString() }; }
+  catch(e) {
+    _logDriveSaveFail_('folder_access', { docNo: resubDocNo, token: lockResult.newToken, docType: 'REQ', actor: actor, actorRole: 'requester' }, e);
+    return { ok: false, message: '폴더 접근 실패: ' + e.toString() };
+  }
 
   var savedFiles = [];
   try {
     savedFiles = saveAttachmentsToFolder(folder, payload.data.attachments || [], { quoteDocNo: payload.data.docNo });
   } catch(e) {
+    _logDriveSaveFail_('attachment_upload', { docNo: resubDocNo, token: lockResult.newToken, docType: 'REQ', actor: actor, actorRole: 'requester',
+      fileCount: (payload.data.attachments || []).length }, e);
     return { ok: false, message: '첨부파일 업로드 실패: ' + e.toString() };
   }
 
@@ -1955,13 +2253,14 @@ function _discardCore(payload) {
   });
 
   // 락 밖: 감사로그 (거부 / 정상 모두 실제 호출자를 남긴다)
+  //   거부 = 보안 기록이라 즉시, 정상 폐기 = 지연 기록 (§3-1-1)
   if (lockResult && lockResult.audit) {
     try { writeAuditLog(lockResult.audit); } catch(_) {}
     delete lockResult.audit;
   } else if (lockResult && lockResult.ok && lockResult.auditInfo) {
     try {
       var ai = lockResult.auditInfo;
-      writeAuditLog({
+      writeAuditLogDeferred_({
         eventType: AUDIT_EVENT.DOC_DISCARD,
         actor:     actor || '(미인증)',
         actorRole: 'requester',
@@ -1995,13 +2294,26 @@ function _discardCore(payload) {
  *   - dateFrom    {string=} 'YYYY-MM-DD'  필터: 제출일 시작
  *   - dateTo      {string=} 'YYYY-MM-DD'  필터: 제출일 종료
  *   - requester   {string=}               필터: 기안자 이메일 또는 이름 부분일치
- *   - status      {string=}               필터: 상태 정확일치 (예: '결재중')
+ *   - status      {string=}               필터: 상태 일치 ('결재중'은 '결재중 (이름)'까지 앞부분 일치)
  *   - docNoLike   {string=}               필터: 문서번호 부분일치 (예: 'REQ-2026-01')
+ *   - docType     {string=}               필터: '' | 'REQ' | 'PRC' | 'INSP' (생략 = 전체)
  *   - hasFilter   {boolean}               필터 적용 여부 (true면 최대 500건, false면 100건)
  * @returns {Object} { ok, docs: [...], truncated, totalScanned }
+ *   INSP(검수보고서목록)는 INSP.gs inspListDiscardableForAdmin이 같은 행 모양으로 만들어 합친다.
  */
 function adminListDiscardableForClient(payload) {
   return _adminListDiscardableCore(payload || {});
+}
+
+/**
+ * 관리자 목록의 상태 필터 비교.
+ *  진행 중 상태는 시트에 '결재중 (결재자 이름)'처럼 저장되므로 '결재중'은 앞부분 일치로 본다.
+ *  (예전에는 정확일치라 '결재중'을 고르면 진행 중 문서가 하나도 안 잡혔다)
+ */
+function _adminStatusMatches_(rowStatus, wanted) {
+  if (!wanted) return true;
+  if (wanted === '결재중') return String(rowStatus).indexOf('결재중') === 0;
+  return rowStatus === wanted;
 }
 
 function _adminListDiscardableCore(payload) {
@@ -2009,17 +2321,20 @@ function _adminListDiscardableCore(payload) {
     // 권한 체크 + 거부 시 자동 로그
     assertAdminWithLog('admin_list_discardable', payload);
 
-    var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
-    var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
-    ensureHeaders(sheet);
+    var docTypeFilter = String(payload.docType || '').trim().toUpperCase();   // '' | 'REQ' | 'PRC' | 'INSP'
 
-    var lastRow = sheet.getLastRow();
-    if (lastRow < 2) {
-      return { ok: true, docs: [], truncated: false, totalScanned: 0 };
+    var allRows = [];
+    if (docTypeFilter !== 'INSP') {
+      var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+      ensureHeaders(sheet);
+
+      var lastRow = sheet.getLastRow();
+      // 전체 데이터 한 번에 읽기 (헤더 제외)
+      if (lastRow >= 2) {
+        allRows = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+      }
     }
-
-    // 전체 데이터 한 번에 읽기 (헤더 제외)
-    var allRows = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
 
     // 필터 파싱
     var dateFrom  = String(payload.dateFrom  || '').trim();
@@ -2027,7 +2342,7 @@ function _adminListDiscardableCore(payload) {
     var requester = String(payload.requester || '').trim().toLowerCase();
     var status    = String(payload.status    || '').trim();
     var docNoLike = String(payload.docNoLike || '').trim().toLowerCase();
-    var hasFilter = !!(dateFrom || dateTo || requester || status || docNoLike);
+    var hasFilter = !!(dateFrom || dateTo || requester || status || docNoLike || docTypeFilter);
     var maxRows   = hasFilter ? 500 : 100;
 
     // dateTo는 해당일 23:59:59까지 포함
@@ -2043,17 +2358,20 @@ function _adminListDiscardableCore(payload) {
 
       // 이미 폐기된 문서는 제외 (목록에서 숨김)
       if (rowStatus === '폐기') continue;
+      if (docTypeFilter && docType !== docTypeFilter) continue;
 
       // 보호 대상은 목록에는 포함하되 클라이언트에서 비활성화 표시
       var isProtected = (docType === 'PRC' && rowStatus === '최종승인(PRC)');
 
       // 필터 적용
-      var ts = r[COL.TIMESTAMP];
+      //  ⚠ 제출일 열은 COL.SUBMIT_AT이다. 예전에는 없는 키(COL.TIMESTAMP)를 읽어 제출일이 늘 비었고,
+      //    그 때문에 날짜 필터는 모든 문서를 걸러냈고 정렬도 되지 않았다. (INSP 행을 합치며 발견·수정)
+      var ts = r[COL.SUBMIT_AT];
       var tsDate = (ts instanceof Date) ? ts : (ts ? new Date(ts) : null);
       if (dateFromObj && (!tsDate || tsDate < dateFromObj)) continue;
       if (dateToObj   && (!tsDate || tsDate > dateToObj))   continue;
 
-      if (status && rowStatus !== status) continue;
+      if (!_adminStatusMatches_(rowStatus, status)) continue;
 
       if (docNoLike) {
         var docNoStr = String(r[COL.DOC_NO] || '').toLowerCase();
@@ -2084,6 +2402,24 @@ function _adminListDiscardableCore(payload) {
         parentToken:     String(r[COL.PARENT_DOC_ID] || ''),
         isProtected:     isProtected,
       });
+    }
+
+    // ── INSP (검수보고서목록) — INSP.gs에 위임. 같은 필터·같은 행 모양 ──
+    //  INSP 쪽이 실패해도 REQ/PRC 목록은 그대로 보여준다 (A-3 결재자 변경 목록과 같은 방식)
+    var inspScanned = 0;
+    if ((docTypeFilter === '' || docTypeFilter === 'INSP') &&
+        typeof inspListDiscardableForAdmin === 'function') {
+      try {
+        var inspRes = inspListDiscardableForAdmin({
+          dateFrom: dateFrom, dateTo: dateTo, requester: requester, status: status, docNoLike: docNoLike,
+        });
+        if (inspRes && inspRes.ok) {
+          matched = matched.concat(inspRes.docs || []);
+          inspScanned = inspRes.totalScanned || 0;
+        }
+      } catch (eInsp) {
+        console.error('[A-1] INSP 폐기 목록 조회 실패: ' + eInsp.toString());
+      }
     }
 
     // 정렬: TIMESTAMP 내림차순
@@ -2121,7 +2457,7 @@ function _adminListDiscardableCore(payload) {
       ok: true,
       docs: result,
       truncated: truncated,
-      totalScanned: allRows.length,
+      totalScanned: allRows.length + inspScanned,
       maxRows: maxRows,
     };
   } catch (err) {
@@ -2405,14 +2741,20 @@ function _changeApproverSendAndLog(mailKind, recipient, ctx, sendFn) {
 }
 
 /**
- * 강제 폐기 실행
+ * 강제 폐기 실행 (REQ/PRC는 여기서, INSP는 INSP.gs adminForceDiscardInsp로 위임 — A-3 결재자 변경과 같은 구조)
  * @param {Object} payload
  *   - token   {string} 폐기 대상 문서 토큰 (필수)
  *   - reason  {string} 폐기 사유 (필수, 시스템로그에 기록)
+ *   - docType {string=} 'INSP'일 때만 검수보고서로 위임 (생략 = REQ/PRC, 이전과 동일)
  * @returns {Object} { ok, message, restoredParent }
  */
 function adminForceDiscardForClient(payload) {
-  return _adminForceDiscardCore(payload || {});
+  payload = payload || {};
+  if (String(payload.docType || '').toUpperCase() === 'INSP') {
+    if (typeof adminForceDiscardInsp === 'function') return adminForceDiscardInsp(payload);
+    return { ok: false, message: '검수보고서 폐기 모듈이 배포되지 않았습니다.' };
+  }
+  return _adminForceDiscardCore(payload);
 }
 
 function _adminForceDiscardCore(payload) {
@@ -3054,7 +3396,7 @@ function testA4ForceReleaseDryRun() {
 function claimRequestForClient(payload) { return _claimRequestCore(payload); }
 
 function _claimRequestCore(payload) {
-  return withLock(function() {
+  var res = withLock(function() {
     try {
       var parentToken = payload.parentToken || payload.parentId;
       if (!parentToken) return { ok: false, message: '원본 토큰이 필요합니다.' };
@@ -3100,17 +3442,40 @@ function _claimRequestCore(payload) {
       var now = new Date();
       sheet.getRange(rowNum, COL.CLAIMED_BY + 1, 1, 2).setValues([[actor, now]]);
 
+      // 시스템로그용 — 새 점유와 만료 점유 인수만 남긴다 (본인이 다시 누른 것은 상태 변화가 아님)
+      var claimMode = !currentClaim ? 'new' : (currentClaim === actor ? 'self' : 'ttl_takeover');
+      var audit = (claimMode === 'self') ? null : {
+        eventType:  AUDIT_EVENT.PRC_CLAIM,
+        actor:      actor,
+        actorRole:  'procurement',
+        docNo:      String(r[COL.DOC_NO] || ''),
+        docToken:   parentToken,
+        docType:    'REQ',
+        targetUser: claimMode === 'ttl_takeover' ? currentClaim : '',
+        reason:     claimMode === 'new' ? '품의 픽업' : ('품의 픽업 — 만료된 점유 인수 (이전 점유자 ' + currentClaim + ')'),
+        payload:    { mode: claimMode, previousClaimedBy: currentClaim, previousClaimedAt: claimedAt ? toDateTimeStr(claimedAt) : '' },
+      };
+
       return {
         ok: true,
         message: '품의를 픽업했습니다.',
         parentToken: parentToken,
         claimedBy: actor,
         claimedAt: toDateTimeStr(now),
+        _audit: audit,
       };
     } catch(err) {
       return { ok: false, message: err.toString() };
     }
   });
+
+  // 락 밖: 시스템로그 (지연 기록 — 픽업 버튼 응답 시간에 영향 없음). 응답 모양은 이전과 같게 _audit을 지운다.
+  if (res && res.hasOwnProperty('_audit')) {
+    var claimAudit = res._audit;
+    delete res._audit;
+    if (claimAudit) { try { writeAuditLogDeferred_(claimAudit); } catch(_) {} }
+  }
+  return res;
 }
 
 /**
@@ -3120,11 +3485,19 @@ function _claimRequestCore(payload) {
 function releaseClaimForClient(payload) { return _releaseClaimCore(payload); }
 
 function _releaseClaimCore(payload) {
-  return withLock(function() {
+  payload = payload || {};
+  // 인가 전용 신원 — getEffectiveUser(배포 계정) 폴백이 없다.
+  //  ⚠ 2026-09-01 보안 검토 지적: 예전에는 ① 클라이언트가 보낸 payload.force=true 만으로 남의 락을 풀 수 있었고
+  //    ② 신원 확인에 실패하면 배포 계정(관리자)으로 폴백돼 관리자 우회가 열렸다. 둘 다 막는다.
+  //    payload.force 는 더 이상 읽지 않는다. 사유·통지가 필요한 강제 해제는 A-4(adminForceReleaseLockForClient)로만.
+  var actor = getRequestUserEmail_();
+
+  var res = withLock(function() {
     try {
       var parentToken = payload.parentToken;
-      var actor = getActiveUserEmail();
-      var force = !!payload.force;  // 관리자 강제 해제
+      if (!actor) {
+        return { ok: false, message: '로그인 사용자를 확인할 수 없습니다. 다시 로그인 후 시도해 주세요.' };
+      }
 
       var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
       var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
@@ -3138,17 +3511,41 @@ function _releaseClaimCore(payload) {
         return { ok: true, message: '이미 락이 해제되어 있습니다.', skipped: true };
       }
 
-      if (claimedBy !== actor && !force && !isAdminUser(actor)) {
+      var isOwn   = claimedBy.toLowerCase() === actor;
+      var byAdmin = !isOwn && isAdminUser(actor);
+      if (!isOwn && !byAdmin) {
         return { ok: false, message: '본인이 점유한 락만 해제할 수 있습니다.' };
       }
 
       sheet.getRange(rowNum, COL.CLAIMED_BY + 1, 1, 2).setValues([['', '']]);
 
-      return { ok: true, message: '락이 해제되었습니다.' };
+      return {
+        ok: true,
+        message: '락이 해제되었습니다.',
+        _audit: {
+          eventType:  AUDIT_EVENT.PRC_RELEASE,
+          actor:      actor,
+          actorRole:  byAdmin ? 'admin' : 'procurement',
+          docNo:      String(r[COL.DOC_NO] || ''),
+          docToken:   parentToken,
+          docType:    'REQ',
+          targetUser: byAdmin ? claimedBy : '',
+          reason:     byAdmin ? ('픽업 회수 — 관리자가 다른 담당자의 점유 해제 (' + claimedBy + ')') : '픽업 회수',
+          payload:    { releasedClaimOf: claimedBy, claimedAt: r[COL.CLAIMED_AT] ? toDateTimeStr(r[COL.CLAIMED_AT]) : '', byAdmin: byAdmin },
+        },
+      };
     } catch(err) {
       return { ok: false, message: err.toString() };
     }
   });
+
+  // 락 밖: 시스템로그 (지연 기록). 응답 모양은 이전과 같게 _audit을 지운다.
+  if (res && res._audit) {
+    var relAudit = res._audit;
+    delete res._audit;
+    try { writeAuditLogDeferred_(relAudit); } catch(_) {}
+  }
+  return res;
 }
 
 /**
@@ -3162,7 +3559,10 @@ function getPrefillDataForClient(parentToken) {
     var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
     var rowNum = findRowNumByToken(sheet, parentToken);
-    if (rowNum < 0) return { ok: false, message: '원본 품의를 찾을 수 없습니다.' };
+    if (rowNum < 0) {
+      _logInvalidLinkAccess_('prc_form', parentToken, 'REQ');
+      return { ok: false, message: '원본 품의를 찾을 수 없습니다.' };
+    }
 
     var r = readRow(sheet, rowNum);
     if (r[COL.STATUS] !== '최종승인') {
@@ -3362,6 +3762,8 @@ function _submitPrcCore(data) {
         rowNum: rowNum,
         token: token,
         folderId: folder.getId(),
+        actor: actor,                                    // 락 밖 시스템로그용 (클라이언트에 그대로 나가지 않음)
+        parentDocNo: String(parentRow[COL.DOC_NO] || ''),
       };
     } catch(err) {
       return { ok: false, message: err.toString() };
@@ -3370,15 +3772,41 @@ function _submitPrcCore(data) {
 
   if (!lockResult.ok) return lockResult;
 
+  // 시스템로그: 구매 문서 제출 — 행 생성 + 원본 품의 락 해제·PRC생성됨이 이 시점에 끝났다.
+  //  지연 기록 (§3-1-1). 픽업 해제도 여기서 일어나므로 PRC_RELEASE는 따로 남기지 않는다.
+  try {
+    writeAuditLogDeferred_({
+      eventType: AUDIT_EVENT.PRC_SUBMIT,
+      actor:     lockResult.actor,
+      actorRole: 'procurement',
+      docNo:     data.docNo,
+      docToken:  lockResult.token,
+      docType:   'PRC',
+      reason:    '구매 문서 제출 (원본 품의 ' + lockResult.parentDocNo + ' 픽업 해제)',
+      payload:   {
+        parentDocNo:   lockResult.parentDocNo,
+        parentToken:   data.parentToken,
+        fieldChanges:  (data.fieldChanges || []).length,
+        attachments:   (data.attachments || []).length,
+        approverCount: (data.approvers || []).length,
+      },
+    });
+  } catch(_) {}
+
   // 락 밖: 첨부 업로드
   var folder;
   try { folder = DriveApp.getFolderById(lockResult.folderId); }
-  catch(e) { return { ok: false, message: '폴더 접근 실패: ' + e.toString() }; }
+  catch(e) {
+    _logDriveSaveFail_('folder_access', { docNo: data.docNo, token: lockResult.token, docType: 'PRC', actor: lockResult.actor, actorRole: 'procurement' }, e);
+    return { ok: false, message: '폴더 접근 실패: ' + e.toString() };
+  }
 
   var savedFiles = [];
   try {
     savedFiles = saveAttachmentsToFolder(folder, data.attachments || []);
   } catch(e) {
+    _logDriveSaveFail_('attachment_upload', { docNo: data.docNo, token: lockResult.token, docType: 'PRC', actor: lockResult.actor, actorRole: 'procurement',
+      fileCount: (data.attachments || []).length }, e);
     return { ok: false, message: '구매 문서 첨부파일 업로드 실패: ' + e.toString() };
   }
 
@@ -3621,7 +4049,8 @@ function getHomeDataForClient() {
         var inspClosed = false;        // 최종 검수 '최종승인(INSP)' → 완전 종결
         var inspLockedPending = false; // 최종 검수 제출됐으나 결재 진행중 → 추가 제출만 차단
         for (var ic = 0; ic < insps.length; ic++) {
-          if (insps[ic].isFinal && insps[ic].status !== '반려') {
+          // 폐기된 회차는 잠금에서 뺀다 — INSP.gs _isInspLocked와 같은 기준 (폐기 후 다시 제출할 수 있어야 함)
+          if (insps[ic].isFinal && insps[ic].status !== '반려' && insps[ic].status !== '폐기') {
             inspLockedPending = true;
             if (insps[ic].status === '최종승인(INSP)') inspClosed = true;
           }
@@ -3818,7 +4247,10 @@ function getRequisitionForViewer(token, urlIdxHint) {
     var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
     var rowNum = findRowNumByToken(sheet, token);
-    if (rowNum < 0) return { ok: false, message: '유효하지 않은 토큰입니다.' };
+    if (rowNum < 0) {
+      _logInvalidLinkAccess_('viewer', token, 'REQ');
+      return { ok: false, message: '유효하지 않은 토큰입니다.' };
+    }
 
     var r         = readRow(sheet, rowNum);
     var apprCount = parseInt(r[COL.APPR_COUNT]) || 0;
@@ -3965,7 +4397,10 @@ function _getRejectDataCore(token) {
     var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
     var rowNum = findRowNumByToken(sheet, token);
-    if (rowNum < 0) return { ok: false, message: '유효하지 않은 토큰입니다.' };
+    if (rowNum < 0) {
+      _logInvalidLinkAccess_('reject', token, 'REQ');
+      return { ok: false, message: '유효하지 않은 토큰입니다.' };
+    }
 
     var r = readRow(sheet, rowNum);
     var hist = String(r[COL.REJECT_LOG] || '');
@@ -6225,6 +6660,19 @@ function processQueueTrigger() {
   var processedCount = 0;
   var skippedReason = '';
 
+  // [시스템로그] 지연 기록 반영 (§3-1-1) — 큐 처리와 독립. 실패해도 아래 큐 처리는 그대로 진행한다.
+  //  전역 락을 쓰지 않으며, 버퍼가 비어 있으면 하트비트만 갱신하고 끝난다.
+  //  소요 시간은 startTime 뒤라 아래 큐 시간 한도(QUEUE_MAX_RUNTIME_MS)에 함께 포함된다 → 트리거 전체 길이는 늘지 않는다.
+  try {
+    var auditFlush = flushAuditLogBuffer_();
+    if (auditFlush && auditFlush.flushed) {
+      Logger.log('[AuditLog] 지연 기록 반영 ' + auditFlush.flushed + '건 / 남음 ' + auditFlush.remaining);
+    }
+  } catch (e) {
+    console.error('[AuditLog] 지연 기록 반영 실패: ' + e.toString());
+    _auditBufAlertOnce_('지연 기록 반영 실패 — 15분 이상 계속되면 새 기록은 자동으로 즉시 기록됩니다. 오류: ' + e.toString());
+  }
+
   // 시간 한도 안에서 계속 다음 job을 꺼내 처리
   while (true) {
     var elapsed = Date.now() - startTime;
@@ -6291,6 +6739,18 @@ function processQueueTrigger() {
     if (job.type === 'quote_pdf' && !result.ok && job.attempts >= QUEUE_MAX_ATTEMPTS) {
       try { _markQuotePdfPending(job.token, '자동 변환 ' + job.attempts + '회 실패: ' + (result.message || '')); }
       catch(e) { notifyAdminError('견적서 PDF 핸드오프 실패: ' + job.docNo + ' / ' + e.toString()); }
+    }
+
+    // [시스템로그] 결재 PDF 생성·FINAL 이동 최종 실패 → DRIVE_SAVE_FAIL (락 밖, 즉시 기록)
+    //  재시도 중인 실패는 남기지 않는다 — 대부분 다음 시도에서 해소된다(2026-08-20 장애 기록 참고).
+    //  견적서 PDF는 QUOTE_PDF_PENDING으로 이미 남으므로 제외.
+    if (!result.ok && job.attempts >= QUEUE_MAX_ATTEMPTS &&
+        (job.type === 'pdf_only' || job.type === 'pdf_and_consolidate')) {
+      _logDriveSaveFail_('queue_' + job.type, {
+        docNo: job.docNo, token: job.token, docType: job.docType,
+        actor: '(system) processQueueTrigger', actorRole: 'system',
+        jobId: job.id, attempts: job.attempts,
+      }, result.message || '');
     }
 
     var jobElapsed = Date.now() - startTime;

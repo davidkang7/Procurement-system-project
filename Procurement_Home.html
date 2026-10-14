@@ -1881,7 +1881,7 @@ function completedTable(docs){
       + '<td>' + escHtml(x.vendorName) + '</td>'
       + '<td>' + statusBadge('최종승인(PRC)') + '</td>'
       + '<td><span class="status ' + st.cls + '">' + escHtml(st.label) + '</span></td>'
-      + '<td class="num">' + (x.insps || []).length + '건</td>'
+      + '<td class="num">' + (x.insps || []).filter(function(s){ return s.status !== '폐기'; }).length + '건</td>'
       + '</tr>';
     if(open) body += inspSubRows(x);
   });
@@ -1891,7 +1891,8 @@ function completedTable(docs){
 
 // PO(품의) 단위 검수 집계 상태 — 저장하지 않고 계산 (설계서 §3)
 function poInspState(x){
-  var insps = x.insps || [];
+  // 폐기된 회차는 집계에서 뺀다 (번호만 소모하고 검수 진행에는 영향이 없다)
+  var insps = (x.insps || []).filter(function(s){ return s.status !== '폐기'; });
   if(insps.length === 0) return { key:'none', label:'검수 미제출', cls:'insp-none' };
   if(x.inspClosed) return { key:'closed', label:'검수 완료 (종결)', cls:'insp-closed' };
   var hasRejected = false, approving = 0, done = 0;
@@ -1918,15 +1919,32 @@ function inspSubRows(x){
       + '<th style="width:150px;">검수보고서 번호</th><th style="width:80px;">입고일</th><th>입고 내역</th>'
       + '<th style="width:70px;">판정</th><th style="width:130px;">상태</th><th style="width:100px;"></th>'
       + '</tr></thead><tbody>';
+    var myEmail = String((STATE.user || {}).email || '').toLowerCase();
     x.insps.forEach(function(s){
       var act = '';
       if(s.status === '반려' && canSubmit){
+        // 같은 화면(INSP 재상신)으로 간다. 제출자 본인에게는 그 화면에 [폐기] 버튼도 있어 이름을 맞춘다.
+        var mineSubmit = !!s.submitter && s.submitter === myEmail;
         act = '<button class="btn-insp"'
-            + ' data-insp-form="' + escAttr(x.prcToken) + '" data-insp-resub="' + escAttr(s.token) + '">수정 재상신</button>';
+            + ' data-insp-form="' + escAttr(x.prcToken) + '" data-insp-resub="' + escAttr(s.token) + '">'
+            + (mineSubmit ? '재상신/폐기' : '수정 재상신') + '</button>';
       }
       var stTxt = s.status;
       if((s.status === '검토중' || s.status.indexOf('결재중') >= 0) && s.currentApprName){
         stTxt = '결재중 (' + s.currentApprName + ')';
+      }
+      // 폐기된 회차는 번호가 소모됐음을 보이기 위해 행은 남기되, 열 수 있는 문서가 없으므로 클릭하지 않는다
+      //  (폐기 시 토큰을 무효화하므로 열면 '찾을 수 없음'이 된다)
+      if(s.status === '폐기'){
+        inner += '<tr style="opacity:.55;">'
+          + '<td><span class="docno ir">' + escHtml(s.docNo) + '</span>' + (s.isFinal ? ' <span class="final-flag">★최종</span>' : '') + '</td>'
+          + '<td>' + escHtml(s.receivedDate) + '</td>'
+          + '<td>' + escHtml(s.receivedNote) + '</td>'
+          + '<td>' + escHtml(s.verdict || '-') + '</td>'
+          + '<td>' + statusBadge(stTxt) + '</td>'
+          + '<td></td>'
+          + '</tr>';
+        return;
       }
       // [검수 회차 조회] 회차 행을 클릭하면 그 회차의 검수보고서를 연다.
       //   서버는 원래 임의 회차 토큰을 열어줬는데, 여기서 s.token을 쓰지 않아

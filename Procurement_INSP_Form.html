@@ -80,6 +80,11 @@
   .btn.insp:hover{filter:brightness(1.08);}
   .btn.gray{background:#fff;color:var(--ink-soft);border:1px solid var(--line);}
   .btn.primary{background:var(--accent);color:#fff;}
+  /* 반려 후 폐기 (제출자 본인에게만 노출) — 외곽선 버튼, 확인 모달 안에서는 채운 버튼 */
+  .btn.danger{background:#fff;color:var(--danger);border:1px solid #f3c0c0;}
+  .btn.danger:hover{background:var(--danger-soft);}
+  .btn.danger-fill{background:var(--danger);color:#fff;}
+  .btn.danger-fill:hover{filter:brightness(1.08);}
   .btn:disabled{opacity:.5;cursor:default;}
 
   /* 홈으로 버튼 (우측 상단 고정) — Form과 동일 */
@@ -228,6 +233,8 @@ function render(){
   html+='<div class="actions">'
     + '<button class="btn gray" onclick="goHome()">취소</button>'
     + '<button class="btn gray" onclick="window.print()">인쇄</button>'
+    // 반려 건 폐기 — 제출자 본인에게만 보인다(REQ/PRC '재상신/폐기'와 같은 흐름). 권한은 서버가 다시 판정.
+    + (RESUB&&RESUB.canDiscard?'<button class="btn danger" id="discard-btn" onclick="showDiscardConfirm()">폐기</button>':'')
     + '<button class="btn insp" id="submit-btn" onclick="submit()">'+(RESUB?'재상신':'검수보고서 제출')+'</button>'
     + '</div>';
 
@@ -444,6 +451,50 @@ function showAlertModal(msg, detail){
   var ok=document.getElementById('ov-ok');
   ok.onclick=hideOverlay;
   ok.focus();
+}
+
+// ── 반려 후 폐기 (제출자 본인) ── 확인·진행·완료·오류 모두 같은 오버레이 카드 (브라우저 confirm 금지)
+function showDiscardConfirm(){
+  document.getElementById('ov-card').innerHTML='<div class="x-icon">!</div>'
+    + '<div class="ov-msg">이 검수보고서를 폐기하시겠습니까?</div>'
+    + '<div class="ov-sub">'+esc(FORM.docNo)+' · '+esc(FORM.nextSeq)+'회차</div>'
+    + '<div class="ov-warn"><b>폐기 후에는 복구할 수 없습니다.</b>'
+    +   '<div>· 첨부한 검수 사진도 함께 휴지통으로 이동됩니다.</div>'
+    +   '<div>· 이 회차 번호는 다시 쓰지 않습니다. 검수보고서가 다시 필요하면 다음 회차로 새로 제출해 주세요.</div>'
+    + '</div>'
+    + '<div class="ov-actions"><button class="btn gray" id="dc-cancel">취소</button>'
+    + '<button class="btn danger-fill" id="dc-ok">폐기 확인</button></div>';
+  document.getElementById('overlay').classList.add('on');
+  document.getElementById('dc-cancel').onclick=hideOverlay;
+  document.getElementById('dc-ok').onclick=doDiscard;
+  // 기본 포커스를 두지 않는다 — Enter 한 번에 폐기되지 않도록 (최종 확인 모달과 같은 원칙)
+  if(document.activeElement) document.activeElement.blur();
+}
+
+function setActionButtonsDisabled(v){
+  ['submit-btn','discard-btn'].forEach(function(id){ var b=document.getElementById(id); if(b) b.disabled=v; });
+}
+
+function doDiscard(){
+  showOverlay('폐기 처리 중...', '잠시만 기다려 주세요.');
+  setActionButtonsDisabled(true);
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res&&res.ok){
+        document.getElementById('ov-card').innerHTML='<div class="ok-icon">✓</div>'
+          + '<div class="ov-msg">폐기 완료</div>'
+          + '<div class="ov-sub">'+esc(FORM.docNo)+' 검수보고서가 폐기되었습니다.</div>'
+          + '<button class="btn insp" style="margin-top:18px;" onclick="goHome()">홈으로 이동</button>';
+      }else{
+        setActionButtonsDisabled(false);
+        showAlertModal('폐기에 실패했습니다.', res?res.message:'알 수 없는 오류');
+      }
+    })
+    .withFailureHandler(function(err){
+      setActionButtonsDisabled(false);
+      showAlertModal('폐기에 실패했습니다.', '네트워크 오류: '+(err&&err.message?err.message:err));
+    })
+    .discardInspForClient({ token: RESUB_TOKEN, reason: '제출자 폐기 (반려 후)' });
 }
 
 function showOverlay(msg,sub){

@@ -225,6 +225,8 @@ function _getInspGroupsByPrc(ss) {
         token:           String(r[INSP_COL.TOKEN] || ''),
         submitAt:        toDateTimeStr(r[INSP_COL.SUBMIT_AT]),
         currentApprName: currentApprName,
+        // 실제 제출자(결재란 0번) — 홈에서 '재상신/폐기' 버튼을 제출자 본인에게만 보이기 위함 (서버가 다시 검증)
+        submitter:       String(r[inspApprCol(0, 2)] || '').trim().toLowerCase(),
       };
 
       if (!groups[prcToken]) groups[prcToken] = [];
@@ -306,7 +308,10 @@ function getInspFormDataForClient(prcToken, resubToken) {
       }
     }
 
-    if (!prc) return { ok: false, message: '대상 구매품의서(구매)를 찾을 수 없습니다.' };
+    if (!prc) {
+      _logInvalidLinkAccess_('insp_form', prcToken, 'PRC');
+      return { ok: false, message: '대상 구매품의서(구매)를 찾을 수 없습니다.' };
+    }
     if (prc.status !== '최종승인(PRC)') {
       return { ok: false, message: '최종승인(구매) 상태의 품의에만 검수보고서를 제출할 수 있습니다.' };
     }
@@ -341,7 +346,10 @@ function getInspFormDataForClient(prcToken, resubToken) {
     var resub = null;
     if (resubToken) {
       var rinfo = _readInspRowByToken(ss, resubToken);
-      if (!rinfo) return { ok: false, message: '재상신할 검수보고서를 찾을 수 없습니다.' };
+      if (!rinfo) {
+        _logInvalidLinkAccess_('insp_resub', resubToken, 'INSP');
+        return { ok: false, message: '재상신할 검수보고서를 찾을 수 없습니다.' };
+      }
       if (rinfo.row[INSP_COL.STATUS] !== '반려') {
         return { ok: false, message: '반려 상태의 검수보고서만 재상신할 수 있습니다.' };
       }
@@ -355,6 +363,8 @@ function getInspFormDataForClient(prcToken, resubToken) {
         isFinal:      String(rr[INSP_COL.IS_FINAL] || '') === 'Y',
         comment:      String(rr[INSP_COL.COMMENT] || ''),
         rejectLog:    String(rr[INSP_COL.REJECT_LOG] || ''),
+        // 폐기 버튼 노출용 표시값 — 실제 권한은 _discardInspCore가 서버에서 다시 판정한다 (제출자 본인만)
+        canDiscard:   String(rr[inspApprCol(0, 2)] || '').trim().toLowerCase() === actor,
       };
     }
 
@@ -584,7 +594,9 @@ function _submitInspCore(data) {
       sheet2.getRange(lockResult.rowNum, INSP_COL.PHOTO_LIST + 1)
         .setValue(JSON.stringify(savedPhotos));
     } catch (e) {
-      // 사진 실패는 제출 자체를 막지 않음 (행은 이미 기록됨) — 관리자 알림
+      // 사진 실패는 제출 자체를 막지 않음 (행은 이미 기록됨) — 관리자 알림 + 시스템로그(즉시)
+      _logDriveSaveFail_('insp_photo', { docNo: lockResult.docNo, token: lockResult.token, docType: 'INSP',
+        actor: actor, actorRole: 'requester', fileCount: photos.length }, e);
       try { notifyAdminError('[INSP] 사진 임시 저장 실패: ' + lockResult.docNo + ' / ' + e.toString()); } catch (_) {}
     }
 
@@ -605,9 +617,9 @@ function _submitInspCore(data) {
       try { notifyAdminError('[INSP] 결재 요청 메일 실패: ' + lockResult.docNo + ' / ' + e.toString()); } catch (_) {}
     }
 
-    // 감사 로그
+    // 감사 로그 — 지연 기록 (제출자 대기 시간에서 시트 쓰기를 뺀다. 처리자·시각은 지금 확정 — Code.gs §3-1-1)
     try {
-      writeAuditLog({
+      writeAuditLogDeferred_({
         eventType: lockResult.isResub ? AUDIT_EVENT.INSP_RESUBMIT : AUDIT_EVENT.INSP_SUBMIT,
         docNo: lockResult.docNo, docToken: lockResult.token, docType: 'INSP',
         actor: actor, reason: '검수보고서 ' + (lockResult.isResub ? '재상신' : '제출') + ' (' + lockResult.seq + '회차)',
@@ -663,8 +675,10 @@ function _findMyInspIdx(row, apprCount, curIdx, actor) {
  * @returns {boolean} true면 신규 제출 차단
  */
 function _isInspLocked(inspList) {
+  // 폐기된 최종 회차도 차단에서 뺀다 — 폐기 후 같은 품의에 검수보고서를 다시 낼 수 있어야 한다.
+  //  ⚠ Code.gs 홈 집계(inspLocked)에 같은 조건이 복제돼 있다. 바꿀 때 둘 다 바꿀 것.
   return (inspList || []).some(function (x) {
-    return x.isFinal && x.status !== '반려';
+    return x.isFinal && x.status !== '반려' && x.status !== '폐기';
   });
 }
 
@@ -822,7 +836,10 @@ function getInspDecisionMetaForClient(token) {
     var actor = (getActiveUserEmail() || '').toLowerCase();
     var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var info = _readInspRowByToken(ss, token);
-    if (!info) return { ok: false, message: '검수보고서를 찾을 수 없습니다.' };
+    if (!info) {
+      _logInvalidLinkAccess_('insp_approve', token, 'INSP');
+      return { ok: false, message: '검수보고서를 찾을 수 없습니다.' };
+    }
     var r = info.row;
     var status = String(r[INSP_COL.STATUS] || '');
     var curIdx = parseInt(r[INSP_COL.APPR_IDX]) || 0;
@@ -852,8 +869,8 @@ function getInspDecisionMetaForClient(token) {
       curIdx:      curIdx,
       apprCount:   apprCount,
       myIdx:       myIdx,
-      isMyTurn:    (myIdx === curIdx && status !== '반려' && status !== '최종승인(INSP)'),
-      alreadyDone: (status === '최종승인(INSP)' || status === '반려'),
+      isMyTurn:    (myIdx === curIdx && status !== '반려' && status !== '최종승인(INSP)' && status !== '폐기'),
+      alreadyDone: (status === '최종승인(INSP)' || status === '반려' || status === '폐기'),
     };
   } catch (err) {
     return { ok: false, message: err.toString() };
@@ -886,6 +903,8 @@ function processInspDecisionFromClient(payload) {
       var status = String(r[INSP_COL.STATUS] || '');
       if (status === '반려')          return { ok: false, message: '이미 반려된 검수보고서입니다.' };
       if (status === '최종승인(INSP)') return { ok: false, message: '이미 최종 승인된 검수보고서입니다.' };
+      // 폐기 시 토큰을 무효화하므로 보통 여기까지 오지 않는다 — 토큰이 살아 있는 비정상 행을 위한 이중 방어
+      if (status === '폐기')          return { ok: false, message: '폐기된 검수보고서입니다.' };
 
       var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;
       var curIdx    = parseInt(r[INSP_COL.APPR_IDX]) || 0;
@@ -963,7 +982,8 @@ function processInspDecisionFromClient(payload) {
   try {
     var ev = (lockResult.decision === 'reject') ? AUDIT_EVENT.INSP_REJECT
            : (lockResult.finalized ? AUDIT_EVENT.INSP_FINALIZED : AUDIT_EVENT.INSP_APPROVE);
-    writeAuditLog({ eventType: ev, docNo: n.docNo, docToken: n.token, docType: 'INSP',
+    // 지연 기록 — actor를 넘기지 않지만 _buildAuditRow_가 '지금(결재자 요청 안에서)' 채우므로 결재자로 남는다
+    writeAuditLogDeferred_({ eventType: ev, docNo: n.docNo, docToken: n.token, docType: 'INSP',
       reason: lockResult.message + (n.isFinal && lockResult.finalized ? ' (최종 검수 — 품의 종결)' : '') });
   } catch (_) {}
 
@@ -1339,6 +1359,374 @@ function adminChangeInspApprover(payload) {
 }
 
 // ================================================================
+// [A-1/INSP] 검수보고서 폐기 — 관리자 강제 폐기 + 제출자 본인 폐기(반려 후)
+//   REQ/PRC와 같은 틀:
+//     · 관리자(ADMIN_EMAILS)    : 검토중·결재중·반려 건 강제 폐기. 사유 필수, 관련자 메일 통지 → ADMIN_FORCE_DISCARD
+//     · 제출자 본인(결재란 0번) : 반려 건만 폐기. 메일 없음(REQ/PRC 기안자 폐기와 동일) → INSP_DISCARD
+//     · 최종승인(INSP)은 누구도 폐기할 수 없다(보호) — PDF가 FINAL에 있거나 로컬 렌더 대기 중이다.
+//   상태·토큰·이력 변경은 _applyInspDiscard_ 하나로 한다 (정책과 동작의 분리 — _applyDecision_와 같은 패턴).
+//
+//   ⚠ 폐기된 회차의 번호는 다시 쓰지 않는다. _getInspGroupsByPrc가 폐기 행까지 세어 다음 회차를 매기므로
+//     -01을 폐기하면 다음 제출은 -02다. 번호를 재사용하면 같은 문서번호가 두 번 생겨
+//     STAGING 폴더(INSP_{docNo})·로컬 렌더러 PDF 파일명·시스템로그가 서로 충돌한다.
+//   ⚠ 폐기 시 토큰을 'DISCARDED_…'로 바꾼다 — 옛 결재 메일·뷰어·재상신 링크는 '없는 토큰'으로 자동 차단된다.
+// ================================================================
+
+/** 관리자가 강제 폐기할 수 있는 INSP 상태 (최종승인·폐기 제외) */
+function _isInspAdminDiscardable_(status) {
+  status = String(status || '');
+  return status === '검토중' || status.indexOf('결재중') === 0 || status === '반려';
+}
+
+/** 폐기 대상 행에서 알림·로그·목록에 필요한 값을 뽑는다 (락 밖에서 쓰기 위해 락 안에서 미리) */
+function _inspDiscardCtx_(r) {
+  var apprCount  = Math.min(parseInt(r[INSP_COL.APPR_COUNT]) || 0, INSP_COL.MAX_APPROVERS);
+  var curIdx     = parseInt(r[INSP_COL.APPR_IDX]) || 0;
+  var status     = String(r[INSP_COL.STATUS] || '');
+  var inProgress = (status === '검토중' || status.indexOf('결재중') === 0);
+  // 현재 결재 대기자: 진행 중 + 현재 차례 블록이 '대기'일 때만 (_getInspMenusForClient와 같은 기준)
+  var curValid   = inProgress && curIdx >= 0 && curIdx < apprCount &&
+                   String(r[inspApprCol(curIdx, 3)] || '') === '대기';
+  return {
+    docType:        'INSP',
+    docNo:          String(r[INSP_COL.DOC_NO] || ''),
+    token:          String(r[INSP_COL.TOKEN] || ''),          // 폐기 전 원래 토큰 (로그용)
+    oldStatus:      status,
+    seq:            parseInt(r[INSP_COL.SEQ]) || 0,
+    isFinal:        String(r[INSP_COL.IS_FINAL] || '') === 'Y',
+    poNo:           String(r[INSP_COL.PO_NO] || ''),
+    subject:        String(r[INSP_COL.SUBJECT] || ''),
+    folderId:       String(r[INSP_COL.DRIVE_ID] || ''),
+    drafterEmail:   String(r[INSP_COL.DRAFTER] || ''),        // 원본 품의 기안자
+    drafterName:    String(r[INSP_COL.DRAFTER_NAME] || ''),
+    submitterEmail: String(r[inspApprCol(0, 2)] || ''),       // 실제 제출자 (결재란 0번)
+    submitterName:  String(r[inspApprCol(0, 1)] || ''),
+    curApprEmail:   curValid ? String(r[inspApprCol(curIdx, 2)] || '') : '',
+    curApprName:    curValid ? String(r[inspApprCol(curIdx, 1)] || '') : '',
+  };
+}
+
+/**
+ * 폐기 공통 동작 — 반드시 락 안에서, 인가를 마친 정책 함수만 호출한다.
+ *  상태 '폐기' + 토큰 무효화 + 반려이력 한 줄. 사진 임시폴더 정리는 호출자가 락 밖에서 한다.
+ * @returns {Object} _inspDiscardCtx_ (변경 전 값)
+ */
+function _applyInspDiscard_(sheet, rowNum, r, logLine) {
+  if (INSP_COL.TOKEN !== INSP_COL.STATUS + 1) {
+    throw new Error('[INSP] STATUS·TOKEN 열이 인접하지 않습니다 — INSP_COL 스키마 확인 필요');
+  }
+  var ctx = _inspDiscardCtx_(r);
+  sheet.getRange(rowNum, INSP_COL.STATUS + 1, 1, 2).setValues([['폐기', 'DISCARDED_' + Utilities.getUuid()]]);
+  var existLog = String(r[INSP_COL.REJECT_LOG] || '');
+  sheet.getRange(rowNum, INSP_COL.REJECT_LOG + 1).setValue(existLog ? existLog + '\n' + logLine : logLine);
+  return ctx;
+}
+
+/** INSP STAGING 임시폴더(사진 포함) 휴지통 이동 — 폴더명이 INSP_로 시작할 때만 (_cleanupInspPhotos와 같은 안전장치) */
+function _trashInspStagingFolder_(folderId) {
+  if (!folderId) return false;
+  try {
+    var folder = DriveApp.getFolderById(folderId);
+    if (String(folder.getName() || '').indexOf('INSP_') !== 0) return false;
+    folder.setTrashed(true);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** 강제 폐기 목록 (Code.gs _adminListDiscardableCore가 REQ/PRC 목록에 합친다. 단독 호출 방어로 자체 권한검증) */
+function inspListDiscardableForAdmin(payload) {
+  try {
+    assertAdminWithLog('insp_list_discardable', payload || {});
+    payload = payload || {};
+    var dateFrom  = String(payload.dateFrom  || '').trim();
+    var dateTo    = String(payload.dateTo    || '').trim();
+    var requester = String(payload.requester || '').trim().toLowerCase();
+    var status    = String(payload.status    || '').trim();
+    var docNoLike = String(payload.docNoLike || '').trim().toLowerCase();
+    var dateFromObj = dateFrom ? new Date(dateFrom + 'T00:00:00') : null;
+    var dateToObj   = dateTo   ? new Date(dateTo   + 'T23:59:59') : null;
+
+    var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+    var docs = [], scanned = 0;
+    if (sheet && sheet.getLastRow() >= 2) {
+      var rows = sheet.getDataRange().getValues();
+      scanned = rows.length - 1;
+      for (var i = 1; i < rows.length; i++) {
+        var r = rows[i];
+        var token = String(r[INSP_COL.TOKEN] || '');
+        if (!token) continue;
+        var rowStatus = String(r[INSP_COL.STATUS] || '');
+        if (rowStatus === '폐기') continue;                         // 이미 폐기 → 숨김
+        var isProtected = (rowStatus === '최종승인(INSP)');         // 보호 대상 → 보이되 선택 불가
+        if (!isProtected && !_isInspAdminDiscardable_(rowStatus)) continue;
+        if (!_adminStatusMatches_(rowStatus, status)) continue;
+
+        var ts = r[INSP_COL.SUBMIT_AT];
+        var tsDate = (ts instanceof Date) ? ts : (ts ? new Date(ts) : null);
+        if (dateFromObj && (!tsDate || tsDate < dateFromObj)) continue;
+        if (dateToObj   && (!tsDate || tsDate > dateToObj))   continue;
+
+        var docNo = String(r[INSP_COL.DOC_NO] || '');
+        if (docNoLike && docNo.toLowerCase().indexOf(docNoLike) < 0) continue;
+
+        var ctx = _inspDiscardCtx_(r);
+        if (requester) {
+          var hay = [ctx.submitterName, ctx.submitterEmail, ctx.drafterName, ctx.drafterEmail].join(' ').toLowerCase();
+          if (hay.indexOf(requester) < 0) continue;
+        }
+
+        docs.push({
+          rowIndex:        i + 1,
+          token:           token,
+          docNo:           docNo,
+          docType:         'INSP',
+          timestamp:       tsDate ? toDateTimeStr(tsDate) : '',
+          timestampMs:     tsDate ? tsDate.getTime() : 0,
+          drafter:         ctx.submitterName || ctx.drafterName,
+          requesterEmail:  ctx.submitterEmail || ctx.drafterEmail,
+          vendor:          String(r[INSP_COL.VENDOR_NAME] || ''),
+          amount:          null,          // 검수보고서에는 금액이 없다 — 화면에서 '-'
+          currency:        '',
+          status:          rowStatus,
+          claimedBy:       '',
+          claimedAt:       '',
+          parentToken:     '',
+          isProtected:     isProtected,
+          // INSP 전용 — 확인 모달의 안내·알림 대상 미리보기용
+          poNo:            ctx.poNo,
+          seq:             ctx.seq,
+          isFinal:         ctx.isFinal,
+          reqDrafterEmail: ctx.drafterEmail,
+          curApprEmail:    ctx.curApprEmail,
+          curApprName:     ctx.curApprName,
+        });
+      }
+    }
+    return { ok: true, docs: docs, totalScanned: scanned };
+  } catch (err) {
+    return { ok: false, message: err.toString(), docs: [] };
+  }
+}
+
+/** 관리자 강제 폐기 실행 (Code.gs adminForceDiscardForClient가 docType==='INSP'일 때 위임) — A-1과 같은 순서·같은 규칙 */
+function adminForceDiscardInsp(payload) {
+  payload = payload || {};
+  // 락 진입 전 권한 1차 체크 (실패 시 락 점유 낭비 방지)
+  try {
+    assertAdminWithLog(AUDIT_EVENT.ADMIN_FORCE_DISCARD, { token: payload.token, docType: 'INSP' });
+    requireAdminReason(payload.reason);
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+
+  // 락 안: 권한 재확인 + 시트 변경만
+  var lockResult = withLock(function() {
+    try {
+      var actor = getActiveUserEmail();
+      if (!isAdminUser(actor)) return { ok: false, message: '관리자 권한이 필요합니다.' };
+
+      var token  = String(payload.token  || '').trim();
+      var reason = String(payload.reason || '').trim();
+      if (!token)  return { ok: false, message: '폐기 대상 토큰이 필요합니다.' };
+      if (!reason) return { ok: false, message: '폐기 사유가 필요합니다.' };
+
+      var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+      if (!sheet) return { ok: false, message: '검수보고서 시트가 없습니다.' };
+
+      var info = _readInspRowByToken(ss, token);
+      if (!info) return { ok: false, message: '대상 검수보고서를 찾을 수 없습니다.' };
+      var status = String(info.row[INSP_COL.STATUS] || '');
+
+      if (status === '폐기') return { ok: false, message: '이미 폐기된 검수보고서입니다.' };
+      if (status === '최종승인(INSP)') {
+        return { ok: false, message: '최종승인(INSP) 상태의 검수보고서는 강제 폐기할 수 없습니다. (보호 대상)' };
+      }
+      if (!_isInspAdminDiscardable_(status)) {
+        return { ok: false, message: '현재 상태에서는 폐기할 수 없습니다. (상태: ' + status + ')' };
+      }
+
+      var line = '[관리자 강제폐기] ' + toDateTimeStr(new Date()) + ' / ' + actor + ' / ' + reason;
+      var ctx = _applyInspDiscard_(sheet, info.rowNum, info.row, line);
+      ctx.actor  = actor;
+      ctx.reason = reason;
+      return { ok: true, message: '검수보고서가 강제 폐기되었습니다.', _ctx: ctx };
+    } catch (err) {
+      return { ok: false, message: err.toString() };
+    }
+  });
+
+  if (!lockResult || !lockResult.ok) return lockResult;
+
+  // ─── 락 밖: 사진 임시폴더 정리 → 관련자 통지 → 시스템로그(관리자 액션 = 즉시 기록) ───
+  //  어느 단계가 실패해도 폐기 자체는 이미 커밋됐다 — 서로 막지 않도록 따로 감싼다.
+  var ctx = lockResult._ctx;
+  var folderTrashed = _trashInspStagingFolder_(ctx.folderId);
+  try { _sendAdminInspDiscardNotifications_(ctx); }
+  catch (err) { console.error('[A-1/INSP] 통지 실패: ' + err.toString()); }
+  try {
+    writeAuditLog({
+      eventType:  AUDIT_EVENT.ADMIN_FORCE_DISCARD,
+      actor:      ctx.actor,
+      actorRole:  'admin',
+      docNo:      ctx.docNo,
+      docToken:   ctx.token,
+      docType:    'INSP',
+      targetUser: ctx.submitterEmail || ctx.drafterEmail,
+      reason:     ctx.reason,
+      payload:    { oldStatus: ctx.oldStatus, newStatus: '폐기', seq: ctx.seq, isFinal: ctx.isFinal, folderTrashed: folderTrashed },
+    });
+  } catch (err) { console.error('[A-1/INSP] 시스템로그 실패: ' + err.toString()); }
+
+  return { ok: true, message: '검수보고서가 강제 폐기되었습니다.' };
+}
+
+/**
+ * 강제 폐기 알림 (락 밖) — 제출자 · 원본 품의 기안자 · 현재 결재 대기자. 관리자 본인 제외, 같은 사람은 1통으로.
+ *  발송 규칙은 A-1(_sendAdminDiscardNotifications)과 같다: GmailApp 직접 + 별칭 폴백 1회, 재시도·throw 없음.
+ */
+function _sendAdminInspDiscardNotifications_(ctx) {
+  var notifyMap = {};
+  var self = String(ctx.actor || '').toLowerCase();
+  function addNotify(email, text) {
+    var key = String(email || '').trim().toLowerCase();
+    if (!key || key === self) return;
+    if (!notifyMap[key]) notifyMap[key] = { to: String(email).trim(), reasons: [] };
+    notifyMap[key].reasons.push(text);
+  }
+  addNotify(ctx.submitterEmail, '귀하가 제출한 검수보고서가 강제 폐기됨');
+  addNotify(ctx.drafterEmail,   '귀하가 기안한 품의의 검수보고서가 강제 폐기됨');
+  if (ctx.curApprEmail) addNotify(ctx.curApprEmail, '결재 대기 중이던 검수보고서가 폐기되어 결재 요청이 취소됨 (처리할 필요 없음)');
+
+  var tsStr    = toDateTimeStr(new Date());
+  var failedTo = [];
+  var lastErr  = null;
+
+  Object.keys(notifyMap).forEach(function(key) {
+    var n = notifyMap[key];
+    // 본문 조립은 try 밖 — 조립 중 예외로 폴백이 빈 메일을 보내지 않도록 (A-1과 동일)
+    var reasonsBlock = n.reasons.map(function(r, i) { return '  ' + (i + 1) + ') ' + r; }).join('\n');
+    var subject = '[구매결재] ' + ctx.docNo + ' 검수보고서가 관리자에 의해 강제 폐기되었습니다';
+    var body =
+      '안녕하세요.\n\n' +
+      '아래 검수보고서가 관리자에 의해 강제 폐기되었음을 알려드립니다.\n\n' +
+      '▶ 문서번호: ' + ctx.docNo + ' (검수보고서 ' + ctx.seq + '회차' + (ctx.isFinal ? ' · 최종 검수' : '') + ')\n' +
+      '▶ PO 번호: ' + (ctx.poNo || '-') + '\n' +
+      '▶ 품명: ' + (ctx.subject || '-') + '\n' +
+      '▶ 처리자: ' + ctx.actor + '\n' +
+      '▶ 처리 일시: ' + tsStr + '\n' +
+      '▶ 폐기 사유: ' + ctx.reason + '\n\n' +
+      '▶ 귀하와 관련된 영향:\n' + reasonsBlock + '\n\n' +
+      '폐기된 회차 번호는 다시 쓰지 않습니다. 검수보고서가 다시 필요하면 다음 회차로 새로 제출해 주세요.\n' +
+      '문의사항은 관리자에게 연락 바랍니다.\n\n' +
+      'InLC 구매결재 시스템';
+
+    try {
+      GmailApp.sendEmail(n.to, subject, body, _mailOptions());
+    } catch (err) {
+      if (_sendWithoutAlias(n.to, subject, body, null, err)) {
+        console.log('[A-1/INSP] 별칭 발송 실패 → 기본 계정으로 폴백 (' + n.to + '): ' + err.toString());
+      } else {
+        console.error('[A-1/INSP] 알림 이메일 발송 실패 (' + n.to + '): ' + err.toString());
+        failedTo.push(n.to);
+        lastErr = err;
+      }
+    }
+  });
+
+  // 집계 통보는 루프 밖에서 1회 (메일 폭풍 방지 — A-1과 동일)
+  if (failedTo.length) _recordAdminNotifyFailure('[A-1/INSP]', ctx, failedTo, lastErr);
+}
+
+/**
+ * 제출자 본인 폐기 (반려 후) — REQ/PRC의 discardRequisitionForClient와 같은 기준.
+ *  INSP 재상신 화면(반려 메일 버튼 · 홈 '재상신/폐기')의 [폐기] 버튼이 호출한다.
+ *  payload: { token, reason? }
+ */
+function discardInspForClient(payload) {
+  return _discardInspCore(payload);
+}
+
+function _discardInspCore(payload) {
+  payload = payload || {};
+  var actor = getRequestUserEmail_();   // 인가 전용 — 배포 계정 폴백 없음 (_discardCore와 동일)
+
+  var lockResult = withLock(function() {
+    try {
+      var token  = String(payload.token || '');
+      var reason = String(payload.reason || '').trim() || '제출자 폐기 (반려 후)';
+
+      var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+      if (!sheet) return { ok: false, message: '검수보고서 시트가 없습니다.' };
+
+      var info = _readInspRowByToken(ss, token);
+      if (!info) return { ok: false, message: '유효하지 않은 토큰입니다.' };
+      var r      = info.row;
+      var docNo  = String(r[INSP_COL.DOC_NO] || '');
+      var status = String(r[INSP_COL.STATUS] || '');
+
+      // ── 인가: 제출자 본인만 (결재란 0번 = 실제 제출자. 같은 부서 담당자가 대신 냈다면 그 사람) ──
+      //  폐기는 사진 임시폴더까지 휴지통으로 보내 되돌리기 어렵다 — REQ/PRC 기안자 폐기와 같은 수준으로 검증한다.
+      //  같은 부서 담당자는 재상신은 할 수 있어도 남이 낸 보고서를 폐기할 수는 없다 (2026-10-14 결정).
+      //  관리자 우회도 두지 않는다 — 관리자는 adminForceDiscardInsp(사유·통지·로그) 경로가 따로 있다.
+      var submitter = String(r[inspApprCol(0, 2)] || '').trim().toLowerCase();
+      var denyInfo  = { actor: actor, token: token, docNo: docNo, docType: 'INSP', docStatus: status,
+                        assignedEmail: submitter, action: 'discard' };
+      if (!actor) {
+        denyInfo.reason = 'no_active_user';
+        return _denyResubmitOrDiscard_('로그인 사용자를 확인할 수 없습니다. 다시 로그인 후 시도해 주세요.',
+          AUDIT_EVENT.DECISION_DENIED, denyInfo);
+      }
+      if (!submitter || submitter !== actor) {
+        denyInfo.reason = 'not_submitter';
+        return _denyResubmitOrDiscard_('검수보고서 제출자 본인만 폐기할 수 있습니다.',
+          AUDIT_EVENT.DECISION_DENIED, denyInfo);
+      }
+      // 폐기 가능 상태 = 반려뿐 (결재 진행 중·최종승인·이미 폐기는 거부)
+      if (status !== '반려') {
+        denyInfo.reason = 'status_not_discardable';
+        return _denyResubmitOrDiscard_('반려된 검수보고서만 폐기할 수 있습니다. (상태: ' + status + ')',
+          AUDIT_EVENT.DECISION_DENIED, denyInfo);
+      }
+
+      var ctx = _applyInspDiscard_(sheet, info.rowNum, r, '[폐기] ' + toDateTimeStr(new Date()) + ' / ' + reason);
+      return { ok: true, message: '검수보고서가 폐기 처리되었습니다.', _ctx: ctx, _reason: reason };
+    } catch (err) {
+      return { ok: false, message: err.toString() };
+    }
+  });
+
+  // 락 밖: 거부 = 보안 기록이라 즉시 기록 / 정상 폐기 = 사진 임시폴더 정리 + 지연 기록
+  if (lockResult && lockResult.audit) {
+    try { writeAuditLog(lockResult.audit); } catch(_) {}
+    delete lockResult.audit;
+  } else if (lockResult && lockResult.ok && lockResult._ctx) {
+    var ctx    = lockResult._ctx;
+    var reason = lockResult._reason;
+    delete lockResult._ctx;
+    delete lockResult._reason;
+    var folderTrashed = _trashInspStagingFolder_(ctx.folderId);
+    try {
+      writeAuditLogDeferred_({
+        eventType: AUDIT_EVENT.INSP_DISCARD,
+        actor:     actor || '(미인증)',
+        actorRole: 'requester',
+        docNo:     ctx.docNo,
+        docToken:  ctx.token,
+        docType:   'INSP',
+        reason:    '제출자 본인 폐기 — ' + reason,
+        payload:   { prevStatus: ctx.oldStatus, seq: ctx.seq, isFinal: ctx.isFinal, folderTrashed: folderTrashed },
+      });
+    } catch(_) {}
+  }
+  return lockResult;
+}
+
+// ================================================================
 // [INSP Step 5] 전용 뷰어 데이터
 // ================================================================
 
@@ -1354,7 +1742,10 @@ function getInspViewerDataForClient(token, hintIdx) {
     var actor = (getActiveUserEmail() || '').toLowerCase();
     var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var info = _readInspRowByToken(ss, token);
-    if (!info) return { ok: false, message: '검수보고서를 찾을 수 없습니다.' };
+    if (!info) {
+      _logInvalidLinkAccess_('insp_view', token, 'INSP');
+      return { ok: false, message: '검수보고서를 찾을 수 없습니다.' };
+    }
     var r = info.row;
 
     var apprCount = parseInt(r[INSP_COL.APPR_COUNT]) || 0;

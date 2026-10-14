@@ -40,7 +40,7 @@
 
   /* 검색 필터 */
   .filter-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 14px; }
-  .filter-row { display: grid; grid-template-columns: repeat(4, 1fr) auto auto; gap: 10px; align-items: end; }
+  .filter-row { display: grid; grid-template-columns: 1.3fr 0.7fr repeat(3, 1fr) auto auto; gap: 10px; align-items: end; }
   .filter-field label { display: block; font-size: 10.5px; font-weight: 700; color: var(--ink-mute); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
   .filter-field input, .filter-field select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; font-family: inherit; font-size: 12px; }
   .date-range { display: flex; gap: 6px; align-items: center; }
@@ -86,6 +86,8 @@
 
   .docno { color: var(--accent); font-weight: 600; }
   .docno.prc { color: var(--procurement); }
+  .docno.insp { color: #0e7d72; }
+  .confirm-info { background: #e4f4f2; border: 1px solid #0e7d72; border-radius: 4px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: #0a5e56; font-weight: 600; word-break: keep-all; }
   td.mono { font-family: 'Consolas', monospace; font-size: 11.5px; }
 
   /* 상태 배지 */
@@ -124,7 +126,7 @@
   .confirm-val { color: var(--ink); font-weight: 600; max-width: 280px; text-align: right; word-break: break-word; }
   .confirm-warn { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 4px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: var(--warn); font-weight: 600; }
   .confirm-cascade { background: var(--procurement-soft); border: 1px solid var(--procurement); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--procurement); font-weight: 600; }
-  .confirm-notify { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--accent); font-weight: 600; }
+  .confirm-notify { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--accent); font-weight: 600; word-break: keep-all; }
   .confirm-notify ul li { margin: 3px 0; font-weight: 600; color: var(--ink); }
   .confirm-notify-empty { background: var(--neutral-soft); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: var(--ink-mute); font-weight: 500; }
 
@@ -155,7 +157,7 @@
 <div class="page-head">
   <div>
     <div class="page-title">🛠 강제 폐기 <span class="url-hint">/ ?action=admin&fn=discard</span></div>
-    <div class="page-sub">진행 중인 품의/구매 문서를 관리자 권한으로 강제 폐기합니다. <strong>최종승인(PRC)</strong>은 폐기 불가 (보호 대상).</div>
+    <div class="page-sub">진행 중인 품의/구매 문서와 검수보고서를 관리자 권한으로 강제 폐기합니다. <strong>최종승인(PRC)</strong>·<strong>최종승인(INSP)</strong>은 폐기 불가 (보호 대상).</div>
   </div>
   <a class="back-link" id="back-link" href="#">← 홈으로</a>
 </div>
@@ -172,6 +174,15 @@
       </div>
     </div>
     <div class="filter-field">
+      <label>유형</label>
+      <select id="f-doctype">
+        <option value="">전체</option>
+        <option value="REQ">REQ (품의)</option>
+        <option value="PRC">PRC (구매)</option>
+        <option value="INSP">INSP (검수)</option>
+      </select>
+    </div>
+    <div class="filter-field">
       <label>기안자 (이름/이메일)</label>
       <input type="text" id="f-requester" placeholder="홍길동 또는 hong@inlct.com">
     </div>
@@ -185,6 +196,7 @@
         <option value="PRC_DRAFT">PRC_DRAFT</option>
         <option value="반려">반려</option>
         <option value="최종승인(PRC)">최종승인(PRC) - 보호 대상</option>
+        <option value="최종승인(INSP)">최종승인(INSP) - 보호 대상</option>
       </select>
     </div>
     <div class="filter-field">
@@ -318,12 +330,16 @@ function searchDocs() {
     status:    document.getElementById('f-status').value,
     docNoLike: document.getElementById('f-docno').value.trim(),
   };
+  // 유형을 고른 경우에만 보낸다 — '전체'일 때 서버로 가는 값은 이전과 같다
+  var docType = document.getElementById('f-doctype').value;
+  if (docType) filter.docType = docType;
   loadDocs(filter);
 }
 
 function resetFilters() {
   document.getElementById('f-date-from').value = '';
   document.getElementById('f-date-to').value = '';
+  document.getElementById('f-doctype').value = '';
   document.getElementById('f-requester').value = '';
   document.getElementById('f-status').value = '';
   document.getElementById('f-docno').value = '';
@@ -382,13 +398,15 @@ function renderRow(d) {
   else cls = 'row-clickable';
 
   var onclick = d.isProtected ? '' : 'onclick="selectDoc(\'' + escAttr(d.token) + '\')"';
-  var docnoCls = d.docType === 'PRC' ? 'docno prc' : 'docno';
+  var docnoCls = d.docType === 'PRC' ? 'docno prc' : (d.docType === 'INSP' ? 'docno insp' : 'docno');
   var statusCls = mapStatusClass(d.status);
-  var amountStr = (d.amount || 0).toLocaleString();
+  // 검수보고서에는 금액이 없다 (서버가 null로 보냄)
+  var amountStr = (d.docType === 'INSP') ? '-' : (d.amount || 0).toLocaleString();
+  var typeStr = escHtml(d.docType) + (d.docType === 'INSP' && d.isFinal ? ' <span style="color:#0e7d72;font-weight:700;">★최종</span>' : '');
 
   return '<tr class="' + cls + '" ' + onclick + '>'
     + '<td class="mono"><span class="' + docnoCls + '">' + escHtml(d.docNo) + '</span></td>'
-    + '<td>' + escHtml(d.docType) + '</td>'
+    + '<td>' + typeStr + '</td>'
     + '<td>' + escHtml(d.drafter) + '</td>'
     + '<td>' + escHtml(d.vendor) + '</td>'
     + '<td style="text-align:right;font-variant-numeric:tabular-nums;">' + amountStr + '</td>'
@@ -403,10 +421,13 @@ function renderRow(d) {
 }
 
 function mapStatusClass(status) {
+  status = String(status || '');
   if (status === '검토중')         return 'review';
-  if (status === '결재중')         return 'in_appr';
+  // 진행 중 상태는 시트에 '결재중 (결재자 이름)'으로 저장된다 — 앞부분으로 판정
+  if (status.indexOf('결재중') === 0) return 'in_appr';
   if (status === '최종승인')       return 'final';
   if (status === '최종승인(PRC)')  return 'approved';
+  if (status === '최종승인(INSP)') return 'approved';
   if (status === 'PRC_DRAFT')      return 'prc_draft';
   if (status === '반려')           return 'rejected';
   if (status === '재제출')         return 'resubmit';
@@ -469,9 +490,17 @@ function openConfirm() {
     if (!previewMap[email]) previewMap[email] = [];
     previewMap[email].push(label);
   }
-  addPreview(sel.requesterEmail, '기안자');
-  if (sel.claimedBy) addPreview(sel.claimedBy, '품의 락 점유자');
-  if (sel.docType === 'PRC' && sel.parentClaimedBy) addPreview(sel.parentClaimedBy, '부모 품의 점유자');
+  if (sel.docType === 'INSP') {
+    // 서버 _sendAdminInspDiscardNotifications_와 동일 룰 (대소문자 무시로 같은 사람은 1통)
+    var low = function(e) { return String(e || '').trim().toLowerCase(); };
+    addPreview(low(sel.requesterEmail), '제출자');
+    addPreview(low(sel.reqDrafterEmail), '품의 기안자');
+    if (sel.curApprEmail) addPreview(low(sel.curApprEmail), '현재 결재 대기자');
+  } else {
+    addPreview(sel.requesterEmail, '기안자');
+    if (sel.claimedBy) addPreview(sel.claimedBy, '품의 락 점유자');
+    if (sel.docType === 'PRC' && sel.parentClaimedBy) addPreview(sel.parentClaimedBy, '부모 품의 점유자');
+  }
 
   var previewKeys = Object.keys(previewMap);
   var notifyBlock = '';
@@ -506,13 +535,23 @@ function openConfirm() {
       + '<span style="font-weight:500;font-size:11px;color:var(--ink-mute);">※ 품의 원기안자에게는 알림 미발송 (품의는 살아있고 인박스로 복귀하므로)</span>'
       + '</div>';
   }
+  if (sel.docType === 'INSP') {
+    cascadeBlock += '<div class="confirm-info">'
+      + '🧾 검수보고서 ' + escHtml(sel.seq) + '회차' + (sel.isFinal ? ' (최종 검수)' : '')
+      + (sel.poNo ? ' · PO ' + escHtml(sel.poNo) : '') + '<br>'
+      + '폐기된 회차 번호는 다시 쓰지 않습니다. 다음 제출은 다음 회차 번호로 진행됩니다.'
+      + (sel.isFinal ? '<br>최종 검수 건이므로, 폐기 후 이 품의에 검수보고서를 다시 제출할 수 있습니다.' : '')
+      + '<br>검수 사진 임시폴더는 휴지통으로 이동됩니다.'
+      + '</div>';
+  }
 
   var statusCls = mapStatusClass(sel.status);
+  var personLabel = sel.docType === 'INSP' ? '제출자' : '기안자';
   document.getElementById('confirm-modal-body').innerHTML =
     '<div style="margin-bottom:12px;">아래 문서를 정말 강제 폐기하시겠습니까? <strong style="color:var(--admin);">이 작업은 되돌릴 수 없습니다.</strong></div>'
     + '<div class="confirm-row"><span class="confirm-key">문서번호</span><span class="confirm-val" style="font-family:Consolas,monospace;">' + escHtml(sel.docNo) + '</span></div>'
     + '<div class="confirm-row"><span class="confirm-key">유형</span><span class="confirm-val">' + escHtml(sel.docType) + '</span></div>'
-    + '<div class="confirm-row"><span class="confirm-key">기안자</span><span class="confirm-val">' + escHtml(sel.drafter) + ' <span style="color:var(--ink-mute);font-weight:500;">(' + escHtml(sel.requesterEmail) + ')</span></span></div>'
+    + '<div class="confirm-row"><span class="confirm-key">' + personLabel + '</span><span class="confirm-val">' + escHtml(sel.drafter) + ' <span style="color:var(--ink-mute);font-weight:500;">(' + escHtml(sel.requesterEmail) + ')</span></span></div>'
     + '<div class="confirm-row"><span class="confirm-key">현재 상태</span><span class="confirm-val"><span class="status ' + statusCls + '">' + escHtml(sel.status) + '</span></span></div>'
     + '<div class="confirm-row"><span class="confirm-key">폐기 사유</span><span class="confirm-val">' + escHtml(state.reason) + '</span></div>'
     + cascadeBlock + notifyBlock;
@@ -593,10 +632,14 @@ function executeDiscard() {
       closeConfirm();
       showResult('폐기 실패: ' + (err && err.message ? err.message : err), 'err');
     })
-    .adminForceDiscardForClient({
-      token:  sel.token,
-      reason: state.reason,
-    });
+    .adminForceDiscardForClient(buildDiscardPayload(sel));
+}
+
+// REQ/PRC는 이전과 같은 { token, reason } — INSP만 서버 위임을 위해 docType을 붙인다
+function buildDiscardPayload(sel) {
+  var p = { token: sel.token, reason: state.reason };
+  if (sel.docType === 'INSP') p.docType = 'INSP';
+  return p;
 }
 
 // ============================================================
