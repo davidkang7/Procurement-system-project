@@ -651,27 +651,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
-//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-10-14 생성분 마감 — TO-PO-26-313 (1건).
- *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지):
- *    TO-PO-26-313_옵텔콤   CT50 Cleaver 수리 (BLADE / CLAMP ARM SET)   KRW 350,000 (선입금)
- */
-function _tmp_markPoDone_20261014() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일 ID]
-    ['TO-PO-26-313', '1d51cf7b-713a-42ca-aa4a-cda6448a00ae', '1euvaan-EAf-kGcJ9k7wlaknbemtUbJ92'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
