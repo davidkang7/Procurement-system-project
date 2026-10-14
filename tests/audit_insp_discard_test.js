@@ -2,7 +2,7 @@
  * 시스템로그 지연 기록 · 신규 로그 6종 · INSP 폐기 — 로컬 검증 (배포 없이 실제 .gs 함수 호출)
  * (memory: gas-local-test-harness)
  *
- * 방식: 같은 시나리오를 HEAD(현재 운영 코드)와 작업 트리(수정본)에서 각각 돌려
+ * 방식: 같은 시나리오를 이전 코드(BASE_REF, 기본 abd290f = 이 기능 직전 커밋)와 작업 트리(수정본)에서 각각 돌려
  *       "반환값 · 시트 상태 · 발송 메일 · 시스템로그 행"이 같은지 비교한다.
  *       달라야 하는 것(신규 기능·보안 수정)은 따로 단언한다.
  *
@@ -17,7 +17,10 @@ const SRC = path.join(__dirname, '..');
 // WT_DIR: 뮤테이션 검사용 — 일부러 버그를 심은 사본 폴더를 지정하면 그 코드를 '수정본'으로 돌린다
 const WT_DIR = process.env.WT_DIR || SRC;
 const readWT   = f => fs.readFileSync(path.join(WT_DIR, f), 'utf8');
-const readHEAD = f => execSync('git show HEAD:' + f, { cwd: SRC, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+// 비교 기준(이전 코드) — 이 기능이 들어가기 직전 커밋. 커밋 후에도 '이전과 같은가'를 다시 볼 수 있도록 고정한다.
+//  다른 기준으로 보려면 BASE_REF=<커밋> (예: BASE_REF=HEAD → 아직 커밋 안 한 다음 수정본을 직전 커밋과 비교)
+const BASE_REF = process.env.BASE_REF || 'abd290f';
+const readHEAD = f => execSync('git show ' + BASE_REF + ':"' + f + '"', { cwd: SRC, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 // ── 고정 시계 (두 환경 공용) ──────────────────────────────────────
 const RealDate = Date;

@@ -2,7 +2,7 @@
 화면(HTML) 검증 — 관리자 강제 폐기 / 검수보고서 작성(재상신) / 홈 결재 완료 목록
 (memory: html-ui-playwright-harness)
 
-방식: HEAD와 작업 트리의 같은 화면을 같은 서버 응답(픽스처)으로 띄워
+방식: 이전 코드(BASE_REF, 기본 abd290f)와 작업 트리의 같은 화면을 같은 서버 응답(픽스처)으로 띄워
       ① 서버로 가는 페이로드가 같은지 ② 화면이 같은지를 비교하고,
       새 기능(INSP 폐기)은 따로 단언한다. 브라우저 기본 대화상자(alert/confirm)는 0건이어야 한다.
 
@@ -12,6 +12,7 @@
   insp-renderer/.venv/Scripts/python.exe tests/html_insp_discard_test.py <fixtures.json>
 """
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -21,6 +22,8 @@ from playwright.sync_api import sync_playwright
 
 SRC = pathlib.Path(__file__).resolve().parent.parent
 FIX = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+# 비교 기준(이전 코드) — 이 기능 직전 커밋. 다른 기준은 환경변수 BASE_REF로 (예: BASE_REF=HEAD)
+BASE_REF = os.environ.get('BASE_REF', 'abd290f')
 BASE = 'http://t.local'
 WEBAPP = BASE + '/exec'
 
@@ -41,7 +44,7 @@ def check(name, cond, detail=''):
 def source(name, rev):
     if rev == 'NEW':
         return (SRC / name).read_text(encoding='utf-8')
-    return subprocess.run(['git', 'show', 'HEAD:' + name], cwd=SRC, capture_output=True,
+    return subprocess.run(['git', 'show', BASE_REF + ':' + name], cwd=SRC, capture_output=True,
                           encoding='utf-8', check=True).stdout
 
 
