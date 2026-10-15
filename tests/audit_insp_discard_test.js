@@ -1,10 +1,11 @@
 /**
- * 시스템로그 지연 기록 · 신규 로그 6종 · INSP 폐기 — 로컬 검증 (배포 없이 실제 .gs 함수 호출)
+ * 시스템로그 지연 기록 · 신규 로그 6종 · INSP 폐기 · 락 해제 실패([W]) — 로컬 검증 (배포 없이 실제 .gs 함수 호출)
  * (memory: gas-local-test-harness)
  *
  * 방식: 같은 시나리오를 이전 코드(BASE_REF, 기본 abd290f = 이 기능 직전 커밋)와 작업 트리(수정본)에서 각각 돌려
  *       "반환값 · 시트 상태 · 발송 메일 · 시스템로그 행"이 같은지 비교한다.
  *       달라야 하는 것(신규 기능·보안 수정)은 따로 단언한다.
+ *       [W]는 수정본끼리 비교한다 — 락 해제가 실패한 실행이 정상 해제된 실행과 결과가 같아야 한다.
  *
  * 실행: node tests/audit_insp_discard_test.js
  */
@@ -98,10 +99,10 @@ const DEPT = { [KIM]: '개발팀', [PARK]: '개발팀', [LEE]: '경영팀', [CHO
 // ── 환경 ─────────────────────────────────────────────────────────
 function makeEnv(label, read) {
   const state = {
-    label, active: ADMIN, mails: [], adminErrors: [], consoleErrors: [],
+    label, active: ADMIN, mails: [], adminErrors: [], consoleErrors: [], consoleWarns: [],
     props: new Map(), cache: new Map(), folders: {}, uuid: 0,
-    lock: { scriptWait: 0, userTry: 0, userHeld: false },
-    flags: { uploadFail: false, photoFail: false, folderAccessFail: false, propsSetFail: false },
+    lock: { scriptWait: 0, userTry: 0, userHeld: false, releaseFails: 0 },
+    flags: { uploadFail: false, photoFail: false, folderAccessFail: false, propsSetFail: false, releaseFail: false, releaseDelayMs: 0 },
   };
   const ss = new FakeSpreadsheet();
 
@@ -134,7 +135,7 @@ function makeEnv(label, read) {
     put: (k, v, ttl) => { state.cache.set(k, { v: String(v), exp: CLOCK.now + (ttl || 600) * 1000 }); },
     remove: k => { state.cache.delete(k); },
   };
-  const quiet = { log() {}, info() {}, warn() {}, error: (...a) => state.consoleErrors.push(a.map(String).join(' ')) };
+  const quiet = { log() {}, info() {}, warn: (...a) => state.consoleWarns.push(a.map(String).join(' ')), error: (...a) => state.consoleErrors.push(a.map(String).join(' ')) };
 
   const sandbox = {
     console: quiet,
@@ -166,7 +167,12 @@ function makeEnv(label, read) {
       sleep() {}, base64Decode: () => [], base64Encode: () => '',
     },
     LockService: {
-      getScriptLock: () => ({ waitLock() { state.lock.scriptWait++; }, tryLock() { state.lock.scriptWait++; return true; }, releaseLock() {} }),
+      // releaseFail: 2026-10-15 실제 장애 재현 — 해제가 releaseDelayMs만큼 끌다가 Google 서버 오류를 던진다
+      getScriptLock: () => ({ waitLock() { state.lock.scriptWait++; }, tryLock() { state.lock.scriptWait++; return true; }, releaseLock() {
+        if (!state.flags.releaseFail) return;
+        state.lock.releaseFails++; CLOCK.now += state.flags.releaseDelayMs;
+        throw new Error("We're sorry, a server error occurred. Please wait a bit and try again.");
+      } }),
       getUserLock: () => ({
         tryLock() { state.lock.userTry++; if (state.lock.userHeld) return false; state.lock.userHeld = true; return true; },
         releaseLock() { state.lock.userHeld = false; },
@@ -925,6 +931,97 @@ console.log('\n[H] 홈 데이터 — HEAD 대비');
   });
   check('H3 관리자 처리 대기(INSP PDF) 목록 영향 없음', () => { n.as(ADMIN); return same([], n.call('listInspAwaitingPdf')); });
 }
+
+// =================================================================
+console.log('\n[W] 락 해제 실패 (2026-10-15 TO-PO-26-318) — 해제가 실패해도 결과는 정상 해제와 같아야 한다');
+// =================================================================
+// 수정 직전 코드 — withLock 해제가 실패하면 성공 결과가 버려지던 버전 (재현용으로 고정)
+const PREFIX_REF = process.env.PREFIX_REF || 'f322aa5';
+const readPreFix = f => execSync('git show ' + PREFIX_REF + ':"' + f + '"', { cwd: SRC, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const W_CLOCK0 = CLOCK.now;
+const SERVER_ERR = "We're sorry, a server error occurred";
+{
+  const p = seed(makeEnv('PREFIX', readPreFix)); p.heartbeat();
+  p.as(KIM); p.state.flags.releaseFail = true;
+  let thrown = null;
+  try { p.call('processDecisionFromClient', { token: 'tok-req1', decision: 'approve', comment: '' }); } catch (e) { thrown = e; }
+  const C = p.sb.COL, row = mainRow(p, 'tok-req1');
+  check('W0 [재현] 수정 전: 시트엔 승인이 들어갔는데 서버 오류가 화면으로 올라가고, 메일·DOC_APPROVE는 빠짐', () =>
+    (thrown && String(thrown.message).indexOf(SERVER_ERR) === 0 && row[p.sb.reqApprCol(0, 3)] === '승인' && row[C.APPR_IDX] === 1 &&
+     p.state.mails.length === 0 && p.bufKeys().length === 0 && p.events().indexOf('DOC_APPROVE') < 0) || [String(thrown), row[C.APPR_IDX], p.state.mails, p.bufKeys()]);
+}
+function releaseFailFlow(name, expectOk, scenario) {
+  CLOCK.now = W_CLOCK0;
+  const ok = seed(makeEnv('NEW', readWT)), bad = seed(makeEnv('NEW', readWT));
+  ok.heartbeat(); bad.heartbeat();
+  const ro = scenario(ok);
+  bad.state.flags.releaseFail = true;
+  let rb = null, thrown = null;
+  try { rb = scenario(bad); } catch (e) { thrown = e; }
+  bad.state.flags.releaseFail = false;
+  ok.flush(); bad.flush();
+  const snap = e => ({ sheets: sheetRows(e), mails: e.state.mails, audit: auditNoId(e.auditRows()), props: Object.fromEntries(e.state.props),
+                       folders: e.state.folders, adminErrors: e.state.adminErrors });
+  check(name + ' — 해제 실패에도 예외 없이 응답', () => thrown === null || String(thrown));
+  check(name + ' — 의도한 경로 (ok=' + expectOk + ')', () => (ro && ro.ok === expectOk && rb && rb.ok === expectOk) || [ro, rb]);
+  check(name + ' — 해제 실패가 실제로 일어남', () => bad.state.lock.releaseFails > 0 || 'releaseLock 실패 0회');
+  check(name + ' — 반환값 동일', () => same(ro, rb));
+  check(name + ' — 시트·메일·시스템로그·큐·Drive 동일', () => same(snap(ok), snap(bad)));
+  check(name + ' — 해제 실패 경고 ' + bad.state.lock.releaseFails + '건 남김', () =>
+    bad.state.consoleWarns.filter(w => w.indexOf('[Lock] 해제 실패') === 0).length === bad.state.lock.releaseFails || bad.state.consoleWarns);
+  return { ok, bad, ro, rb };
+}
+{
+  const r = releaseFailFlow('W1 결재 승인(기안자 단계) — 이번 장애 경로', true, env => { env.as(KIM); return env.call('processDecisionFromClient', { token: 'tok-req1', decision: 'approve', comment: '' }); });
+  check('W1 다음 결재자(이결재) 메일 + DOC_APPROVE(처리자=김기안)가 남음', () => {
+    const row = r.bad.auditRows().find(x => x[AC.EV] === 'DOC_APPROVE');
+    return (r.bad.state.mails.some(m => m.kind === 'approval' && m.to === LEE) && row && row[AC.ACTOR] === KIM) || [r.bad.state.mails, row];
+  });
+}
+{
+  const r = releaseFailFlow('W2 결재 최종 승인 — 완료 메일·PDF 큐 등록', true, env => { env.as(LEE); return env.call('processDecisionFromClient', { token: 'tok-req8', decision: 'approve', comment: '' }); });
+  check('W2 PDF 큐 등록 + 오탐 "큐 등록 실패" 알림 없음', () => {
+    const q = JSON.parse(r.bad.state.props.get('PENDING_JOB_QUEUE') || '[]');
+    return (q.some(j => j.token === 'tok-req8') && r.bad.state.adminErrors.every(m => m.indexOf('큐 등록 실패') < 0)) || [q, r.bad.state.adminErrors];
+  });
+}
+releaseFailFlow('W3 결재 반려', true, env => { env.as(LEE); return env.call('processDecisionFromClient', { token: 'tok-req8', decision: 'reject', comment: '단가 재확인' }); });
+releaseFailFlow('W4 비결재자 승인 시도(거부 경로)', false, env => { env.as(PARK); return env.call('processDecisionFromClient', { token: 'tok-req1', decision: 'approve' }); });
+releaseFailFlow('W5 품의 제출', true, env => { env.as(KIM); return env.call('submitRequisitionForClient', submitPayload(KIM)); });
+releaseFailFlow('W6 재상신', true, env => { env.as(KIM); const d = submitPayload(KIM); d.subject = '수정 품의'; return env.call('resubmitRequisitionForClient', { token: 'tok-req5', data: d }); });
+releaseFailFlow('W7 기안자 폐기', true, env => { env.as(KIM); return env.call('discardRequisitionForClient', { token: 'tok-req5', reason: '기안자 폐기 (반려 후)' }); });
+releaseFailFlow('W8 픽업', true, env => { env.as(BUYER1); return env.call('claimRequestForClient', { parentToken: 'tok-req2' }); });
+releaseFailFlow('W9 회수', true, env => { env.as(BUYER1); return env.call('releaseClaimForClient', { parentToken: 'tok-req7' }); });
+releaseFailFlow('W10 구매 문서 제출', true, env => { env.as(BUYER1); return env.call('submitPrcForClient', prcPayload()); });
+releaseFailFlow('W11 검수보고서 제출', true, env => { env.as(KIM); return env.call('submitInspForClient', inspPayload(KIM)); });
+releaseFailFlow('W12 검수 결재 최종 승인', true, env => { env.as(LEE); return env.call('processInspDecisionFromClient', { token: 'tok-i3', decision: 'approve', comment: '' }); });
+releaseFailFlow('W13 검수보고서 폐기(제출자)', true, env => { env.as(KIM); return env.call('discardInspForClient', { token: 'tok-i2' }); });
+releaseFailFlow('W14 관리자 결재자 변경(INSP)', true, env => { env.as(ADMIN); return env.call('adminChangeApproverForClient', { docType: 'INSP', token: 'tok-i3', stageIdx: 1, newEmail: CHOI, reason: '휴가' }); });
+releaseFailFlow('W15 관리자 결재자 변경(REQ)', true, env => { env.as(ADMIN); return env.call('adminChangeApproverForClient', { docType: 'REQ', token: 'tok-req8', stageIdx: 1, newEmail: CHOI, reason: '휴가' }); });
+releaseFailFlow('W16 관리자 강제 폐기(REQ)', true, env => { env.as(ADMIN); return env.call('adminForceDiscardForClient', { token: 'tok-req1', reason: '중복' }); });
+releaseFailFlow('W17 관리자 강제 폐기(INSP)', true, env => { env.as(ADMIN); return env.call('adminForceDiscardForClient', { docType: 'INSP', token: 'tok-i3', reason: '정리' }); });
+releaseFailFlow('W18 관리자 강제 락 해제', true, env => { env.as(ADMIN); return env.call('adminForceReleaseLockForClient', { token: 'tok-req3', reason: '담당자 부재' }); });
+releaseFailFlow('W19 큐 트리거 — 최종 승인 PDF 작업 처리', true, env => {
+  env.as(LEE); env.call('processDecisionFromClient', { token: 'tok-req8', decision: 'approve', comment: '' });
+  const queued = JSON.parse(env.state.props.get('PENDING_JOB_QUEUE') || '[]').filter(j => j.token === 'tok-req8').length;
+  env.as(ADMIN); env.call('processQueueTrigger');
+  const left = JSON.parse(env.state.props.get('PENDING_JOB_QUEUE') || '[]');   // 끝난 작업은 큐에서 지워진다
+  return { ok: queued === 1 && left.length === 0, queued: queued, left: left.map(j => j.status) };
+});
+{
+  // ③ 해제가 실패해도 그 아래 '장시간 점유' 진단 경고는 남아야 한다 (수정 전에는 못 남김)
+  const run = read => {
+    CLOCK.now = W_CLOCK0;
+    const e = seed(makeEnv('X', read)); e.heartbeat(); e.as(KIM);
+    e.state.flags.releaseFail = true; e.state.flags.releaseDelayMs = 6000;   // 실제 장애처럼 해제가 약 5초 이상 끌다 실패
+    try { e.call('processDecisionFromClient', { token: 'tok-req1', decision: 'approve', comment: '' }); } catch (_) {}
+    return e.state.consoleWarns;
+  };
+  const pre = run(readPreFix), now = run(readWT);
+  check('W20 해제가 6초 끌다 실패: 수정본은 "장시간 점유" 진단 경고를 남김 (수정 전엔 없음)', () =>
+    (now.some(w => w.indexOf('[Lock] 장시간 점유 6000ms') === 0) && !pre.some(w => w.indexOf('[Lock] 장시간 점유') === 0)) || { pre, now });
+}
+CLOCK.now = W_CLOCK0;
 
 // ── 화면 테스트용 픽스처 덤프 — 실제 서버 함수가 만든 응답을 HTML 검증(tests/html_insp_discard_test.py)에 그대로 쓴다 ──
 if (process.env.DUMP_FIXTURES) {
