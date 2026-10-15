@@ -104,6 +104,7 @@ LETTERHEAD = {
 UNIT_WORDS = {
     "ea", "pc", "pcs", "set", "sets", "box", "roll", "lot", "kg", "g", "m", "mm", "cm",
     "hr", "hour", "md", "spl", "unit", "units", "pack", "bt/l", "btl",
+    "sh",   # sheet — 디에스티반도체 Sawing 매수 단위(TO-PO-26-242 발행분 '8 sh')
     "개", "대", "매", "권", "본", "세트", "조", "식", "회", "건", "박스", "롤", "장", "병",
     "캔", "통", "쌍", "년", "월", "일",
 }
