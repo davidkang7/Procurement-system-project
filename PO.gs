@@ -651,33 +651,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
-//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-10-16 생성분 마감 — TO-PO-26-315~318 (4건).
- *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지):
- *    TO-PO-26-315_디에스티반도체   Wafer Sawing 11 sh / Glass Sawing 8 sh   KRW 2,700,000
- *    TO-PO-26-316_RFMTL           Lid 원자재 100 EA                        KRW 3,000,000
- *    TO-PO-26-317_신광정보통신     F4PO1-058-E0 5 ea                        KRW 346,500
- *    TO-PO-26-318_빅터스          MTMM-113-06-F-D-240 외 3종 1 EA           KRW 290,000
- */
-function _tmp_markPoDone_20261016() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일 ID]
-    ['TO-PO-26-315', '62b77824-8bee-453b-a9c8-a54e1eb36f5b', '1hHj4aGXAqOcKYeJou878a7-4dF1QggWE'],
-    ['TO-PO-26-316', 'bd954557-c146-4b6c-90a7-c506da180d74', '1grr3J_vEpllJGqyu2rRewxxRZBmh1wVN'],
-    ['TO-PO-26-317', '1d1b114c-9d43-434f-b926-a591c7737822', '1Kvjhjd4xoi4y2IJNSre1aHboQhOqBhaY'],
-    ['TO-PO-26-318', '94cbcfaa-2797-4d64-9637-cb9296bc621b', '1G6BNJ8tc9E1Ti8COXNikK-kJYlKPxSaQ'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
