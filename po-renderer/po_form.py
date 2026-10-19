@@ -314,6 +314,21 @@ def _set(ws: Worksheet, ref: str, value):
     cell.value = value
 
 
+DESC_LINE_UNITS = 44      # 품목명 칸 한 줄 용량(반각 기준, 한글=2) — 2026-10-19 322 렌더에서 실측
+
+
+def _fit_desc_height(ws: Worksheet, row: int, text) -> None:
+    """품목명이 한 줄을 넘으면 줄바꿈 + 행 높이를 늘린다. 안 하면 칸 끝에서 글자가 잘려 나간다
+    (2026-10-19 TO-PO-26-322 Labview 건 — 자동 검사로는 안 잡히고 PDF 육안으로만 보임)."""
+    units = sum(2 if ord(ch) > 0x2E80 else 1 for ch in str(text or ""))
+    lines = -(-units // DESC_LINE_UNITS)
+    if lines <= 1:
+        return
+    c = ws.cell(row, COL_DESC)
+    c.alignment = c.alignment.copy(wrap_text=True, vertical="top")
+    ws.row_dimensions[row].height = 13.5 * lines
+
+
 def _shrink(ws: Worksheet, row: int, col: int):
     """좁은 열(단위·납기)의 글자 잘림 방지 — 자동 검사로 못 잡는 결함이라 항상 켠다."""
     c = ws.cell(row, col)
@@ -485,6 +500,7 @@ def fill(layout: FormLayout, order: PoOrder, rules: VendorRules):
             break
         ws.cell(row, COL_NO, idx)
         ws.cell(row, COL_DESC, it.name)
+        _fit_desc_height(ws, row, it.name)
         ws.cell(row, COL_QTY, it.qty)
         ws.cell(row, COL_UNIT, it.unit or DEFAULT_UNIT)
         _shrink(ws, row, COL_UNIT)
@@ -495,6 +511,7 @@ def fill(layout: FormLayout, order: PoOrder, rules: VendorRules):
             _shrink(ws, row, COL_DELY)
         if it.spec:
             ws.cell(row + 1, COL_DESC, it.spec)
+            _fit_desc_height(ws, row + 1, it.spec)
         row += need
 
     if remark_label:

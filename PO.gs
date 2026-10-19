@@ -651,3 +651,34 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-10-19 생성분 마감 — TO-PO-26-319~322 (4건).
+ *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지):
+ *    TO-PO-26-319_태성테크        Lid 가공 50 EA                              KRW 2,500,000
+ *    TO-PO-26-320_태성테크        O-Box 밀링작업                              KRW 540,000
+ *    TO-PO-26-321_태성테크        Lid 가공                                    KRW 5,000,000
+ *    TO-PO-26-322_선인씨엔에스     LabVIEW+ Suite 외 2종 (결제조건 '지급 완료')  KRW 69,610,000
+ *  (한빛테크 323·324는 과거 7건 모두 '생성불요'라 제외 — 사용자 확인 대기)
+ */
+function _tmp_markPoDone_20261019() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일 ID]
+    ['TO-PO-26-319', '16de938f-941c-4c9c-9e1f-46560de33cd0', '1nLGgz8iddbPtE4k8pZcS4y9INrx24itr'],
+    ['TO-PO-26-320', '7e2418e0-4ef1-47c9-aa72-48a0f573226e', '1-koXVJJwbU842ODuoP12RjxXZugpc_eN'],
+    ['TO-PO-26-321', 'b2d226a7-16ec-4ba7-a318-5d0fd9eff0b7', '1k23SfDqN1KSSCimT8sO_xqc5T4aUfae9'],
+    ['TO-PO-26-322', '3fec0035-b47c-4f04-a774-c3b18653a544', '1jG_Rd3sF5H2EwyGba6GWDWpSLGhkAetv'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
