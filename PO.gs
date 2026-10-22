@@ -651,37 +651,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
-//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-10-22 생성분 마감 — TO-PO-26-325~330 (6건).
- *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지, PDF 육안 확인):
- *    TO-PO-26-325_태성테크   IO Holder C1 구매의 건            KRW 4,500,000
- *    TO-PO-26-326_태성테크   O-Box 밀링 작업                   KRW 380,000
- *    TO-PO-26-327_태성테크   FRAME 수정 작업                   KRW 1,600,000
- *    TO-PO-26-328_환화       O-Box 스넛/단자 교체의 건          KRW 1,051,000
- *    TO-PO-26-329_이에이텍   LCOS_IN_CONNECTION_V1.1 제작      KRW 450,000
- *    TO-PO-26-330_태성테크   Snout 구매의 건                   KRW 700,000
- */
-function _tmp_markPoDone_20261022() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일 ID]
-    ['TO-PO-26-325', '6c76167b-f791-40c1-8297-22f064223e95', '1oSIzBbiQqLcVueW6UqkssDP1Jyuv_VMZ'],
-    ['TO-PO-26-326', '02bf8be2-b17e-4ba5-9ddf-dfea681912bb', '1lgnytZMYL3j3CLMIk_lig7b6P4up0cnM'],
-    ['TO-PO-26-327', 'cbccab15-addf-479f-a953-2546c5f47341', '1kSAn2VxSSlkfhDaWWMf2wXTX2FCra2G6'],
-    ['TO-PO-26-328', '679a771e-0ecd-4457-b907-36fabf03e87c', '1AhAg4E1uJR9uHHymjNp5VVVEz0DDLZeL'],
-    ['TO-PO-26-329', 'c4161285-f2fb-4464-a58b-7473988e6dac', '1m6nd1qm0CvmaAol0cWqz0Ck0HZykh2su'],
-    ['TO-PO-26-330', 'fba08166-69ed-4b96-aed7-4fcd33114608', '1Org0dPiJgTrshcHXvNBUSpRTK2eZqj2N'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
