@@ -2230,3 +2230,53 @@ function _cleanupInspPhotos(row) {
   return '사진 ' + deleted + '장 삭제';
 }
 
+
+
+
+
+// ================================================================
+// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-10-22 PENDING_PDF 3건 마감.
+ *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료 (모두 판정 '합격', 사진 1장 임베드):
+ *    TO-PO-26-260  TH-AP-26-051-01  FOSWA_1_2_L_9_L_3(FC/APC) 구매
+ *    TO-PO-26-315  LC-2026-015-01   Dicing 품의
+ *    TO-PO-26-313  TP-AP-26-023-01  CT50 Cleaver 수리
+ *  → moveStatus를 FINAL로 마감한다. (테스트 행 PRQ-2026-001-01/Test_123은 대상 제외)
+ */
+function _tmp_markInspPdfDone_20261022() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
+    ['TO-PO-26-260', 'TH-AP-26-051-01', '355eaa59-4381-49d4-9cad-f47917f2794e', '1o8C3Qt2ZecdZkGFqLhVAFOY5v9a3SIo9'],
+    ['TO-PO-26-315', 'LC-2026-015-01', '89839da1-89a2-4e18-8007-48a7f7c934a4', '1ESkvdnWmTL44RE8WhfzKdzK_F-v9YiOv'],
+    ['TO-PO-26-313', 'TP-AP-26-023-01', '3bbfdbb1-aa8a-4421-8413-557298beec1d', '1Q8xlLy3UoxB1QuHg9VmKFipUs2mxVfKm'],
+  ];
+
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2], fileId = j[3];
+    // 토큰-문서번호 대조: 한 건이라도 어긋나면 그 건만 건너뛴다(오기입 방지).
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return docNo + ' → SKIP / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return docNo + ' → SKIP / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return docNo + ' → SKIP / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return docNo + ' → SKIP / 이미 FINAL 마감됨';
+    }
+    var res = markInspPdfDone(token, fileId);
+    return docNo + ' → ' + (res.ok ? 'OK' : 'FAIL') + ' / ' + res.message;
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
