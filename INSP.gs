@@ -2240,11 +2240,12 @@ function _cleanupInspPhotos(row) {
 // ================================================================
 
 /**
- * 2026-10-22 PENDING_PDF 3건 마감.
+ * 2026-10-22 PENDING_PDF 4건 마감.
  *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료 (모두 판정 '합격', 사진 1장 임베드):
  *    TO-PO-26-260  TH-AP-26-051-01  FOSWA_1_2_L_9_L_3(FC/APC) 구매
  *    TO-PO-26-315  LC-2026-015-01   Dicing 품의
  *    TO-PO-26-313  TP-AP-26-023-01  CT50 Cleaver 수리
+ *    TO-PO-26-324  LC-2026-017-01   Wire bonding 품의
  *  → moveStatus를 FINAL로 마감한다. (테스트 행 PRQ-2026-001-01/Test_123은 대상 제외)
  */
 function _tmp_markInspPdfDone_20261022() {
@@ -2253,6 +2254,7 @@ function _tmp_markInspPdfDone_20261022() {
     ['TO-PO-26-260', 'TH-AP-26-051-01', '355eaa59-4381-49d4-9cad-f47917f2794e', '1o8C3Qt2ZecdZkGFqLhVAFOY5v9a3SIo9'],
     ['TO-PO-26-315', 'LC-2026-015-01', '89839da1-89a2-4e18-8007-48a7f7c934a4', '1ESkvdnWmTL44RE8WhfzKdzK_F-v9YiOv'],
     ['TO-PO-26-313', 'TP-AP-26-023-01', '3bbfdbb1-aa8a-4421-8413-557298beec1d', '1Q8xlLy3UoxB1QuHg9VmKFipUs2mxVfKm'],
+    ['TO-PO-26-324', 'LC-2026-017-01', '18da450e-2c47-496a-8093-d864b10bc09f', '1Na0DmuknrEOXm0CxsA_UcX3vDq52zgGB'],
   ];
 
   var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
