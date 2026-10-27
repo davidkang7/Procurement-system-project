@@ -2240,7 +2240,7 @@ function _cleanupInspPhotos(row) {
 // ================================================================
 
 /**
- * 2026-10-27 PENDING_PDF 8건 마감.
+ * 2026-10-27 PENDING_PDF 10건 마감.
  *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료 (모두 판정 '합격', 사진 1장 임베드):
  *    TO-PO-26-244  TH-AP-26-045-01  CFP8750-0101FSZ 구매 건
  *    TO-PO-26-301  TO-AP-26-027-01  리본Fanout-1.5m-LC/UP 구매의 건
@@ -2250,6 +2250,8 @@ function _cleanupInspPhotos(row) {
  *    TO-PO-26-294  TO-AP-26-023-06  U-Mount 외 5종
  *    TO-PO-26-330  TO-AP-26-042-01  Snout 구매의 건
  *    TO-PO-26-308  TO-AP-26-031-01  E-BOX 외 1종
+ *    TO-PO-26-291  TR-AP-026-51-01  MLC60 Optics 구매 (G1)
+ *    TO-PO-26-312  TR-AP-26-055-01  LC Adaptor
  *  → moveStatus를 FINAL로 마감한다. (테스트 행 PRQ-2026-001-01/Test_123은 대상 제외)
  */
 function _tmp_markInspPdfDone_20261027() {
@@ -2263,6 +2265,8 @@ function _tmp_markInspPdfDone_20261027() {
     ['TO-PO-26-294', 'TO-AP-26-023-06', '25851754-e125-4f22-a232-23c8e8907146', '1HFbqnwOgP0gwYRzaPYw49bgVOQ_-fhr-'],
     ['TO-PO-26-330', 'TO-AP-26-042-01', '23f78596-b362-43cf-99ba-9c6dcf9f7526', '1FDe-h13XSD7elc4vxzvzIIQN4ZsIANZX'],
     ['TO-PO-26-308', 'TO-AP-26-031-01', 'f2b8499e-7be0-4e62-ab8e-98c483af41bc', '1qBU03dj2MGbKBm-nMvd80K-9zih8dQCC'],
+    ['TO-PO-26-291', 'TR-AP-026-51-01', 'a4cd552c-38c6-4ab8-b562-723c6aa14364', '1wdGv_NES-VoSJZwe6iaTqm2rE_NYhQIW'],
+    ['TO-PO-26-312', 'TR-AP-26-055-01', '9422a684-71b2-4bff-a6ea-554e8850ef70', '1ICAq00hbndHMQdCQaUPLwgxvxZ_Ub4cb'],
   ];
 
   var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
