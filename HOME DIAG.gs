@@ -9,7 +9,7 @@
 // 계측 대상 — 홈 경로에서 부르는 전역 함수 (중첩 호출은 각자 합산된다)
 var HOME_DIAG_WRAP_ = [
   'getDeptByEmailMap', '_getInspGroupsByPrc', '_getInspMenusForClient', '_isSameDeptEmail',
-  '_collectAdminTasks_', 'listPendingQuotePdf', 'reconcileQuotePdf', 'listPoPending', 'listInspAwaitingPdf',
+  '_collectAdminTasks_', 'listPendingQuotePdf', 'reconcileQuotePdf', 'listPoPending', 'listPoPendingForHome_', 'listInspAwaitingPdf',
   '_readUserPrefs', 'toDateStr', 'getRowCurrency',
 ];
 
@@ -114,7 +114,8 @@ function diagHomeTiming() {
     L.push(line('_collectAdminTasks_', '관리자 배너 합계'));
     L.push(line('listPendingQuotePdf', '  └ 견적서'));
     L.push(line('reconcileQuotePdf', '      └ PENDING 건 Drive 확인'));
-    L.push(line('listPoPending', '  └ 주문서목록'));
+    L.push(line('listPoPendingForHome_', '  └ 주문서목록(홈용, 수정 3)'));
+    L.push(line('listPoPending', '  └ 주문서목록(기존 — 홈용이 시트 없음·빈 시트일 때만)'));
     L.push(line('listInspAwaitingPdf', '  └ 검수 PDF 대기(검수보고서목록 읽기 #3)'));
     L.push(line('_readUserPrefs', '설정'));
     L.push('    그 밖(시트 열기·품의서목록 읽기·메인 루프·정렬): ' + (wrappedTotal - topSum) + 'ms');
