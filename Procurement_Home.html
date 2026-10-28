@@ -1082,6 +1082,11 @@ function cellDay(v){
   var s = String(v == null ? '' : v).trim();
   return DATE_CELL_RE.test(s) ? s.slice(0, 10) : '';
 }
+// 목록 표시용 '연-월-일'. 서버 값('YYYY-MM-DD HH:mm')은 정렬에 그대로 쓰고(같은 날 안의 순서 유지), 화면에만 날짜를 보인다.
+//  날짜 형식이 아닌 값은 손대지 않는다.
+function dateOnly(v){
+  return cellDay(v) || String(v == null ? '' : v);
+}
 function passesRange(v, f){
   var d = cellDay(v);
   if(!d) return false;                     // 빈 값·비정형 → 기간 필터를 걸면 제외
@@ -2071,7 +2076,7 @@ function docRow(r){
     + '<td>' + escHtml(r.vendorName) + '</td>'
     + '<td class="num">' + fmtAmt(r.amount, r.currency) + '</td>'
     + '<td>' + statusBadge(r.status) + rejectActionBtn(r) + '</td>'
-    + '<td>' + escHtml(r.submitAt) + '</td>'
+    + '<td>' + escHtml(dateOnly(r.submitAt)) + '</td>'
     + '</tr>';
 }
 
