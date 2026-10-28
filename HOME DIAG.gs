@@ -177,7 +177,68 @@ function diagHomeTiming() {
   L.push('[5] 스프레드시트 구성: 시트 ' + sheets.length + '개 · 데이터 ' + totalCells + '칸 · 격자 ' + totalGrid + '칸');
   L.push('    ' + parts.join(' · '));
 
+  // ── 6) 이전 코드(@110 사본, HOME DIAG OLD.gs) vs 현재 코드 — 같은 운영 데이터로 결과 대조 (수정 2·3) ──
+  L.push('');
+  L.push('[6] 이전 코드(@110 = e6fa2e3 사본) vs 현재 코드 — 운영 데이터 결과 대조');
+  if (typeof diagOld_getHomeDataForClient_ !== 'function') {
+    L.push('    ✗ 이전 코드 사본(HOME DIAG OLD.gs)이 없음');
+  } else {
+    function verdict(d) { return d ? '✗ 다름 — ' + d : '✓ 동일'; }
+    // (a) 홈 전체(실행자 = 관리자). 이전·현재를 번갈아 2회씩 — 시간도 같은 조건에서 비교
+    var tOld = [], tNew = [], oldRes = null, newRes = null;
+    for (var a = 0; a < 2; a++) {
+      tOld.push(ms(function () { oldRes = diagOld_getHomeDataForClient_(); }));
+      tNew.push(ms(function () { newRes = getHomeDataForClient(); }));
+    }
+    L.push('    (a) 홈 전체(관리자): ' + verdict(homeDiagFirstDiff_(oldRes, newRes))
+      + ' · 시간 이전 ' + tOld.join(' / ') + 'ms → 현재 ' + tNew.join(' / ') + 'ms');
+
+    // (b) 검수보고서 — 함수마다 직접 읽기(이전) vs 한 번 읽어 공유(현재)
+    var shared = _readInspRows_(ss);
+    L.push('    (b) 검수 결재완료 그룹: ' + verdict(homeDiagFirstDiff_(diagOld__getInspGroupsByPrc_(ss), _getInspGroupsByPrc(ss, shared)))
+      + ' · 검수 PDF 대기: ' + verdict(homeDiagFirstDiff_(diagOld_listInspAwaitingPdf_(), listInspAwaitingPdf(shared))));
+
+    // (c) 검수 메뉴 — 결재자목록에 있는 모든 사용자 관점(역할·부서별 가시성이 사람마다 다르다)
+    var dmap = getDeptByEmailMap(ss);
+    var people = {};
+    ss.getSheetByName('결재자목록').getDataRange().getValues().slice(1).forEach(function (r) {
+      var e = String(r[3] || '').trim().toLowerCase();
+      if (e) people[e] = true;
+    });
+    people[String(me).toLowerCase()] = true;
+    var nSame = 0, bad = [];
+    Object.keys(people).forEach(function (e) {
+      var p = isProcurementUser(e), ad = isAdminUser(e), gv = isGlobalViewer(e);
+      var d = homeDiagFirstDiff_(diagOld__getInspMenusForClient_(ss, e, p, ad, gv, dmap), _getInspMenusForClient(ss, e, p, ad, gv, dmap, shared));
+      if (d) bad.push(e.split('@')[0] + ': ' + d); else nSame++;
+    });
+    L.push('    (c) 검수 메뉴(사용자별 ' + Object.keys(people).length + '명): 동일 ' + nSame + '명' + (bad.length ? ' · ✗ 다름 ' + bad.length + '명 — ' + bad.slice(0, 3).join(' / ') : ''));
+
+    // (d) 주문서목록 — 기존(시트 호출 4회) vs 홈용(2회)
+    var tPoOld = 0, tPoNew = 0, poOld = null, poNew = null;
+    tPoOld = ms(function () { poOld = diagOld_listPoPending_(); });
+    tPoNew = ms(function () { poNew = listPoPendingForHome_(); });
+    L.push('    (d) 주문서 미생성 목록: ' + verdict(homeDiagFirstDiff_(poOld, poNew)) + ' (' + len(poNew) + '건) · 시간 기존 ' + tPoOld + 'ms → 홈용 ' + tPoNew + 'ms');
+  }
+
   var out = L.join('\n');
   console.log(out);
   return out;
+}
+
+// 두 값의 첫 차이 위치(같으면 null) — 로그에는 위치와 짧은 값만 남긴다
+function homeDiagFirstDiff_(a, b, p) {
+  p = p || '';
+  if (a === b) return null;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) {
+    return (p || '(전체)') + ': ' + String(JSON.stringify(a)).slice(0, 60) + ' ≠ ' + String(JSON.stringify(b)).slice(0, 60);
+  }
+  var keys = {};
+  Object.keys(a).forEach(function (k) { keys[k] = true; });
+  Object.keys(b).forEach(function (k) { keys[k] = true; });
+  for (var k in keys) {
+    var d = homeDiagFirstDiff_(a[k], b[k], p + (Array.isArray(a) ? '[' + k + ']' : '.' + k));
+    if (d) return d;
+  }
+  return null;
 }
