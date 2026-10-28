@@ -53,6 +53,8 @@ class FakeSheet {
   getName() { return this.name; }
   getLastRow() { return this.rows.length; }
   getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0); }
+  getMaxRows() { return Math.max(this.rows.length, 1000); }
+  getMaxColumns() { return Math.max(this.getLastColumn(), 26); }
   getRange(row, col, nRows = 1, nCols = 1) { return new FakeRange(this, row, col, nRows, nCols); }
   getDataRange() { return this.getRange(1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
   appendRow() { this._writes.n++; return this; }
@@ -60,6 +62,7 @@ class FakeSheet {
 class FakeSpreadsheet {
   constructor(counters) { this.sheets = {}; this.counters = counters; this.opens = 0; }
   getSheetByName(n) { return this.sheets[n] || null; }
+  getSheets() { return Object.values(this.sheets); }
   insertSheet(n) { throw new Error('홈 경로가 시트를 만들면 안 된다: ' + n); }
   _add(n, rows) {
     const c = this.counters[n] = { reads: { n: 0 }, writes: { n: 0 } };
