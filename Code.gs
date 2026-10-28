@@ -379,14 +379,43 @@ function toDateStr(v, fmt) {
   fmt = fmt || 'yyyy-MM-dd';
   if (v instanceof Date) {
     if (isNaN(v.getTime())) return '';
-    return Utilities.formatDate(v, Session.getScriptTimeZone(), fmt);
+    return _formatInScriptTz_(v, fmt);
   }
   var s = String(v).trim();
   if (!s) return '';
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
   var d = new Date(s);
   if (isNaN(d.getTime())) return s;
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), fmt);
+  return _formatInScriptTz_(d, fmt);
+}
+
+// ⚠ 날짜 변환은 홈 목록의 행마다 일어난다(홈 1회 965회). Session.getScriptTimeZone()·Utilities.formatDate는
+//   서버 호출이라 각각 회당 0.4~4ms여서, 홈 한 번에 0.7~2.3초를 여기서 썼다(2026-10-28 진단).
+//   → 시간대는 실행당 1회만 조회하고, 홈이 쓰는 두 형식은 순수 계산으로 만든다.
+var _scriptTz_ = '';
+function _scriptTimeZone_() {
+  return _scriptTz_ || (_scriptTz_ = Session.getScriptTimeZone());
+}
+
+function _formatInScriptTz_(d, fmt) {
+  var tz = _scriptTimeZone_();
+  var fast = _fastKstFormat_(d, tz, fmt);
+  return fast !== null ? fast : Utilities.formatDate(d, tz, fmt);
+}
+
+// 'yyyy-MM-dd' / 'yyyy-MM-dd HH:mm'를 Asia/Seoul 기준으로 계산. 한국은 1988년 이후 서머타임이 없어 UTC+9 고정이다.
+//  그 밖(다른 시간대·형식, 1989년 이전·9999년 이후)은 null → 호출부가 Utilities.formatDate로 처리한다.
+//  검증: 운영 시트 Date 1,484칸 × 2형식 Utilities.formatDate와 불일치 0, 시간대 DB 대조 26,720개 일치.
+function _fastKstFormat_(d, tz, fmt) {
+  if (tz !== 'Asia/Seoul') return null;
+  var withTime = (fmt === 'yyyy-MM-dd HH:mm');
+  if (!withTime && fmt !== 'yyyy-MM-dd') return null;
+  var y = d.getUTCFullYear();
+  if (y < 1989 || y > 9998) return null;
+  var t = new Date(d.getTime() + 9 * 3600 * 1000);
+  function p(n) { return (n < 10 ? '0' : '') + n; }
+  var s = t.getUTCFullYear() + '-' + p(t.getUTCMonth() + 1) + '-' + p(t.getUTCDate());
+  return withTime ? s + ' ' + p(t.getUTCHours()) + ':' + p(t.getUTCMinutes()) : s;
 }
 
 function toDateTimeStr(v) {
