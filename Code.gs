@@ -49,8 +49,7 @@ var CONFIG = {
     //'mhpark@inlct.com',
     //'bret@inlct.com',
     //'kskim@inlct.com',
-    // ⚠ [측정용 임시 제외 2026-10-28] 일반 사용자 홈 로딩 기준값 측정 — 측정 후 즉시 복구할 것
-    //'admin-inlct@inlct.com',   // mujung@inlct.com 대체 (2026-07)
+    'admin-inlct@inlct.com',   // mujung@inlct.com 대체 (2026-07)
   ],
   ADMIN_EMAILS: [
     'davidkang@inlct.com',
