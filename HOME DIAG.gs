@@ -143,7 +143,9 @@ function diagHomeTiming() {
   var dates = [];
   [mainRows, inspRows].forEach(function (rs) {
     if (!rs) return;
-    for (var i = 1; i < rs.length; i++) for (var j = 0; j < rs[i].length; j++) if (rs[i][j] instanceof Date) dates.push(rs[i][j]);
+    for (var i = 1; i < rs.length; i++) for (var j = 0; j < rs[i].length; j++) {
+      if (rs[i][j] instanceof Date && !isNaN(rs[i][j].getTime())) dates.push(rs[i][j]);
+    }
   });
   var mism = [], fallback = 0, slowMs = 0, fastMs = 0, slowOut = [], fastOut = [];
   slowMs = ms(function () {
