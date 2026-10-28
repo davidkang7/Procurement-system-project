@@ -4109,7 +4109,7 @@ function _collectAdminTasks_(rows, inspRows) {
   var t = { quotePdf: [], po: [], insp: [] };
   try { t.quotePdf = listPendingQuotePdf(rows); }
   catch(e) { Logger.log('[AdminTasks] 견적서 목록 실패: ' + e); }
-  try { t.po = (typeof listPoPending === 'function') ? listPoPending() : []; }
+  try { t.po = (typeof listPoPendingForHome_ === 'function') ? listPoPendingForHome_() : []; }
   catch(e) { Logger.log('[AdminTasks] 주문서 목록 실패: ' + e); }
   try {
     t.insp = ((typeof listInspAwaitingPdf === 'function') ? listInspAwaitingPdf(inspRows) : [])

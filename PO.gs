@@ -145,12 +145,7 @@ function ensurePoSheet_() {
   var sheet = getOrCreateSheet(ss, CONFIG.PO_SHEET_NAME);
 
   if (sheet.getLastRow() > 0) {
-    // 같은 이름의 시트가 이미 있는데 우리 대장이 아니면(수기 시트 등) 엉뚱한 컬럼에 쓰게 된다.
-    var hdr = sheet.getRange(1, 1, 1, 3).getValues()[0];
-    if (String(hdr[0]) !== 'createdAt' || String(hdr[2]) !== 'prcToken') {
-      throw new Error('[PO] 시트 "' + CONFIG.PO_SHEET_NAME + '" 의 머리글이 주문서 대장 형식이 아닙니다 '
-        + '(A1=' + hdr[0] + ', C1=' + hdr[2] + '). 기존 시트를 다른 이름으로 옮기고 다시 실행하세요.');
-    }
+    _assertPoHeader_(sheet.getRange(1, 1, 1, 3).getValues()[0]);
     return sheet;
   }
 
@@ -177,6 +172,15 @@ function ensurePoSheet_() {
   sheet.setColumnWidth(PO_COL.NOTE + 1, 220);
 
   return sheet;
+}
+
+// 같은 이름의 시트가 이미 있는데 우리 대장이 아니면(수기 시트 등) 엉뚱한 컬럼에 쓰게 된다.
+//  hdr = 1행 A~C 값
+function _assertPoHeader_(hdr) {
+  if (String(hdr[0]) !== 'createdAt' || String(hdr[2]) !== 'prcToken') {
+    throw new Error('[PO] 시트 "' + CONFIG.PO_SHEET_NAME + '" 의 머리글이 주문서 대장 형식이 아닙니다 '
+      + '(A1=' + hdr[0] + ', C1=' + hdr[2] + '). 기존 시트를 다른 이름으로 옮기고 다시 실행하세요.');
+  }
 }
 
 /**
@@ -516,7 +520,32 @@ function listPoPending() {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) { console.log('[PO] 주문서목록이 비어 있습니다. backfillPoSheet() 실행을 검토하세요.'); return []; }
 
-  var rows = sheet.getRange(2, 1, lastRow - 1, PO_TOTAL_COLS).getValues();
+  return _poPendingFromRows_(sheet.getRange(2, 1, lastRow - 1, PO_TOTAL_COLS).getValues());
+}
+
+/**
+ * 관리자 홈 배너용 — listPoPending과 같은 결과를 시트 호출 2번(범위 계산 + 읽기)으로 만든다.
+ *  listPoPending은 대장 보장(행 수 확인 + 머리글 읽기)·행 수 확인·본문 읽기로 4번이라
+ *  홈 1회에 0.4초 남짓 들었다(2026-10-28 진단). 머리글 확인은 같은 읽기의 첫 줄로 한다.
+ *  시트가 없거나 완전히 비었으면 대장을 만들어야 하므로 listPoPending()에 그대로 맡긴다.
+ */
+function listPoPendingForHome_() {
+  _assertPoOperator_('listPoPending');
+  _poSchemaSelfCheck_();
+  var sheet = SpreadsheetApp.openById(CONFIG.SHEET_ID).getSheetByName(CONFIG.PO_SHEET_NAME);
+  var all = sheet ? sheet.getDataRange().getValues() : null;
+  if (!all || (all.length === 1 && all[0].join('') === '')) return listPoPending();   // 시트 없음·빈 시트(getLastRow() === 0)
+
+  var a1 = all[0];
+  function cell(v) { return v === undefined ? '' : v; }   // 데이터 범위가 3열보다 좁을 때 getRange(1,1,1,3)과 같게
+  _assertPoHeader_([cell(a1[0]), cell(a1[1]), cell(a1[2])]);
+  if (all.length < 2) { console.log('[PO] 주문서목록이 비어 있습니다. backfillPoSheet() 실행을 검토하세요.'); return []; }
+  // 데이터 범위 폭이 PO_TOTAL_COLS와 달라도 된다 — 아래는 열 번호로만 읽고 빈 칸(''/undefined)을 같게 다룬다.
+  return _poPendingFromRows_(all.slice(1));
+}
+
+// 주문서목록 2행부터의 행들 → 미생성 목록 (rowNum은 시트 행 번호)
+function _poPendingFromRows_(rows) {
   var out = [];
   for (var i = 0; i < rows.length; i++) {
     if (!_isPoOpen_(rows[i][PO_COL.STATUS])) continue;   // 생성완료·생성불요는 제외

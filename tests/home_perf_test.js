@@ -425,8 +425,16 @@ check('홈 1회 날짜 서버 호출: 모든 역할에서 시간대 조회 1회 
 
 console.log('\n[시트가 없거나 비었거나 읽기가 실패해도 기준과 같은 응답]');
 {
-  const INSP = '검수보고서목록', MAIN = '품의서목록';
+  const INSP = '검수보고서목록', MAIN = '품의서목록', PO = '주문서목록';
   const scenarios = [
+    // 주문서목록(관리자 배너) — 홈용 1회 읽기가 기존 listPoPending과 같은 결과인지
+    ['주문서목록 시트 없음', s => { delete s.sheets[PO]; }],
+    ['주문서목록 완전히 빔', s => { s.sheets[PO].rows = []; }],
+    ['주문서목록 머리글만', s => { s.sheets[PO].rows.length = 1; }],
+    ['주문서목록 머리글이 대장 형식 아님', s => { s.sheets[PO].rows[0][0] = '수기 메모'; }],
+    ['주문서목록 열이 좁음(13열)', s => { s.sheets[PO].rows = s.sheets[PO].rows.map(r => r.slice(0, 13)); }],
+    ['주문서목록 열이 넓음 + 다른 열에만 내용 있는 마지막 행', s => {
+      const rs = s.sheets[PO].rows; rs[1][24] = '메모'; const extra = new Array(26).fill(''); extra[25] = '끝'; rs.push(extra); }],
     ['검수보고서목록 읽기 실패', s => { s.sheets[INSP].getDataRange = () => { throw new Error('읽기 장애 시뮬레이션'); }; }],
     ['검수보고서목록 시트 없음', s => { delete s.sheets[INSP]; }],
     ['검수보고서목록 머리글만', s => { s.sheets[INSP].rows.length = 1; }],
@@ -437,14 +445,16 @@ console.log('\n[시트가 없거나 비었거나 읽기가 실패해도 기준�
   for (const [name, mutate] of scenarios) for (const who of [ADMIN, KIM]) {
     const b = makeEnv('BASE', readBASE, who, PREFS), w = makeEnv('WT', readWT, who, PREFS);
     mutate(b.ss); mutate(w.ss);
-    const rb = b.run().res, rw = w.run().res;
+    const xb = b.run(), xw = w.run(), rb = xb.res, rw = xw.res;
     const d = firstDiff(rb, rw);
-    check(`${name} (${who === ADMIN ? '관리자' : '일반'}): 기준과 같은 응답`, rb.ok === true && rw.ok === true && d === null, d || (rb.message + ' / ' + rw.message));
+    check(`${name} (${who === ADMIN ? '관리자' : '일반'}): 기준과 같은 응답·시트 쓰기 ${xb.writes}회 동일`,
+      rb.ok === true && rw.ok === true && d === null && xb.writes === xw.writes, d || (rb.message + ' / ' + rw.message + ` / 쓰기 ${xb.writes}·${xw.writes}`));
   }
 }
 
 check('검수보고서목록은 모든 역할에서 홈 1회에 한 번만 읽는다', table.every(t => t.wt['검수보고서목록'] === 1),
   table.map(t => `${t.role} ${t.base['검수보고서목록']}→${t.wt['검수보고서목록']}`).join(' / '));
+check('관리자 배너 주문서목록은 한 번만 읽는다(머리글·본문 따로 읽지 않음)', table[0].wt['주문서목록'] === 1, `${table[0].base['주문서목록']}→${table[0].wt['주문서목록']}`);
 check('시트 호출 수가 모든 역할에서 줄었다', table.every(t => t.callsWt < t.callsBase),
   table.map(t => `${t.role} ${t.callsBase}→${t.callsWt}`).join(' / '));
 
