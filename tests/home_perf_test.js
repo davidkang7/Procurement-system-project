@@ -195,7 +195,8 @@ function buildFixtures(ctx) {
 }
 
 // ── 환경 ─────────────────────────────────────────────────────────
-function makeEnv(label, read, active, prefsByEmail) {
+// extraFiles: Code/INSP/PO 외에 함께 올릴 .gs (예: 진단 함수 파일) — 같은 read로 읽는다
+function makeEnv(label, read, active, prefsByEmail, extraFiles = []) {
   const counters = {};
   const errors = [];
   const ss = new FakeSpreadsheet(counters);
@@ -227,7 +228,7 @@ function makeEnv(label, read, active, prefsByEmail) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  ['Code.gs', 'INSP.gs', 'PO.gs'].forEach(f => vm.runInContext(read(f), sandbox, { filename: label + ':' + f }));
+  ['Code.gs', 'INSP.gs', 'PO.gs', ...extraFiles].forEach(f => vm.runInContext(read(f), sandbox, { filename: label + ':' + f }));
   // 홈 경로에서 쓰기·메일이 일어나면 안 된다 — 큐·감사로그·메일은 기록만 하고 실패로 센다
   sandbox.__errors = errors;
   vm.runInContext(`
@@ -243,6 +244,7 @@ function makeEnv(label, read, active, prefsByEmail) {
   ss._add(ctx.CONFIG.PO_SHEET_NAME, fx.poRows);
 
   return {
+    sandbox, counters, errors,
     // 검수보고서 작성·제출 관문(INSP.gs)은 deptMap 없이 _isSameDeptEmail을 부른다 — 그 경로도 그대로여야 한다
     sameDept(a, b, map) {
       sandbox.__args = [a, b, map];
@@ -273,6 +275,10 @@ function check(name, cond, detail) {
   if (cond) { pass++; console.log('  ✓ ' + name); }
   else { fail++; console.log('  ✗ ' + name + (detail ? '\n      ' + detail : '')); }
 }
+
+// 다른 테스트(진단 함수·후속 수정 검증)가 같은 환경·픽스처를 쓰도록 공개한다. require로 불리면 시나리오는 돌리지 않는다.
+module.exports = { makeEnv, firstDiff, readWT, readBASE, ADMIN, BUYER, GVIEW, KIM, PARK, LEE, NODEPT };
+if (require.main !== module) return;
 
 // ── 시나리오 ─────────────────────────────────────────────────────
 const PREFS = { ['UPREF_' + KIM]: JSON.stringify({ v: 1, cols: { a: 1 } }) };
