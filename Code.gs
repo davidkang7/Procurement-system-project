@@ -4000,7 +4000,7 @@ function getHomeDataForClient() {
 
     // [INSP Step 5] 내 검수 결재 대기 + 최종 완료(통합)
     var inspMenus = (typeof _getInspMenusForClient === 'function')
-      ? _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView)
+      ? _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView, deptMap)
       : { myInspPending: [], inspFinals: [], allInspPending: [] };
 
     // 최종 완료 통합: REQ/PRC 최종 + INSP 최종(IS_FINAL) — 단일 리스트, docType으로 구분

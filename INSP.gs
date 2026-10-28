@@ -248,11 +248,13 @@ function _getInspGroupsByPrc(ss) {
 // [INSP 부서 공유] 같은 부서 판정 (검수보고서 제출 권한 확장)
 // - 결재자목록 부서 열 기준. Code.gs의 getDeptByEmailMap 재사용.
 // - 두 이메일이 모두 등록되어 있고 부서가 같으면 true
+// - deptMap(선택): 이미 만든 부서 맵. 반복문에서 부를 때는 반드시 넘길 것 —
+//   없으면 호출마다 결재자목록 시트를 통째로 다시 읽는다(홈 로딩 N+1, 2026-10-28).
 // ================================================================
-function _isSameDeptEmail(ss, emailA, emailB) {
+function _isSameDeptEmail(ss, emailA, emailB, deptMap) {
   if (!emailA || !emailB) return false;
   if (typeof getDeptByEmailMap !== 'function') return false;
-  var m  = getDeptByEmailMap(ss);
+  var m  = deptMap || getDeptByEmailMap(ss);
   var da = m[String(emailA).trim().toLowerCase()];
   var db = m[String(emailB).trim().toLowerCase()];
   return !!da && !!db && da === db;
@@ -1027,9 +1029,10 @@ function _sendInspCompletionEmail(toEmail, drafter, docNo, subject, token, isFin
  * @param {string} actor 로그인 이메일(소문자)
  * @param {boolean} isProc 구매팀 여부
  * @param {boolean} isAdmin 관리자 여부 (allInspPending 수집 + 전사 조회 게이트)
+ * @param {Object=} deptMap 홈이 이미 만든 부서 맵(getDeptByEmailMap) — 같은 부서 판정에 재사용
  * @returns {Object} { myInspPending: [], inspFinals: [], allInspPending: [] }
  */
-function _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView) {
+function _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView, deptMap) {
   var out = { myInspPending: [], inspFinals: [], allInspPending: [] };
   try {
     var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
@@ -1105,7 +1108,7 @@ function _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView) {
       if (status === '최종승인(INSP)') {
         if (isAdmin || isProc || isGView || amParticipant ||
             meta.drafter.toLowerCase() === actor ||
-            _isSameDeptEmail(ss, meta.drafter, actor)) {
+            _isSameDeptEmail(ss, meta.drafter, actor, deptMap)) {
           out.inspFinals.push(meta);
         }
       }
