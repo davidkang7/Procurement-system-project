@@ -57,16 +57,18 @@ class FakeRange {
   setValues() { this.sheet._writes.n++; return this; }
   setValue() { this.sheet._writes.n++; return this; }
 }
+// _meta: 크기 확인·범위 계산 호출(getLastRow / getLastColumn / getDataRange) — 운영에서 회당 0.1~0.2초인 서버 호출
 class FakeSheet {
-  constructor(name, reads, writes) { this.name = name; this.rows = []; this._reads = reads; this._writes = writes; }
+  constructor(name, reads, writes, meta) { this.name = name; this.rows = []; this._reads = reads; this._writes = writes; this._meta = meta; }
   _get(r, c) { const row = this.rows[r - 1]; return row ? (row[c - 1] ?? '') : ''; }
+  _lastCol() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0); }
   getName() { return this.name; }
-  getLastRow() { return this.rows.length; }
-  getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0); }
+  getLastRow() { this._meta.n++; return this.rows.length; }
+  getLastColumn() { this._meta.n++; return this._lastCol(); }
   getMaxRows() { return Math.max(this.rows.length, 1000); }
-  getMaxColumns() { return Math.max(this.getLastColumn(), 26); }
+  getMaxColumns() { return Math.max(this._lastCol(), 26); }
   getRange(row, col, nRows = 1, nCols = 1) { return new FakeRange(this, row, col, nRows, nCols); }
-  getDataRange() { return this.getRange(1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
+  getDataRange() { this._meta.n++; return this.getRange(1, 1, Math.max(this.rows.length, 1), Math.max(this._lastCol(), 1)); }
   appendRow() { this._writes.n++; return this; }
 }
 class FakeSpreadsheet {
@@ -75,8 +77,8 @@ class FakeSpreadsheet {
   getSheets() { return Object.values(this.sheets); }
   insertSheet(n) { throw new Error('홈 경로가 시트를 만들면 안 된다: ' + n); }
   _add(n, rows) {
-    const c = this.counters[n] = { reads: { n: 0 }, writes: { n: 0 } };
-    const s = new FakeSheet(n, c.reads, c.writes);
+    const c = this.counters[n] = { reads: { n: 0 }, writes: { n: 0 }, meta: { n: 0 } };
+    const s = new FakeSheet(n, c.reads, c.writes, c.meta);
     s.rows = rows.map(r => r.slice());
     this.sheets[n] = s;
   }
@@ -259,7 +261,7 @@ function makeEnv(label, read, active, prefsByEmail, extraFiles = []) {
   ss._add(ctx.CONFIG.PO_SHEET_NAME, fx.poRows);
 
   return {
-    sandbox, counters, errors, svc,
+    sandbox, counters, errors, svc, ss,
     // 검수보고서 작성·제출 관문(INSP.gs)은 deptMap 없이 _isSameDeptEmail을 부른다 — 그 경로도 그대로여야 한다
     sameDept(a, b, map) {
       sandbox.__args = [a, b, map];
@@ -272,7 +274,9 @@ function makeEnv(label, read, active, prefsByEmail, extraFiles = []) {
       const writes = Object.keys(counters).reduce((s, k) => s + counters[k].writes.n, 0);
       const svcCalls = { fmt: svc.fmt, tz: svc.tz };
       svc.fmt = 0; svc.tz = 0;
-      return { res: JSON.parse(JSON.stringify(res)), reads, writes, opens, errors, svc: svcCalls };
+      // 시트 호출 = 값 읽기(getValues) + 크기 확인·범위 계산(getLastRow/getLastColumn/getDataRange)
+      const sheetCalls = Object.keys(counters).reduce((s, k) => s + counters[k].reads.n + counters[k].meta.n, 0);
+      return { res: JSON.parse(JSON.stringify(res)), reads, writes, opens, errors, svc: svcCalls, sheetCalls };
     },
   };
 }
@@ -330,7 +334,7 @@ for (const role of ROLES) {
 
   const sum = r => Object.values(r).reduce((s, n) => s + n, 0);
   table.push({ role: role.name, base: base.reads, wt: wt.reads, baseSum: sum(base.reads), wtSum: sum(wt.reads), opensBase: base.opens, opensWt: wt.opens,
-    svcBase: base.svc, svcWt: wt.svc });
+    svcBase: base.svc, svcWt: wt.svc, callsBase: base.sheetCalls, callsWt: wt.sheetCalls });
   console.log('');
 }
 
@@ -419,12 +423,38 @@ check('홈 1회 날짜 서버 호출: 모든 역할에서 시간대 조회 1회 
   table.every(t => t.svcWt.tz <= 1 && t.svcWt.fmt <= 2) && table.every(t => t.svcBase.fmt > 50),
   table.map(t => `${t.role} fmt ${t.svcBase.fmt}→${t.svcWt.fmt} tz ${t.svcBase.tz}→${t.svcWt.tz}`).join(' / '));
 
+console.log('\n[시트가 없거나 비었거나 읽기가 실패해도 기준과 같은 응답]');
+{
+  const INSP = '검수보고서목록', MAIN = '품의서목록';
+  const scenarios = [
+    ['검수보고서목록 읽기 실패', s => { s.sheets[INSP].getDataRange = () => { throw new Error('읽기 장애 시뮬레이션'); }; }],
+    ['검수보고서목록 시트 없음', s => { delete s.sheets[INSP]; }],
+    ['검수보고서목록 머리글만', s => { s.sheets[INSP].rows.length = 1; }],
+    ['검수보고서목록 완전히 빔', s => { s.sheets[INSP].rows = []; }],
+    ['품의서목록 머리글만', s => { s.sheets[MAIN].rows.length = 1; }],
+    ['품의서목록 완전히 빔', s => { s.sheets[MAIN].rows = []; }],
+  ];
+  for (const [name, mutate] of scenarios) for (const who of [ADMIN, KIM]) {
+    const b = makeEnv('BASE', readBASE, who, PREFS), w = makeEnv('WT', readWT, who, PREFS);
+    mutate(b.ss); mutate(w.ss);
+    const rb = b.run().res, rw = w.run().res;
+    const d = firstDiff(rb, rw);
+    check(`${name} (${who === ADMIN ? '관리자' : '일반'}): 기준과 같은 응답`, rb.ok === true && rw.ok === true && d === null, d || (rb.message + ' / ' + rw.message));
+  }
+}
+
+check('검수보고서목록은 모든 역할에서 홈 1회에 한 번만 읽는다', table.every(t => t.wt['검수보고서목록'] === 1),
+  table.map(t => `${t.role} ${t.base['검수보고서목록']}→${t.wt['검수보고서목록']}`).join(' / '));
+check('시트 호출 수가 모든 역할에서 줄었다', table.every(t => t.callsWt < t.callsBase),
+  table.map(t => `${t.role} ${t.callsBase}→${t.callsWt}`).join(' / '));
+
 console.log('\n[시트 읽기 횟수 — getValues 호출 수 (기준 → 수정본)]');
 const sheetNames = ['품의서목록', '결재자목록', '검수보고서목록', '주문서목록'];
-console.log('  ' + ['역할'.padEnd(18), ...sheetNames.map(s => s.padStart(10)), '합계'.padStart(9), 'openById'.padStart(9), 'formatDate'.padStart(11), '시간대'.padStart(7)].join(' '));
+console.log('  (시트 호출 = 값 읽기 + 크기 확인·범위 계산. 운영에서 회당 0.1~0.3초)');
+console.log('  ' + ['역할'.padEnd(18), ...sheetNames.map(s => s.padStart(10)), '합계'.padStart(9), '시트 호출'.padStart(8), 'openById'.padStart(9), 'formatDate'.padStart(11), '시간대'.padStart(7)].join(' '));
 table.forEach(t => {
   const cell = s => `${t.base[s] || 0}→${t.wt[s] || 0}`.padStart(10);
-  console.log('  ' + [t.role.padEnd(18), ...sheetNames.map(cell), `${t.baseSum}→${t.wtSum}`.padStart(9), `${t.opensBase}→${t.opensWt}`.padStart(9),
+  console.log('  ' + [t.role.padEnd(18), ...sheetNames.map(cell), `${t.baseSum}→${t.wtSum}`.padStart(9), `${t.callsBase}→${t.callsWt}`.padStart(10), `${t.opensBase}→${t.opensWt}`.padStart(9),
     `${t.svcBase.fmt}→${t.svcWt.fmt}`.padStart(11), `${t.svcBase.tz}→${t.svcWt.tz}`.padStart(7)].join(' '));
 });
 

@@ -3799,7 +3799,10 @@ function getHomeDataForClient() {
     var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
 
-    if (sheet.getLastRow() < 2) {
+    // 행 수 확인(getLastRow)을 따로 하지 않고 바로 읽는다 — 시트 호출은 회당 0.1~0.3초라 한 번이라도 아낀다.
+    //   빈 시트의 getDataRange()는 A1 한 칸이므로 rows.length < 2 가 getLastRow() < 2 와 같다.
+    var rows = sheet.getDataRange().getValues();
+    if (rows.length < 2) {
       return {
         ok: true,
         user: { email: actor, isProcurement: isProcurementUser(actor), isAdmin: isAdminUser(actor), isGlobalViewer: isGlobalViewer(actor) },
@@ -3812,7 +3815,6 @@ function getHomeDataForClient() {
       };
     }
 
-    var rows = sheet.getDataRange().getValues();
     var myDrafts = [];       // 작성 중 (DRAFT는 현재 시스템에 없음 → 검토중)
     var myPending = [];      // 내가 결재해야 할 문서
     var myDocs = [];         // 내가 작성한 문서
@@ -3969,14 +3971,22 @@ function getHomeDataForClient() {
       return (a.submitAt || '').localeCompare(b.submitAt || '');
     });
 
+    // [INSP] 검수보고서목록은 여기서 한 번만 읽어 결재 완료·검수 메뉴·관리자 배너가 함께 쓴다.
+    //   (과거엔 셋이 각자 읽어 관리자 홈 1회에 3번 — 회당 0.4초 안팎, 2026-10-28 진단)
+    //   읽기가 실패하면 null → 각 함수가 예전처럼 직접 읽고 스스로 실패 처리한다(홈 로딩은 계속).
+    var inspRows = null;
+    if (typeof _readInspRows_ === 'function') {
+      try { inspRows = _readInspRows_(ss); } catch (e) { inspRows = null; }
+    }
+
     // [INSP Step 2] 결재 완료 목록 조립
     // - 가시성: 구매팀은 전체, 일반 사용자는 원본 REQ 기안자 본인 건만 (Q-INSP-05)
-    // - 검수보고서 그룹은 INSP.gs의 _getInspGroupsByPrc()가 1회 read로 제공
+    // - 검수보고서 그룹은 INSP.gs의 _getInspGroupsByPrc()가 위에서 읽은 행으로 만든다
     //   (INSP 파일 미배포 환경에서도 홈이 죽지 않도록 typeof 가드)
     var completedDocs = [];
     if (prcFinals.length > 0) {
       var inspGroups = (typeof _getInspGroupsByPrc === 'function')
-        ? _getInspGroupsByPrc(ss)
+        ? _getInspGroupsByPrc(ss, inspRows)
         : {};
       for (var c = 0; c < prcFinals.length; c++) {
         var pf  = prcFinals[c];
@@ -4028,7 +4038,7 @@ function getHomeDataForClient() {
 
     // [INSP Step 5] 내 검수 결재 대기 + 최종 완료(통합)
     var inspMenus = (typeof _getInspMenusForClient === 'function')
-      ? _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView, deptMap)
+      ? _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView, deptMap, inspRows)
       : { myInspPending: [], inspFinals: [], allInspPending: [] };
 
     // 최종 완료 통합: REQ/PRC 최종 + INSP 최종(IS_FINAL) — 단일 리스트, docType으로 구분
@@ -4080,7 +4090,7 @@ function getHomeDataForClient() {
       allPending:     isAdmin ? allPending : [],
       allInspPending: isAdmin ? (inspMenus.allInspPending || []) : [],
       // [관리자 처리 대기 배너] 견적서 PDF · 주문서 · 검수보고서 PDF — 시트 상태가 근거(메일을 놓쳐도 홈에 남는다)
-      adminTasks:     isAdmin ? _collectAdminTasks_(rows) : null,
+      adminTasks:     isAdmin ? _collectAdminTasks_(rows, inspRows) : null,
       // [설정 유지] 마지막 컬럼 필터 설정. 홈은 서버를 원래 1회만 부르므로 여기에 실어
       //   보내면 왕복이 늘지 않고, 화면이 이 응답을 받은 뒤에야 그려지므로 깜빡임도 없다.
       prefs: _readUserPrefs(),
@@ -4093,15 +4103,16 @@ function getHomeDataForClient() {
 /**
  * 관리자 홈 배너용 처리 대기 목록. 각 소스는 독립적으로 실패해도 홈 로딩을 막지 않는다.
  * @param rows 홈이 이미 읽은 품의서목록 전체 행(헤더 포함) — 견적서는 재읽기 없이 여기서 추출
+ * @param inspRows 홈이 이미 읽은 검수보고서목록 전체 행(없으면 null → 직접 읽음)
  */
-function _collectAdminTasks_(rows) {
+function _collectAdminTasks_(rows, inspRows) {
   var t = { quotePdf: [], po: [], insp: [] };
   try { t.quotePdf = listPendingQuotePdf(rows); }
   catch(e) { Logger.log('[AdminTasks] 견적서 목록 실패: ' + e); }
   try { t.po = (typeof listPoPending === 'function') ? listPoPending() : []; }
   catch(e) { Logger.log('[AdminTasks] 주문서 목록 실패: ' + e); }
   try {
-    t.insp = ((typeof listInspAwaitingPdf === 'function') ? listInspAwaitingPdf() : [])
+    t.insp = ((typeof listInspAwaitingPdf === 'function') ? listInspAwaitingPdf(inspRows) : [])
       .filter(function(x) { return ADMIN_TASK_EXCLUDE_DOCNOS.indexOf(String(x.docNo || '')) < 0; });
   } catch(e) { Logger.log('[AdminTasks] 검수보고서 목록 실패: ' + e); }
   return t;

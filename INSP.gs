@@ -184,20 +184,29 @@ function inspApprCol(stageIdx, offset) {
 // ================================================================
 
 /**
- * 검수보고서목록을 1회 read하여 PRC token별로 그룹핑해 반환
- * - getHomeDataForClient에서 호출 (동일 스프레드시트 — openById 재사용, 추가 read 1회)
+ * 검수보고서목록 전체 행(헤더 포함). 시트가 없으면 []. 실패는 호출부가 처리한다(throw).
+ * - 홈은 이걸 한 번만 읽어 _getInspGroupsByPrc / _getInspMenusForClient / listInspAwaitingPdf에 넘긴다
+ *   (시트 호출은 회당 0.1~0.3초 — 2026-10-28 진단).
+ * - 행 수 확인(getLastRow) 없이 바로 읽는다. 빈 시트는 [['']] 한 줄이라 데이터 행 루프(i=1~)가 0회로 같다.
+ */
+function _readInspRows_(ss) {
+  var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
+  return sheet ? sheet.getDataRange().getValues() : [];
+}
+
+/**
+ * 검수보고서목록을 PRC token별로 그룹핑해 반환
+ * - getHomeDataForClient에서 호출 (홈이 한 번 읽은 행을 inspRows로 넘긴다)
  * - 시트가 없거나 데이터가 없으면 빈 객체 반환 (홈 로딩을 중단시키지 않음)
  * - Date 필드는 전부 문자열 변환 (google.script.run 직렬화 시 Date → null 방지)
  * @param {Spreadsheet} ss 이미 열린 스프레드시트 객체
+ * @param {Array=} inspRows 이미 읽은 검수보고서목록 행 — 없으면 여기서 읽는다(작성·제출 화면)
  * @returns {Object} { prcToken: [inspObj, ...] } — 각 그룹은 회차(seq) 오름차순
  */
-function _getInspGroupsByPrc(ss) {
+function _getInspGroupsByPrc(ss, inspRows) {
   var groups = {};
   try {
-    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
-    if (!sheet || sheet.getLastRow() < 2) return groups;
-
-    var rows = sheet.getDataRange().getValues();
+    var rows = Array.isArray(inspRows) ? inspRows : _readInspRows_(ss);
     for (var i = 1; i < rows.length; i++) {
       var r = rows[i];
       var prcToken = String(r[INSP_COL.PRC_TOKEN] || '');
@@ -1030,16 +1039,15 @@ function _sendInspCompletionEmail(toEmail, drafter, docNo, subject, token, isFin
  * @param {boolean} isProc 구매팀 여부
  * @param {boolean} isAdmin 관리자 여부 (allInspPending 수집 + 전사 조회 게이트)
  * @param {Object=} deptMap 홈이 이미 만든 부서 맵(getDeptByEmailMap) — 같은 부서 판정에 재사용
+ * @param {Array=} inspRows 홈이 이미 읽은 검수보고서목록 행 — 없으면 여기서 읽는다
  * @returns {Object} { myInspPending: [], inspFinals: [], allInspPending: [] }
  */
-function _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView, deptMap) {
+function _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView, deptMap, inspRows) {
   var out = { myInspPending: [], inspFinals: [], allInspPending: [] };
   try {
-    var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
-    if (!sheet || sheet.getLastRow() < 2) return out;
+    var rows = Array.isArray(inspRows) ? inspRows : _readInspRows_(ss);
     actor = String(actor || '').toLowerCase();
 
-    var rows = sheet.getDataRange().getValues();
     for (var i = 1; i < rows.length; i++) {
       var r = rows[i];
       var token = String(r[INSP_COL.TOKEN] || '');
@@ -1978,14 +1986,12 @@ function _sendInspPdfHandoffEmail(m, stagingFolderId) {
 /**
  * PDF 생성 대기 목록 (David/코워크 워크리스트).
  *  - status=최종승인(INSP) && MOVE_STATUS=PENDING_PDF 인 회차.
+ * @param {Array=} inspRows 홈(관리자 배너)이 이미 읽은 검수보고서목록 행 — 편집기에서 실행하면 없음 → 여기서 읽는다
  * @returns {Array} [{docNo, token, subject, poNo, stagingFolderId, photoCount}]
  */
-function listInspAwaitingPdf() {
+function listInspAwaitingPdf(inspRows) {
   var out = [];
-  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
-  var sheet = ss.getSheetByName(CONFIG.INSP_SHEET_NAME);
-  if (!sheet || sheet.getLastRow() < 2) return out;
-  var rows = sheet.getDataRange().getValues();
+  var rows = Array.isArray(inspRows) ? inspRows : _readInspRows_(SpreadsheetApp.openById(CONFIG.SHEET_ID));
   for (var i = 1; i < rows.length; i++) {
     var r = rows[i];
     if (String(r[INSP_COL.STATUS] || '') !== '최종승인(INSP)') continue;
