@@ -389,8 +389,6 @@
 var WEBAPP_URL = '<?= webappUrl ?>';
 // 메일 링크 등에서 전달된 기본 선택 메뉴 키 (예: ?action=home&menu=completed)
 var INITIAL_MENU = '<?= initialMenu ?>';
-// 서버(doGet)가 페이지와 함께 실어 보낸 홈 데이터 — 없으면 null. 서버에서 <script>용으로 이스케이프했다(_jsonForInlineScript_).
-var INITIAL_DATA = <?!= (typeof initialData === 'undefined') ? 'null' : initialData ?>;
 var STATE = {
   user: null,
   data: null,
@@ -528,12 +526,7 @@ function boot(){
       STATE.filters[node.key] = isApprChild(menu) ? apprChildSeg(menu) : 'all';
     }
   }
-  // 페이지에 실려 온 데이터가 정상이면 바로 그린다 — 서버 왕복 1회(실행 시작 + 통신)를 아낀다.
-  // 없거나 실패 응답이면 예전처럼 따로 부른다(일시 오류를 한 번 더 시도하는 효과도 있다).
-  var initial = INITIAL_DATA;
-  INITIAL_DATA = null;
-  if(initial && initial.ok) applyHomeData(initial);
-  else loadHome();
+  loadHome();
 }
 
 function loadHome(){
@@ -551,7 +544,17 @@ function loadHome(){
     .withSuccessHandler(function(res){
       STATE.loading = false;
       setRefreshButtonsLoading(false);
-      applyHomeData(res);
+      if(!res || !res.ok){
+        showError('데이터 로드 실패: ' + (res ? res.message : '응답이 비어있습니다.'));
+        return;
+      }
+      STATE.data = res;
+      STATE.user = res.user;
+      // [설정 유지] 같은 응답에 실려 온 설정을 렌더 전에 적용 → 추가 왕복 0, 깜빡임 0
+      applyPrefs(res.prefs);
+      renderUser();
+      renderSidebar();
+      renderContent();
     })
     .withFailureHandler(function(err){
       STATE.loading = false;
@@ -559,21 +562,6 @@ function loadHome(){
       showError('네트워크 오류: ' + (err && err.message ? err.message : err));
     })
     .getHomeDataForClient();
-}
-
-// 홈 응답을 화면에 반영 — 페이지에 실려 온 데이터(boot)와 새로고침(loadHome)이 함께 쓴다.
-function applyHomeData(res){
-  if(!res || !res.ok){
-    showError('데이터 로드 실패: ' + (res ? res.message : '응답이 비어있습니다.'));
-    return;
-  }
-  STATE.data = res;
-  STATE.user = res.user;
-  // [설정 유지] 같은 응답에 실려 온 설정을 렌더 전에 적용 → 추가 왕복 0, 깜빡임 0
-  applyPrefs(res.prefs);
-  renderUser();
-  renderSidebar();
-  renderContent();
 }
 
 // 새로고침/다시시도 버튼들의 로딩 상태를 토글

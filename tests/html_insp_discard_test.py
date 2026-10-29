@@ -75,9 +75,6 @@ window.__calls = []; window.__resp = %s; window.__dialogs = 0;
 
 def build(name, rev, tvars, resp):
     html = source(name, rev)
-    # 홈의 INITIAL_DATA 스크립틀릿(<?!= (typeof initialData === 'undefined') ? 'null' : initialData ?>) — 값이 없으면 'null'
-    #  → 화면이 예전처럼 getHomeDataForClient를 따로 부른다(이 테스트의 응답 스텁 그대로 사용)
-    html = re.sub(r"<\?!=\s*\(typeof (\w+) === 'undefined'\) \? 'null' : \1\s*\?>", lambda m: str(tvars.get(m.group(1), 'null')), html)
     html = re.sub(r'<\?!?=\s*(\w+)\s*\?>', lambda m: str(tvars.get(m.group(1), '')), html)
     return html.replace('<head>', '<head>' + (STUB % json.dumps(resp, ensure_ascii=False)), 1)
 
