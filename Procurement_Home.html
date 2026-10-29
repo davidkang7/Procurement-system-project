@@ -541,12 +541,9 @@ function loadHome(){
     return;
   }
   google.script.run
-    .withSuccessHandler(function(json){
+    .withSuccessHandler(function(res){
       STATE.loading = false;
       setRefreshButtonsLoading(false);
-      // 서버는 JSON 문자열 하나로 보낸다(큰 객체를 그대로 넘기는 변환 비용을 줄이려고 — getHomeDataJsonForClient 주석)
-      var res = null;
-      try { res = (typeof json === 'string') ? JSON.parse(json) : json; } catch(e) { res = null; }
       if(!res || !res.ok){
         showError('데이터 로드 실패: ' + (res ? res.message : '응답이 비어있습니다.'));
         return;
@@ -564,7 +561,7 @@ function loadHome(){
       setRefreshButtonsLoading(false);
       showError('네트워크 오류: ' + (err && err.message ? err.message : err));
     })
-    .getHomeDataJsonForClient();
+    .getHomeDataForClient();
 }
 
 // 새로고침/다시시도 버튼들의 로딩 상태를 토글

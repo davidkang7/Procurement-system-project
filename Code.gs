@@ -3794,20 +3794,14 @@ function _submitPrcCore(data) {
  * (전체 시트 1회 로드 → 메모리에서 필터링)
  */
 function getHomeDataForClient() {
-  // [임시 진단 v3] 실제 웹 호출 안의 단계별 시간 — HOME TIMING.gs. 확인 후 이 줄들과 함께 되돌린다.
-  var __tm = (typeof _homeTiming_ === 'function') ? _homeTiming_() : { mark: function () {}, log: function () {} };
   try {
     var actor = getActiveUserEmail();
-    __tm.mark('사용자 확인');
     var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
-    __tm.mark('openById');
     var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
-    __tm.mark('시트 찾기');
 
     // 행 수 확인(getLastRow)을 따로 하지 않고 바로 읽는다 — 시트 호출은 회당 0.1~0.3초라 한 번이라도 아낀다.
     //   빈 시트의 getDataRange()는 A1 한 칸이므로 rows.length < 2 가 getLastRow() < 2 와 같다.
     var rows = sheet.getDataRange().getValues();
-    __tm.mark('품의서목록 읽기');
     if (rows.length < 2) {
       return {
         ok: true,
@@ -3840,7 +3834,6 @@ function getHomeDataForClient() {
     // - deptMap: 이메일(소문자) → 부서
     // - myDept 가 비어있으면(등록 안 됨/부서 미기재) 부서 공유 없음(=기존 본인 문서만)
     var deptMap = getDeptByEmailMap(ss);
-    __tm.mark('결재자목록 읽기');
     var myDept  = deptMap[String(actor || '').toLowerCase()] || '';
     function sameDeptAsMe(email) {
       if (!myDept) return false;
@@ -3960,7 +3953,6 @@ function getHomeDataForClient() {
       }
     }
 
-    __tm.mark('메인 루프');
     // APPROVED_1ST는 FIFO (오래된 순) 정렬 (Q-13)
     approvedInbox.sort(function(a, b) {
       return (a.submitAt || '').localeCompare(b.submitAt || '');
@@ -3982,12 +3974,10 @@ function getHomeDataForClient() {
     // [INSP] 검수보고서목록은 여기서 한 번만 읽어 결재 완료·검수 메뉴·관리자 배너가 함께 쓴다.
     //   (과거엔 셋이 각자 읽어 관리자 홈 1회에 3번 — 회당 0.4초 안팎, 2026-10-28 진단)
     //   읽기가 실패하면 null → 각 함수가 예전처럼 직접 읽고 스스로 실패 처리한다(홈 로딩은 계속).
-    __tm.mark('정렬');
     var inspRows = null;
     if (typeof _readInspRows_ === 'function') {
       try { inspRows = _readInspRows_(ss); } catch (e) { inspRows = null; }
     }
-    __tm.mark('검수보고서목록 읽기');
 
     // [INSP Step 2] 결재 완료 목록 조립
     // - 가시성: 구매팀은 전체, 일반 사용자는 원본 REQ 기안자 본인 건만 (Q-INSP-05)
@@ -4046,12 +4036,10 @@ function getHomeDataForClient() {
       });
     }
 
-    __tm.mark('결재완료 조립');
     // [INSP Step 5] 내 검수 결재 대기 + 최종 완료(통합)
     var inspMenus = (typeof _getInspMenusForClient === 'function')
       ? _getInspMenusForClient(ss, actor, isProc, isAdmin, isGView, deptMap, inspRows)
       : { myInspPending: [], inspFinals: [], allInspPending: [] };
-    __tm.mark('검수 메뉴');
 
     // 최종 완료 통합: REQ/PRC 최종 + INSP 최종(IS_FINAL) — 단일 리스트, docType으로 구분
     var finalDocs = [];
@@ -4079,15 +4067,8 @@ function getHomeDataForClient() {
       });
     });
     finalDocs.sort(function(a, b) { return (b.submitAt || '').localeCompare(a.submitAt || ''); });
-    __tm.mark('최종완료 조립');
 
-    // [임시 진단 v3] 관리자 배너·설정을 따로 재려고 아래 객체 밖에서 먼저 계산한다(원래도 이 순서로 계산됐다).
-    var __adminTasks = isAdmin ? _collectAdminTasks_(rows, inspRows) : null;
-    __tm.mark('관리자 배너');
-    var __prefs = _readUserPrefs();
-    __tm.mark('설정');
-
-    var __res = {
+    return {
       ok: true,
       user: {
         email: actor,
@@ -4109,25 +4090,14 @@ function getHomeDataForClient() {
       allPending:     isAdmin ? allPending : [],
       allInspPending: isAdmin ? (inspMenus.allInspPending || []) : [],
       // [관리자 처리 대기 배너] 견적서 PDF · 주문서 · 검수보고서 PDF — 시트 상태가 근거(메일을 놓쳐도 홈에 남는다)
-      adminTasks:     __adminTasks,
+      adminTasks:     isAdmin ? _collectAdminTasks_(rows, inspRows) : null,
       // [설정 유지] 마지막 컬럼 필터 설정. 홈은 서버를 원래 1회만 부르므로 여기에 실어
       //   보내면 왕복이 늘지 않고, 화면이 이 응답을 받은 뒤에야 그려지므로 깜빡임도 없다.
-      prefs: __prefs,
+      prefs: _readUserPrefs(),
     };
-    __tm.log(__res);
-    return __res;
   } catch(err) {
     return { ok: false, message: err.toString() + ' / ' + (err.stack || '') };
   }
-}
-
-/**
- * 홈 데이터를 JSON 문자열 하나로 돌려준다(화면은 JSON.parse로 푼다). 내용은 getHomeDataForClient()와 같다.
- * google.script.run은 돌려준 객체를 화면으로 넘길 형태로 바꾸는데, 홈 응답은 약 240KB(목록 행 수백 개)라
- * 그 비용이 크다 — 웹 호출에서 함수 밖 시간이 1.0~2.7초였다(2026-10-29 진단 v3). 문자열 하나는 변환이 거의 없다.
- */
-function getHomeDataJsonForClient() {
-  return JSON.stringify(getHomeDataForClient());
 }
 
 /**
