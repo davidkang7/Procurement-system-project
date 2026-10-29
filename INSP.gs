@@ -926,9 +926,12 @@ function processInspDecisionFromClient(payload) {
         var resubCount = parseInt(r[INSP_COL.RESUB_COUNT]) || 0;
         var entry = '[' + (resubCount + 1) + '차 반려] ' + apprName + ' / ' + toDateTimeStr(now) + ' / ' + (comment || '사유 없음');
         sheet.getRange(rowNum, INSP_COL.REJECT_LOG + 1).setValue(existLog ? existLog + '\n' + entry : entry);
+        // 재상신 링크는 구매문서 토큰 + 검수보고서 토큰이 둘 다 있어야 열린다 (getInspFormDataForClient)
+        //  ※ 2026-10-29 전까지 둘 다 빠져 메일 링크가 'resub=undefined'로 나갔다 — 홈 화면 버튼만 동작했다.
         return { ok: true, decision: 'reject', message: '반려 처리되었습니다.',
           notify: { type: 'reject', toEmail: drafterEmail, drafter: drafterName,
-                    docNo: docNo, subject: subject, approverName: apprName, comment: comment } };
+                    docNo: docNo, subject: subject, approverName: apprName, comment: comment,
+                    token: token, prcToken: String(r[INSP_COL.PRC_TOKEN] || '') } };
       }
 
       // 승인
@@ -962,7 +965,7 @@ function processInspDecisionFromClient(payload) {
   var n = lockResult.notify;
   try {
     if (n.type === 'reject' && n.toEmail) {
-      deferMail_('inspReject', [n.toEmail, n.drafter, n.docNo, n.subject, n.approverName, n.comment, n.token],
+      deferMail_('inspReject', [n.toEmail, n.drafter, n.docNo, n.subject, n.approverName, n.comment, n.token, n.prcToken],
                  { docNo: n.docNo, to: n.toEmail });
     } else if (n.type === 'next' && n.approver.email) {
       deferMail_('inspApproval', [n.approver, { docNo: n.docNo, subject: n.subject, drafter: n.drafter, vendorName: '' }, n.token, n.rowNum, n.idx],
@@ -998,8 +1001,10 @@ function processInspDecisionFromClient(payload) {
 }
 
 /** INSP 반려 알림 메일 */
-function _sendInspRejectEmail(toEmail, drafter, docNo, subject, approverName, comment, token) {
-  var url = CONFIG.WEBAPP_URL + '?action=insp_form&resub=' + encodeURIComponent(token);
+function _sendInspRejectEmail(toEmail, drafter, docNo, subject, approverName, comment, token, prcToken) {
+  // 홈 화면 '재상신/폐기' 버튼과 같은 링크 (Procurement_Home의 data-insp-form/data-insp-resub)
+  var url = CONFIG.WEBAPP_URL + '?action=insp_form&token=' + encodeURIComponent(prcToken || '') +
+            '&resub=' + encodeURIComponent(token || '');
   var subj = '[검수보고서 반려] ' + docNo + ' - ' + subject;
   var html = '<div style="font-family:sans-serif;max-width:600px;">'
     + '<h2 style="color:#d64541;">검수보고서가 반려되었습니다</h2>'

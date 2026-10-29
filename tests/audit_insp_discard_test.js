@@ -527,7 +527,8 @@ function compareFlow(name, scenario, opts) {
   check(name + ' — 메일 동일', () => same(h.state.mails, n.state.mails));
   if (!opts.skipAudit) {
     check(name + ' — 시스템로그: HEAD의 행이 지연 기록 반영 후 그대로 있음', () => {
-      const ha = auditNoId(h.auditRows()), na = auditNoId(n.auditRows());
+      // fixHeadAudit: 이후 의도한 수정이 바꾼 칸을 HEAD 쪽에 반영해 비교 (나머지 칸은 그대로 같아야 한다)
+      const ha = (opts.fixHeadAudit || (x => x))(auditNoId(h.auditRows())), na = auditNoId(n.auditRows());
       const extra = opts.extraEvents || [];
       const naKept = na.filter(r => extra.indexOf(r[AC.EV - 1]) < 0);
       return same(ha, naKept);
@@ -688,7 +689,18 @@ const inspPayload = (who, prcToken) => ({
     return (row && row[AC.ACTOR] === LEE) || row;
   });
 }
-compareFlow('B19b 검수 결재 반려', env => { env.as(LEE); return env.call('processInspDecisionFromClient', { token: 'tok-i3', decision: 'reject', comment: '수량 불일치' }); }, { deferred: ['INSP_REJECT'] });
+{
+  // 2026-10-29 INSP 반려 메일 링크 수정: 반려 결과에 토큰이 실리면서 INSP_REJECT 행의 문서 토큰(그동안 빈칸)도 채워진다
+  const tokCol = AC.TOKEN - 1;
+  const r = compareFlow('B19b 검수 결재 반려', env => { env.as(LEE); return env.call('processInspDecisionFromClient', { token: 'tok-i3', decision: 'reject', comment: '수량 불일치' }); }, {
+    deferred: ['INSP_REJECT'],
+    fixHeadAudit: rows => rows.map(x => (x[AC.EV - 1] === 'INSP_REJECT' && x[tokCol] === '') ? Object.assign(x.slice(), { [tokCol]: 'tok-i3' }) : x),
+  });
+  check('B19b INSP_REJECT 행에 문서 토큰이 남음 (수정 전 빈칸)', () => {
+    const nr = r.n.auditRows().find(x => x[AC.EV] === 'INSP_REJECT'), hr = r.h.auditRows().find(x => x[AC.EV] === 'INSP_REJECT');
+    return (nr && nr[AC.TOKEN] === 'tok-i3' && hr && hr[AC.TOKEN] === '') || [hr && hr[AC.TOKEN], nr && nr[AC.TOKEN]];
+  });
+}
 
 {
   console.log('\n[B21] 잘못된 링크 접근');

@@ -274,8 +274,16 @@ const SCEN = [
   { name: 'PRC 최종승인 → 구매 기안자 + 원 기안자', fn: DECIDE.REQ,  token: 'tok-prc',   decision: 'approve', mails: 2 },
   { name: 'INSP 중간 승인 → 다음 결재자',          fn: DECIDE.INSP, token: 'tok-i-mid', decision: 'approve', mails: 1 },
   { name: 'INSP 최종승인 → 기안자',               fn: DECIDE.INSP, token: 'tok-i-fin', decision: 'approve', mails: 1 },
-  { name: 'INSP 반려 → 기안자 (토큰 undefined 링크 보존)', fn: DECIDE.INSP, token: 'tok-i-rej', decision: 'reject', mails: 1 },
+  { name: 'INSP 반려 → 기안자 (재상신 링크 수정분 반영)', fn: DECIDE.INSP, token: 'tok-i-rej', decision: 'reject', mails: 1 },
 ];
+// INSP 반려 메일 재상신 링크 버그 수정(2026-10-29) — 이전 코드 메일의 깨진 링크를 고친 링크로 바꿔 놓고 비교한다.
+//  그 외 글자는 한 자도 달라지면 안 된다.
+const BROKEN_LINK = '?action=insp_form&resub=undefined';
+const FIXED_LINK  = '?action=insp_form&token=tok-prc&resub=tok-i-rej';
+const fixBase = mails => mails.map(m => Object.assign({}, m, {
+  plain: String(m.plain || '').split(BROKEN_LINK).join(FIXED_LINK),
+  html:  String(m.html || '').split(BROKEN_LINK).join(FIXED_LINK),
+}));
 function decide(env, s) {
   return env.as(LEE).call(s.fn, { token: s.token, decision: s.decision, comment: '확인 <b>완료</b>\n둘째 줄' });
 }
@@ -296,8 +304,42 @@ for (const s of SCEN) {
   CLOCK.now += 15 * SEC;
   const r = n.flush();
   check('E ' + s.name + ' — 트리거 발송 = 이전 코드 즉시 발송 (수신자·제목·본문·HTML·발신·순서)', () =>
-    (r.sent === s.mails && n.mailKeys().length === 0 && same(b.state.mails, n.state.mails) === true) || same(b.state.mails, n.state.mails));
+    (r.sent === s.mails && n.mailKeys().length === 0 && same(fixBase(b.state.mails), n.state.mails) === true) || same(fixBase(b.state.mails), n.state.mails));
   check('E ' + s.name + ' — 관리자 알림 없음', () => (n.state.adminErrors.length === 0 && b.state.adminErrors.length === 0) || [b.state.adminErrors, n.state.adminErrors]);
+}
+
+// =================================================================
+console.log('\n[R] INSP 반려 메일 재상신 링크 — 버그 수정 (2026-10-29)');
+// =================================================================
+{
+  const b = seed(makeEnv('BASE', readBASE)), n = seed(makeEnv('NEW', readWT));
+  n.hb();
+  decide(b, SCEN[6]); decide(n, SCEN[6]);
+  CLOCK.now += 15 * SEC; n.flush();
+  const bm = b.state.mails[0], nm = n.state.mails[0];
+  check('R1 [수정 전] 이전 코드 메일은 resub=undefined (토큰 둘 다 없음)', () =>
+    (bm.plain.indexOf(BROKEN_LINK) >= 0 && bm.html.indexOf(BROKEN_LINK) >= 0) || bm.plain);
+  check('R2 [수정 후] 텍스트·HTML 모두 구매문서 토큰 + 검수보고서 토큰 링크, undefined 없음', () =>
+    (nm.plain.indexOf(FIXED_LINK) >= 0 && nm.html.indexOf(FIXED_LINK) >= 0 && nm.plain.indexOf('undefined') < 0 && nm.html.indexOf('undefined') < 0) || nm.plain);
+  // 링크를 실제 작성 화면 서버 함수에 넣어 끝까지 열리는지 (반려된 검수보고서 · 구매문서 최종승인 상태)
+  function openForm(env, url) {
+    const q = new URL(url.replace(/^[^?]*/, 'https://x/'));
+    const C = env.sb.COL;
+    env.main().rows.find(r => r[C.TOKEN] === 'tok-prc')[C.STATUS] = '최종승인(PRC)';
+    vm.runInContext('getCurrentUserForClient = function () { return { ok: true, user: { email: "' + KIM + '", name: "김기안", dept: "개발팀" } }; };' +
+                    'getApproverListForClient = function () { return { ok: true, approvers: [] }; };', env.sb);
+    // 화면이 템플릿으로 넘기는 값 = doGet의 e.parameter.token / e.parameter.resub
+    return env.as(KIM).call('getInspFormDataForClient', q.searchParams.get('token') || '', q.searchParams.get('resub') || '');
+  }
+  const linkOf = m => (m.plain.match(/재상신: (\S+)/) || [])[1] || '';
+  check('R3 [수정 전] 이전 메일 링크로는 작성 화면이 안 열림 (구매 문서 토큰 필요)', () => {
+    const r = openForm(b, linkOf(bm));
+    return (r.ok === false && r.message.indexOf('구매 문서 토큰이 필요') >= 0) || r;
+  });
+  check('R4 [수정 후] 새 메일 링크로 재상신 화면이 열리고 반려 건이 채워짐', () => {
+    const r = openForm(n, linkOf(nm));
+    return (r.ok === true && r.resub && r.resub.token === 'tok-i-rej' && r.form.prcToken === 'tok-prc') || r;
+  });
 }
 
 // =================================================================
@@ -310,8 +352,8 @@ for (const mode of ['하트비트 없음', '하트비트 11분 전', '스위치 
     if (mode.indexOf('스위치') === 0) { n.hb(); n.state.props.set('MAIL_DEFER_OFF', '1'); }
     const rb = decide(b, s), rn = decide(n, s);
     check('I ' + mode + ' / ' + s.name, () =>
-      (same(rb, rn) === true && same(sheets(b), sheets(n)) === true && same(b.state.mails, n.state.mails) === true && n.mailKeys().length === 0) ||
-      [same(rb, rn), same(b.state.mails, n.state.mails), n.mailKeys()]);
+      (same(rb, rn) === true && same(sheets(b), sheets(n)) === true && same(fixBase(b.state.mails), n.state.mails) === true && n.mailKeys().length === 0) ||
+      [same(rb, rn), same(fixBase(b.state.mails), n.state.mails), n.mailKeys()]);
   }
 }
 {
@@ -503,6 +545,17 @@ check('D24 processQueueTrigger — 메일을 PDF job보다 먼저 보내고 하�
   n.as(ADMIN).call('processQueueTrigger');
   return (same(n.state.order, ['mail', 'mail', 'mail', 'pdf_job']) === true && n.state.props.get('MAIL_FLUSH_HEARTBEAT') === String(CLOCK.now)) ||
          [n.state.order, n.state.props.get('MAIL_FLUSH_HEARTBEAT')];
+});
+check('D26 인자에 undefined가 있어도 즉시 발송과 같은 메일 (JSON에서 null로 바뀌지 않음)', () => {
+  // 반려 메일 링크는 '...&token=' + token 이라 undefined/null이 글자로 갈린다
+  const args = [KIM, '김기안', 'TH-AP-26-926', '제목', '이결재', '사유', undefined];
+  const im = fresh(); im.state.props.set('MAIL_DEFER_OFF', '1');
+  im.call('deferMail_', 'rejection', args, { docNo: 'TH-AP-26-926' });
+  const df = fresh();
+  df.call('deferMail_', 'rejection', args, { docNo: 'TH-AP-26-926' });
+  CLOCK.now += 15 * SEC; df.flush();
+  return (im.state.mails.length === 1 && im.state.mails[0].plain.indexOf('token=undefined') >= 0 && same(im.state.mails, df.state.mails) === true) ||
+         same(im.state.mails, df.state.mails);
 });
 check('D25 mailBufferStatus — 관리자 점검 함수가 상태를 돌려줌', () => {
   const n = fresh();
