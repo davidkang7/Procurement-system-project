@@ -876,6 +876,7 @@ function getInspDecisionMetaForClient(token) {
  *   ※ PDF 변환·FINAL 이동·사진 삭제는 Step 6에서 insp_pdf 큐로 처리
  */
 function processInspDecisionFromClient(payload) {
+  var t0 = Date.now();
   var lockResult = withLock(function () {
     try {
       var actor    = (getActiveUserEmail() || '').toLowerCase();
@@ -954,17 +955,21 @@ function processInspDecisionFromClient(payload) {
     }
   });
 
+  var lockMs = Date.now() - t0;
   if (!lockResult.ok || !lockResult.notify) return lockResult;
 
-  // 락 밖: 메일 + 감사 로그
+  // 락 밖: 메일(지연 발송 보관함 — Code.gs 14-1, 넣을 수 없으면 즉시 발송) + 감사 로그
   var n = lockResult.notify;
   try {
     if (n.type === 'reject' && n.toEmail) {
-      _sendInspRejectEmail(n.toEmail, n.drafter, n.docNo, n.subject, n.approverName, n.comment, n.token);
+      deferMail_('inspReject', [n.toEmail, n.drafter, n.docNo, n.subject, n.approverName, n.comment, n.token],
+                 { docNo: n.docNo, to: n.toEmail });
     } else if (n.type === 'next' && n.approver.email) {
-      _sendInspApprovalEmail(n.approver, { docNo: n.docNo, subject: n.subject, drafter: n.drafter, vendorName: '' }, n.token, n.rowNum, n.idx);
+      deferMail_('inspApproval', [n.approver, { docNo: n.docNo, subject: n.subject, drafter: n.drafter, vendorName: '' }, n.token, n.rowNum, n.idx],
+                 { docNo: n.docNo, to: n.approver.email });
     } else if (n.type === 'completion' && n.toEmail) {
-      _sendInspCompletionEmail(n.toEmail, n.drafter, n.docNo, n.subject, n.token, n.isFinal);
+      deferMail_('inspCompletion', [n.toEmail, n.drafter, n.docNo, n.subject, n.token, n.isFinal],
+                 { docNo: n.docNo, to: n.toEmail });
     }
   } catch (e) {
     try { notifyAdminError('[INSP] 결재 후 메일 실패: ' + n.docNo + ' / ' + e.toString()); } catch (_) {}
@@ -988,6 +993,7 @@ function processInspDecisionFromClient(payload) {
       try { notifyAdminError('[INSP] PDF 핸드오프(매니페스트/메일) 실패: ' + n.docNo + ' / ' + e.toString()); } catch (_) {}
     }
   }
+  _logDecisionTiming_('INSP ' + n.type, t0, lockMs);
   return { ok: true, message: lockResult.message, finalized: !!lockResult.finalized };
 }
 

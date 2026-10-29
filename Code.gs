@@ -1549,6 +1549,7 @@ function _denyResubmitOrDiscard_(message, eventType, info) {
 function _decisionCore_(payload) {
   payload = payload || {};
   var actor = getRequestUserEmail_();   // 인가 전용 — 폴백 없음
+  var t0 = Date.now();
 
   // 락 안: 인가 검증 + 시트 업데이트만 빠르게 (메일·감사로그는 락 밖)
   var lockResult = withLock(function() {
@@ -1653,6 +1654,7 @@ function _decisionCore_(payload) {
       return { ok: false, message: err.toString() };
     }
   });
+  var lockMs = Date.now() - t0;
 
   // ── 락 밖 ①: 비인가 시도 감사로그 (§8.7) ──
   if (lockResult && lockResult.audit) {
@@ -1688,17 +1690,21 @@ function _decisionCore_(payload) {
     } catch(_) {}
   }
 
-  // 락 밖 ③: 이메일 발송 (재시도)
+  // 락 밖 ③: 이메일 — 지연 발송 보관함에 넣는다(14-1). 넣을 수 없으면 그 자리에서 즉시 발송(재시도).
   var n = lockResult.notify;
+  var timingLabel = ((lockResult.auditInfo && lockResult.auditInfo.docType) || n.docType || '') + ' ' + n.type;
   try {
     if (n.type === 'reject' && n.toEmail) {
-      sendRejectionNoticeWithRetry(n.toEmail, n.drafter, n.docNo, n.subject, n.approverName, n.comment, n.token);
+      deferMail_('rejection', [n.toEmail, n.drafter, n.docNo, n.subject, n.approverName, n.comment, n.token],
+                 { docNo: n.docNo, to: n.toEmail });
     } else if (n.type === 'next_approval') {
-      sendApprovalEmailWithRetry(n.approver, n.data, n.token, n.rowNum, n.idx);
+      deferMail_('approval', [n.approver, n.data, n.token, n.rowNum, n.idx],
+                 { docNo: n.docNo, to: n.approver && n.approver.email });
     } else if (n.type === 'completion') {
       // 완료 알림 메일은 수신자 이메일이 있을 때만 발송 (없어도 PDF 생성·큐에는 영향 없음)
       if (n.toEmail) {
-        sendCompletionNoticeWithRetry(n.toEmail, n.drafter, n.docNo, n.subject, n.issueDate, n.token, n.extra);
+        deferMail_('completion', [n.toEmail, n.drafter, n.docNo, n.subject, n.issueDate, n.token, n.extra],
+                   { docNo: n.docNo, to: n.toEmail });
       } else {
         // 수신자 누락은 조용히 넘기지 않고 관리자에게 알림 — PDF 생성은 계속 진행
         notifyAdminError('완료 알림 수신자 이메일 누락: ' + n.docNo + ' (' + n.docType + ') — 메일은 건너뛰고 PDF 생성은 진행');
@@ -1719,7 +1725,8 @@ function _decisionCore_(payload) {
         if (n.reqDrafterEmail) {
           try {
             // extra는 PRC 행 기준 — 구매팀이 최종 확정한 업체명·품목·금액을 안내한다.
-            sendInspReadyNoticeWithRetry(n.reqDrafterEmail, n.reqDrafter, n.reqDocNo, n.subject, n.docNo, n.extra);
+            deferMail_('inspReady', [n.reqDrafterEmail, n.reqDrafter, n.reqDocNo, n.subject, n.docNo, n.extra],
+                       { docNo: n.docNo, to: n.reqDrafterEmail });
           } catch(e) {
             notifyAdminError('검수보고서 안내 메일 실패: ' + n.docNo + ' / ' + e.toString());
           }
@@ -1747,12 +1754,14 @@ function _decisionCore_(payload) {
     }
   } catch(e) {
     notifyAdminError('이메일 발송 실패: ' + n.docNo + ' / ' + e.toString());
+    _logDecisionTiming_(timingLabel, t0, lockMs);
     return Object.assign({}, lockResult, {
       warning: true,
       message: lockResult.message + ' (이메일 발송 실패 — 관리자 알림 전송)',
     });
   }
 
+  _logDecisionTiming_(timingLabel, t0, lockMs);
   return { ok: lockResult.ok, message: lockResult.message };
 }
 
@@ -4946,6 +4955,7 @@ function sendInspReadyNoticeWithRetry(toEmail, reqDrafter, reqDocNo, subject, po
 
 /**
  * REQ 1차 승인 완료 → 구매팀 전체 알림 (FR-50, REQ-07)
+ *  수신자 1명 = 지연 발송 항목 1개 (14-1). 발송이 중간에 끊겨도 어느 수신자까지 갔는지 갈린다.
  */
 function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken) {
   var emails = CONFIG.PROCUREMENT_NOTIFY_EMAILS || [];
@@ -4954,6 +4964,17 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
     return;
   }
 
+  emails.forEach(function(email) {
+    try {
+      deferMail_('procTeam', [email, docNo, subject, drafter, parentToken], { docNo: docNo, to: email });
+    } catch(e) {
+      Logger.log('[notifyProcurementTeam] ' + email + ' 발송 실패: ' + e);
+    }
+  });
+}
+
+/** 구매팀 알림 1통 — notifyProcurementTeamOfApproved1st가 지연 발송 항목으로 넘긴다 */
+function _sendProcurementTeamNotice_(email, docNo, subject, drafter, parentToken) {
   var docNoEsc   = escapeHtml(docNo);
   var subjectEsc = escapeHtml(subject);
   var drafterEsc = escapeHtml(drafter);
@@ -4998,13 +5019,298 @@ function notifyProcurementTeamOfApproved1st(docNo, subject, drafter, parentToken
     '— ' + CONFIG.FROM_NAME,
   ].join('\n');
 
-  emails.forEach(function(email) {
-    try {
-      sendEmailWithRetry(email, emailSubject, plainBody, htmlBody);
-    } catch(e) {
-      Logger.log('[notifyProcurementTeam] ' + email + ' 발송 실패: ' + e);
+  return sendEmailWithRetry(email, emailSubject, plainBody, htmlBody);
+}
+
+
+// ================================================================
+// 14-1. 결재 알림 메일 지연 발송 — 결재자가 기다리는 시간에서 메일 발송을 뺀다
+// ================================================================
+//  결재 응답 안에서 메일 1통은 1.1~2.6초 (2026-10-29 실측). 결재 직후에는 보관함(스크립트 속성)에
+//  넣기만 하고(0.1초), processQueueTrigger가 매분 맨 앞에서 보낸다. 메일은 최대 약 1분 늦는다.
+//  구조는 시스템로그 지연 기록(3-1)과 같다 — 하트비트가 끊기면 쓰는 쪽이 즉시 발송으로 돌아간다.
+//
+//  ⚠ 같은 메일이 두 번 가면 안 된다 (2026-10-29 결정). 그래서
+//   - 트리거는 '발송 중(시각)'으로 바꾼 뒤 보내고, 보낸 뒤 지운다. 오래된 '발송 중'은 갔는지 알 수 없으므로
+//     다시 보내지 않고 관리자에게 확인을 요청한다(중복 대신 알림).
+//   - 발송이 재시도까지 실패해도 다시 넣지 않는다 — 서버는 보냈는데 오류로 응답했을 수 있다(즉시 발송 때와 같은 처리).
+//   - 만든 지 MAIL_BUF_MIN_AGE_MS가 안 된 항목은 트리거가 건드리지 않는다 — 그동안은 쓴 쪽이
+//     저장 실패 처리(지우고 즉시 발송)를 트리거와 겹치지 않고 끝낼 수 있다.
+//  ※ 수신자 1명 = 항목 1개. 메일 내용은 결재 시점 값을 그대로 담는다(보낼 때 시트를 다시 읽지 않는다).
+//  ※ 되돌리기: 스크립트 속성 MAIL_DEFER_OFF = 1 → 배포 없이 즉시 발송. 이미 보관된 항목은 트리거가 마저 보낸다.
+
+var MAIL_BUF_PREFIX       = 'MAIL_BUF_';             // 항목 키: 접두사 + 13자리 ms + '_' + 실행 내 순번 + '_' + id
+var MAIL_FLUSH_HEARTBEAT  = 'MAIL_FLUSH_HEARTBEAT';  // 마지막 발송 처리 시각(ms) — ⚠ MAIL_BUF_ 접두사와 겹치면 안 된다
+var MAIL_DEFER_OFF        = 'MAIL_DEFER_OFF';        // '1'이면 지연 발송 끔 (되돌리기 · 실측 A/B 비교)
+var MAIL_BUF_STALE_MS     = 10 * 60 * 1000;          // 하트비트가 이보다 오래되면 즉시 발송으로 전환
+var MAIL_BUF_MIN_AGE_MS   = 10 * 1000;               // 이보다 어린 항목은 트리거가 건드리지 않는다 (위 ⚠ 셋째)
+var MAIL_SENDING_STALE_MS = 7 * 60 * 1000;           // 실행 한도 6분 + 여유 — 이보다 오래된 '발송 중'은 끊긴 실행이 남긴 것
+var MAIL_BUF_MAX_BYTES    = 8000;                    // 스크립트 속성 값 한도 9KB
+var MAIL_FLUSH_MAX_ITEMS  = 30;                      // 1회 발송 최대 건수 (남으면 다음 트리거)
+var MAIL_FLUSH_BUDGET_MS  = 90 * 1000;               // 1회 발송 시간 한도 (큐 처리 시간 한도 안에서 소비)
+var MAIL_BUF_ALERT_AGE_MS = 15 * 60 * 1000;          // 이보다 오래 대기 중인 항목이 있으면 관리자 알림 (1시간 1회)
+
+var _mailBufSeq_   = 0;                              // 실행 내 순번 — 같은 ms에 넣은 메일도 넣은 순서대로 나간다
+var _mailDeferLog_ = { deferred: 0, sent: 0 };       // 이 실행에서 지연/즉시 처리한 메일 수 (결재 소요 로그용)
+
+/** 항목 종류 → 실제 발송 함수. 호출 시점에 찾는다(INSP.gs 함수는 파일 로드 순서상 최상위에서 아직 없을 수 있다) */
+function _mailKindSender_(kind) {
+  switch (kind) {
+    case 'approval':       return sendApprovalEmailWithRetry;
+    case 'rejection':      return sendRejectionNoticeWithRetry;
+    case 'completion':     return sendCompletionNoticeWithRetry;
+    case 'procTeam':       return _sendProcurementTeamNotice_;
+    case 'inspReady':      return sendInspReadyNoticeWithRetry;
+    case 'inspApproval':   return _sendInspApprovalEmail;
+    case 'inspReject':     return _sendInspRejectEmail;
+    case 'inspCompletion': return _sendInspCompletionEmail;
+  }
+  return null;
+}
+
+/**
+ * 결재 알림 메일 1통을 지연 발송 보관함에 넣는다. 넣을 수 없으면 지금처럼 즉시 보낸다.
+ * @param {string} kind  _mailKindSender_의 종류
+ * @param {Array}  args  발송 함수 인자 그대로 (JSON으로 저장 — 날짜 객체가 있으면 즉시 발송)
+ * @param {Object} meta  { docNo, to } — 알림·점검 표시용
+ * @returns {string} 'deferred' | 'sent' | 'unknown'(저장 여부 불명 — 보내지 않고 관리자 알림)
+ *  즉시 발송이 실패하면 지금처럼 throw — 호출자의 기존 처리(관리자 알림·경고)가 그대로 받는다.
+ */
+function deferMail_(kind, args, meta) {
+  meta = meta || {};
+  var send = _mailKindSender_(kind);
+  if (!send) throw new Error('알 수 없는 메일 종류: ' + kind);
+
+  var props = null, key = '', createdAt = 0;
+  try {
+    props = PropertiesService.getScriptProperties();
+    if (props.getProperty(MAIL_DEFER_OFF) !== '1') {
+      var hb = Number(props.getProperty(MAIL_FLUSH_HEARTBEAT) || 0);
+      if (hb > 0 && (Date.now() - hb) < MAIL_BUF_STALE_MS) {
+        if (_mailArgsJsonSafe_(args, 0)) {
+          createdAt = Date.now();
+          var json = JSON.stringify({
+            k: kind,
+            a: args.map(function(v) { return v === undefined ? { $u: 1 } : v; }),   // 배열 속 undefined는 JSON에서 null로 바뀐다
+            d: String(meta.docNo || ''),
+            r: String(meta.to || ''),
+            s: 'pending',
+            c: createdAt,
+          });
+          if (_mailUtf8Bytes_(json) <= MAIL_BUF_MAX_BYTES) {
+            key = MAIL_BUF_PREFIX + _auditBufStamp_(createdAt) + '_' + ('00' + (++_mailBufSeq_)).slice(-3) + '_' +
+                  Utilities.getUuid().slice(0, 8);
+            props.setProperty(key, json);
+            _mailDeferLog_.deferred++;
+            return 'deferred';
+          }
+        }
+      } else if (hb > 0) {
+        _mailBufStaleAlert_(props, hb);
+      }
     }
+  } catch (err) {
+    if (key) {
+      var r = _mailBufRecover_(props, key, createdAt);
+      if (r === 'deferred') {
+        _mailDeferLog_.deferred++;
+        return 'deferred';
+      }
+      if (r === 'unknown') {
+        try { notifyAdminError('[메일] 보관 상태 불명 — ' + _mailDesc_(kind, meta) + ' / 두 번 갈 수 있어 즉시 발송하지 않음. ' +
+                               '수신 여부 확인 필요 / ' + err); } catch (_) {}
+        return 'unknown';
+      }
+    }
+    console.warn('[메일] 지연 발송 보관 실패 → 즉시 발송: ' + err);
+  }
+  send.apply(null, args);
+  _mailDeferLog_.sent++;
+  return 'sent';
+}
+
+/**
+ * 저장이 '실패'로 보고된 항목 정리 — 실제로는 들어갔을 수 있어서, 트리거와 겹쳐 두 번 보내지 않도록 가른다.
+ *  트리거는 MIN_AGE가 지나고, 지금 값을 다시 읽어 남아 있을 때만 집는다(flushMailBuffer_). 그래서
+ *  - MIN_AGE 안에 지운 것이 확인되면 트리거는 집을 수 없었다      → 'send'     (즉시 발송)
+ *  - 항목이 남아 있으면 트리거가 한 번 보낸다                     → 'deferred'
+ *  - 그 밖(확인 불가, MIN_AGE가 지난 뒤 사라짐 = 트리거가 보냈을 수도) → 'unknown'
+ */
+function _mailBufRecover_(props, key, createdAt) {
+  try {
+    if (Date.now() - createdAt < MAIL_BUF_MIN_AGE_MS) {
+      try { props.deleteProperty(key); } catch (_) {}
+      if (props.getProperty(key) !== null) return 'deferred';
+      return (Date.now() - createdAt < MAIL_BUF_MIN_AGE_MS) ? 'send' : 'unknown';
+    }
+    return (props.getProperty(key) !== null) ? 'deferred' : 'unknown';
+  } catch (_) {
+    return 'unknown';
+  }
+}
+
+/** JSON 왕복으로 값이 바뀌지 않는가 — 날짜·함수는 문자열·누락으로 바뀌므로 즉시 발송 쪽으로 보낸다 */
+function _mailArgsJsonSafe_(v, depth) {
+  if (v === null || v === undefined) return true;
+  var t = typeof v;
+  if (t === 'string' || t === 'boolean') return true;
+  if (t === 'number') return isFinite(v);
+  if (t !== 'object' || v instanceof Date || depth > 4) return false;
+  var isArr = Array.isArray(v);
+  for (var k in v) {
+    if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+    if (isArr && depth > 0 && v[k] === undefined) return false;   // 안쪽 배열의 undefined는 null로 바뀐다 (맨 바깥 인자 배열은 deferMail_이 따로 담는다)
+    if (!_mailArgsJsonSafe_(v[k], depth + 1)) return false;
+  }
+  return true;
+}
+
+function _mailUtf8Bytes_(s) {
+  return unescape(encodeURIComponent(s)).length;
+}
+
+function _mailBufKeys_(keys) {
+  return (keys || []).filter(function(k) { return String(k).indexOf(MAIL_BUF_PREFIX) === 0; });
+}
+
+function _mailDesc_(kind, meta) {
+  return kind + ' / 문서 ' + (meta.docNo || meta.d || '-') + ' / 수신 ' + (meta.to || meta.r || '-');
+}
+
+/** 저장된 항목 → { item, args } . 복원할 수 없으면 null */
+function _mailBufParse_(raw) {
+  var item = null;
+  try { item = JSON.parse(raw); } catch (_) { return null; }
+  if (!item || typeof item !== 'object' || !Array.isArray(item.a) || !_mailKindSender_(item.k)) return null;
+  var args = item.a.map(function(v) {
+    return (v && typeof v === 'object' && v.$u === 1 && Object.keys(v).length === 1) ? undefined : v;
   });
+  return { item: item, args: args };
+}
+
+/**
+ * 지연 발송 보관함 → 메일 발송. processQueueTrigger가 매분 맨 먼저 호출한다.
+ *  - 보관함이 비어 있으면 하트비트만 갱신하고 끝 (락 없음)
+ *  - 항목이 있으면 사용자 락을 '기다리지 않고' 시도 → 이미 다른 실행이 발송 중이면 건너뜀
+ *  - 스크립트 속성 쓰기가 실패하면 throw — 하트비트를 갱신하지 않으므로 10분 뒤 쓰는 쪽이 즉시 발송으로 전환된다
+ * @returns {Object} { sent, failed, uncertain, remaining, skipped? }
+ */
+function flushMailBuffer_() {
+  var props = PropertiesService.getScriptProperties();
+  var keys = _mailBufKeys_(props.getKeys());
+  if (!keys.length) {
+    props.setProperty(MAIL_FLUSH_HEARTBEAT, String(Date.now()));
+    return { sent: 0, failed: 0, uncertain: 0, remaining: 0 };
+  }
+
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(0)) return { sent: 0, failed: 0, uncertain: 0, remaining: keys.length, skipped: 'busy' };
+  try {
+    var all = props.getProperties();
+    keys = _mailBufKeys_(Object.keys(all)).sort();   // 키에 13자리 ms + 순번 → 사전순 = 넣은 순서
+    var started = Date.now();
+    var sent = 0, failed = 0, uncertain = 0, oldestWaiting = 0;
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      var p = _mailBufParse_(all[key]);
+      if (!p) {
+        // 보낼 수 없다 — 원문을 담아 알리고 지운다 (매분 같은 알림이 반복되지 않도록)
+        notifyAdminError('[메일] 지연 발송 항목 복원 실패 — 수동 확인 필요: ' + key + ' / ' + String(all[key]).slice(0, 1000));
+        props.deleteProperty(key);
+        failed++;
+        continue;
+      }
+      var item = p.item, now = Date.now();
+      if (item.s === 'sending') {
+        if (now - Number(item.t || 0) < MAIL_SENDING_STALE_MS) continue;
+        // 발송 도중 끊긴 실행이 남긴 항목 — 갔는지 알 수 없다. 다시 보내면 중복이 될 수 있어 보내지 않고 알린다.
+        notifyAdminError('[메일] 발송 여부 확인 필요 — ' + _mailDesc_(item.k, item) +
+                         ' / 발송 도중 실행이 끊겼습니다. 보낸편지함에서 확인 후 필요하면 다시 보내 주세요.');
+        props.deleteProperty(key);
+        uncertain++;
+        continue;
+      }
+      if (now - Number(item.c || 0) < MAIL_BUF_MIN_AGE_MS) continue;   // 쓴 쪽이 아직 처리 중일 수 있다
+      if (sent + failed >= MAIL_FLUSH_MAX_ITEMS || now - started > MAIL_FLUSH_BUDGET_MS) {
+        if (!oldestWaiting) oldestWaiting = Number(item.c || 0);
+        continue;
+      }
+      // 처음에 읽은 목록은 낡았을 수 있다 — 쓴 쪽이 저장 실패로 지운 항목을 되살리지 않도록 지금 값을 다시 본다
+      if (props.getProperty(key) !== all[key]) continue;
+
+      item.s = 'sending';
+      item.t = Date.now();
+      props.setProperty(key, JSON.stringify(item));   // 실패하면 throw — 아직 안 보냈으니 다음 트리거가 다시 집는다
+      try {
+        _mailKindSender_(item.k).apply(null, p.args);
+        sent++;
+      } catch (e) {
+        failed++;
+        notifyAdminError('[메일] 지연 발송 실패 — ' + _mailDesc_(item.k, item) + ' / ' + e);
+      }
+      props.deleteProperty(key);   // 실패하면 throw — '발송 중'으로 남아 7분 뒤 '확인 필요' 알림 (재발송 없음)
+    }
+    props.setProperty(MAIL_FLUSH_HEARTBEAT, String(Date.now()));
+    if (oldestWaiting && (Date.now() - oldestWaiting) > MAIL_BUF_ALERT_AGE_MS) {
+      _mailBufAlertOnce_('지연 발송 메일이 15분 넘게 밀려 있습니다. 실행 기록에서 processQueueTrigger를 확인하세요.');
+    }
+    return { sent: sent, failed: failed, uncertain: uncertain, remaining: _mailBufKeys_(props.getKeys()).length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** 하트비트가 끊긴 상태에서 보관함에 메일이 남아 있으면 알림 — 트리거가 멈추면 남은 메일은 그대로 묶인다 */
+function _mailBufStaleAlert_(props, hb) {
+  try {
+    var left = _mailBufKeys_(props.getKeys()).length;
+    if (left) {
+      _mailBufAlertOnce_('지연 발송 메일 ' + left + '건이 대기 중인데 발송 트리거가 ' + Math.round((Date.now() - hb) / 60000) +
+                         '분째 돌지 않습니다. 새 메일은 즉시 발송으로 전환됨. processQueueTrigger 트리거를 확인하세요.');
+    }
+  } catch (_) {}
+}
+
+/** 지연 발송 장애 알림 — 1시간에 1회만 (매분 도는 트리거가 메일 폭풍을 만들지 않도록) */
+function _mailBufAlertOnce_(message) {
+  try {
+    var cache = CacheService.getScriptCache();
+    if (cache.get('MAIL_BUF_ALERTED')) return;
+    cache.put('MAIL_BUF_ALERTED', '1', 3600);
+  } catch (_) {}
+  try { notifyAdminError('[메일] ' + message); } catch (_) {}
+}
+
+/**
+ * [점검용] 지연 발송 상태 — 편집기에서 실행. 배포 직후 보관함이 매분 비워지는지 확인할 때 쓴다.
+ *  하트비트가 1~2분 이내로 갱신되고 대기 0 근처면 정상.
+ */
+function mailBufferStatus() {
+  assertAdminWithLog('mail_buffer_status', {});
+  var props = PropertiesService.getScriptProperties();
+  var all = props.getProperties();
+  var keys = _mailBufKeys_(Object.keys(all)).sort();
+  var hb = Number(all[MAIL_FLUSH_HEARTBEAT] || 0);
+  var off = all[MAIL_DEFER_OFF] === '1';
+  var sending = keys.filter(function(k) { var p = _mailBufParse_(all[k]); return p && p.item.s === 'sending'; }).length;
+  var out = {
+    pending: keys.length - sending,
+    sending: sending,
+    oldestKey: keys[0] || '',
+    heartbeatAgeSec: hb ? Math.round((Date.now() - hb) / 1000) : null,
+    mode: off ? '즉시 발송(MAIL_DEFER_OFF 스위치)'
+        : (hb && (Date.now() - hb) < MAIL_BUF_STALE_MS) ? '지연 발송' : '즉시 발송(하트비트 없음/오래됨)',
+  };
+  console.log(JSON.stringify(out, null, 2));
+  return out;
+}
+
+/** [결재 소요] 실측용 로그 1줄 — 실행 기록에서 '[결재소요]'로 찾아 지연/즉시 발송을 비교한다 */
+function _logDecisionTiming_(label, t0, lockMs) {
+  try {
+    console.log('[결재소요] ' + label + ' / 전체 ' + (Date.now() - t0) + 'ms / 락 구간 ' + lockMs + 'ms / 메일 지연 ' +
+                _mailDeferLog_.deferred + '통·즉시 ' + _mailDeferLog_.sent + '통');
+  } catch (_) {}
 }
 
 
@@ -6614,6 +6920,19 @@ function processQueueTrigger() {
   var startTime = Date.now();
   var processedCount = 0;
   var skippedReason = '';
+
+  // [메일] 결재 알림 지연 발송 (14-1) — 사람이 기다리는 메일이라 맨 먼저. PDF job 뒤에 줄 세우지 않는다.
+  //  실패해도 아래 처리는 그대로 진행한다. 비어 있으면 하트비트만 갱신하고 끝난다(락 없음).
+  try {
+    var mailFlush = flushMailBuffer_();
+    if (mailFlush && (mailFlush.sent || mailFlush.failed || mailFlush.uncertain)) {
+      Logger.log('[메일] 지연 발송 ' + mailFlush.sent + '통 / 실패 ' + mailFlush.failed + ' / 확인 필요 ' +
+                 mailFlush.uncertain + ' / 남음 ' + mailFlush.remaining);
+    }
+  } catch (e) {
+    console.error('[메일] 지연 발송 처리 실패: ' + e.toString());
+    _mailBufAlertOnce_('지연 발송 처리 실패 — 10분 이상 계속되면 새 메일은 자동으로 즉시 발송됩니다. 오류: ' + e.toString());
+  }
 
   // [시스템로그] 지연 기록 반영 (§3-1-1) — 큐 처리와 독립. 실패해도 아래 큐 처리는 그대로 진행한다.
   //  전역 락을 쓰지 않으며, 버퍼가 비어 있으면 하트비트만 갱신하고 끝난다.
