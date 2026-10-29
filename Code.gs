@@ -289,6 +289,8 @@ function doGet(e) {
   // 홈 데이터를 페이지에 실어 보낸다 — 화면이 뜬 뒤 따로 부르면 Apps Script 실행 시작(1~1.5초)과
   //  통신(약 0.6초)을 한 번 더 낸다(2026-10-29 진단). 못 만들면 'null' → 화면이 예전처럼 따로 부른다.
   var initialData = 'null';
+  // [임시 — 첫 화면 시간 비교용] ?noinit=1 이면 예전 방식(화면이 따로 호출). 측정 후 이 줄과 함께 되돌린다.
+  if (e.parameter.noinit !== '1')
   try { initialData = _jsonForInlineScript_(getHomeDataForClient()); } catch (_) { initialData = 'null'; }
   return _renderTemplate('Procurement_Home', {
     webappUrl:   CONFIG.WEBAPP_URL,
