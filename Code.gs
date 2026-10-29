@@ -4122,6 +4122,15 @@ function getHomeDataForClient() {
 }
 
 /**
+ * 홈 데이터를 JSON 문자열 하나로 돌려준다(화면은 JSON.parse로 푼다). 내용은 getHomeDataForClient()와 같다.
+ * google.script.run은 돌려준 객체를 화면으로 넘길 형태로 바꾸는데, 홈 응답은 약 240KB(목록 행 수백 개)라
+ * 그 비용이 크다 — 웹 호출에서 함수 밖 시간이 1.0~2.7초였다(2026-10-29 진단 v3). 문자열 하나는 변환이 거의 없다.
+ */
+function getHomeDataJsonForClient() {
+  return JSON.stringify(getHomeDataForClient());
+}
+
+/**
  * 관리자 홈 배너용 처리 대기 목록. 각 소스는 독립적으로 실패해도 홈 로딩을 막지 않는다.
  * @param rows 홈이 이미 읽은 품의서목록 전체 행(헤더 포함) — 견적서는 재읽기 없이 여기서 추출
  * @param inspRows 홈이 이미 읽은 검수보고서목록 전체 행(없으면 null → 직접 읽음)

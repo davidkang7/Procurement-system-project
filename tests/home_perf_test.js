@@ -452,6 +452,24 @@ console.log('\n[시트가 없거나 비었거나 읽기가 실패해도 기준�
   }
 }
 
+console.log('\n[문자열 응답 — 화면이 부르는 getHomeDataJsonForClient = getHomeDataForClient의 JSON]');
+{
+  const bad = [];
+  for (const role of ROLES) {
+    const e = makeEnv('WT', readWT, role.email, PREFS);
+    if (typeof e.sandbox.getHomeDataJsonForClient !== 'function') { bad.push('함수 없음'); break; }
+    const s = vm.runInContext('getHomeDataJsonForClient()', e.sandbox);
+    const obj = JSON.parse(JSON.stringify(vm.runInContext('getHomeDataForClient()', e.sandbox)));
+    const d = typeof s === 'string' ? firstDiff(obj, JSON.parse(s)) : '문자열이 아님: ' + typeof s;
+    if (d || obj.ok !== true) bad.push(role.name + ': ' + (d || 'ok=false'));
+  }
+  check('역할 8종 모두 문자열을 풀면 기존 응답과 같다', bad.length === 0, bad.join(' / '));
+  const e = makeEnv('WT', readWT, ADMIN, PREFS);
+  e.sandbox.SpreadsheetApp.openById = () => { throw new Error('열기 장애 시뮬레이션'); };
+  const fail = JSON.parse(vm.runInContext('getHomeDataJsonForClient()', e.sandbox));
+  check('서버 오류도 같은 형태(ok=false·message)로 전달', fail.ok === false && /열기 장애/.test(fail.message), JSON.stringify(fail).slice(0, 120));
+}
+
 check('검수보고서목록은 모든 역할에서 홈 1회에 한 번만 읽는다', table.every(t => t.wt['검수보고서목록'] === 1),
   table.map(t => `${t.role} ${t.base['검수보고서목록']}→${t.wt['검수보고서목록']}`).join(' / '));
 check('관리자 배너 주문서목록은 한 번만 읽는다(머리글·본문 따로 읽지 않음)', table[0].wt['주문서목록'] === 1, `${table[0].base['주문서목록']}→${table[0].wt['주문서목록']}`);
