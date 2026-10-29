@@ -286,10 +286,24 @@ function doGet(e) {
 
   // 7) 기본 진입 = 대시보드 홈 (§12.2, AC-13)
   //    menu 파라미터: 홈 진입 시 기본 선택할 메뉴 키 (예: 메일 링크의 menu=completed)
+  // 홈 데이터를 페이지에 실어 보낸다 — 화면이 뜬 뒤 따로 부르면 Apps Script 실행 시작(1~1.5초)과
+  //  통신(약 0.6초)을 한 번 더 낸다(2026-10-29 진단). 못 만들면 'null' → 화면이 예전처럼 따로 부른다.
+  var initialData = 'null';
+  try { initialData = _jsonForInlineScript_(getHomeDataForClient()); } catch (_) { initialData = 'null'; }
   return _renderTemplate('Procurement_Home', {
     webappUrl:   CONFIG.WEBAPP_URL,
     initialMenu: e.parameter.menu || '',
+    initialData: initialData,
   }, '구매결재 시스템');
+}
+
+// 값을 HTML <script> 안에 그대로 넣을 수 있는 JSON 리터럴로 만든다.
+//  '<'·'>'·'&'와 줄 구분 문자(U+2028/2029)를 \u 이스케이프로 바꿔, 품의 제목 같은 사용자 입력에
+//  '</script>'나 '<!--'가 있어도 태그로 해석되지 않게 한다(JSON.parse·JS 해석 결과는 같다).
+function _jsonForInlineScript_(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
 function _renderTemplate(filename, vars, title) {

@@ -452,6 +452,56 @@ console.log('\n[시트가 없거나 비었거나 읽기가 실패해도 기준�
   }
 }
 
+console.log('\n[페이지에 실어 보내는 홈 데이터 — doGet 홈 경로의 initialData]');
+{
+  // HtmlService 대역: 템플릿에 넘긴 값만 기록한다
+  const renderHome = (e, param) => {
+    const seen = {};
+    e.sandbox.HtmlService = {
+      createTemplateFromFile: name => { seen.file = name; const t = {}; t.evaluate = () => { seen.vars = Object.assign({}, t); return { setTitle() { return this; }, setXFrameOptionsMode() { return this; } }; }; return t; },
+      createHtmlOutput: () => ({ setTitle() { return this; }, setXFrameOptionsMode() { return this; } }),
+      XFrameOptionsMode: { ALLOWALL: 'ALLOWALL' },
+    };
+    e.sandbox.__p = param || {};
+    vm.runInContext('doGet({ parameter: __p })', e.sandbox);
+    return seen;
+  };
+  const LS_PS = String.fromCharCode(0x2028, 0x2029);   // 줄 구분 문자 2종(U+2028/2029)
+  const RAW_UNSAFE = new RegExp('[<>&' + LS_PS + ']');
+  const bad = [];
+  for (const role of ROLES) {
+    const e = makeEnv('WT', readWT, role.email, PREFS);
+    const seen = renderHome(e);
+    const s = seen.vars && seen.vars.initialData;
+    const expect = JSON.parse(JSON.stringify(vm.runInContext('getHomeDataForClient()', e.sandbox)));
+    if (seen.file !== 'Procurement_Home' || typeof s !== 'string') { bad.push(role.name + ': 홈 템플릿·initialData 없음'); continue; }
+    if (RAW_UNSAFE.test(s)) bad.push(role.name + ': 이스케이프 안 된 < > & 줄구분 문자');
+    const d1 = firstDiff(expect, JSON.parse(s));
+    const d2 = firstDiff(expect, vm.runInNewContext('(' + s + ')'));   // 페이지에선 JS 리터럴로 해석된다 — JSON 해석과 같아야
+    if (d1 || d2) bad.push(role.name + ': ' + (d1 || d2));
+  }
+  check('역할 8종: 실린 데이터 = 기존 응답(JSON·JS 해석 모두), 위험 문자 없음', bad.length === 0, bad.join(' / '));
+
+  // 악성 제목 — '</script>'·'<!--'·따옴표·& ·줄 구분 문자가 그대로 되살아나야 하고, 문자열엔 원문자 없음
+  const XSS = '</script><script>window.__xss=1</script><!-- "따옴표" \'홑\' & <b>굵게</b>' + LS_PS + '끝';
+  const e2 = makeEnv('WT', readWT, KIM, PREFS);
+  e2.ss.sheets['품의서목록'].rows[1][vm.runInContext('COL.SUBJECT', e2.sandbox)] = XSS;
+  const s2 = renderHome(e2).vars.initialData;
+  const back = JSON.parse(s2).myDocs.map(x => x.subject);
+  check('악성 제목: 페이지 문자열에 원문자 없음 · 풀면 원래 제목 그대로', !RAW_UNSAFE.test(s2) && !/<\/script/i.test(s2) && back.includes(XSS), s2.slice(0, 80));
+
+  // 메뉴 파라미터는 그대로, 홈 데이터가 실패 응답이면 그 응답을 싣고(화면이 다시 호출), 예외면 'null'
+  const e3 = makeEnv('WT', readWT, ADMIN, PREFS);
+  check('menu 파라미터 그대로 전달', renderHome(e3, { menu: 'completed' }).vars.initialMenu === 'completed');
+  const e4 = makeEnv('WT', readWT, ADMIN, PREFS);
+  e4.sandbox.SpreadsheetApp.openById = () => { throw new Error('열기 장애 시뮬레이션'); };
+  const f4 = JSON.parse(renderHome(e4).vars.initialData);
+  check('시트 장애: ok=false 응답이 실린다(화면은 따로 다시 호출)', f4.ok === false && /열기 장애/.test(f4.message));
+  const e5 = makeEnv('WT', readWT, ADMIN, PREFS);
+  vm.runInContext('getHomeDataForClient = function () { throw new Error("예외 시뮬레이션"); }', e5.sandbox);
+  check('홈 데이터 함수가 예외를 던지면 initialData = null, 페이지는 정상 생성', renderHome(e5).vars.initialData === 'null');
+}
+
 check('검수보고서목록은 모든 역할에서 홈 1회에 한 번만 읽는다', table.every(t => t.wt['검수보고서목록'] === 1),
   table.map(t => `${t.role} ${t.base['검수보고서목록']}→${t.wt['검수보고서목록']}`).join(' / '));
 check('관리자 배너 주문서목록은 한 번만 읽는다(머리글·본문 따로 읽지 않음)', table[0].wt['주문서목록'] === 1, `${table[0].base['주문서목록']}→${table[0].wt['주문서목록']}`);
