@@ -1202,6 +1202,26 @@ function checkDocNoForClient(docNo) {
   }
 }
 
+/**
+ * 품의(REQ) 최초 제출 품의번호 형식 — 맞으면 '', 틀리면 안내 문구
+ * 영문 대문자 2자리-영문 대문자 2자리-발행 일자 연도 끝 2자리-일련번호 3자리 (예: TO-AP-26-001)
+ * 화면 docNoFormatError(Procurement_Form.html)와 같은 규칙·문구 — 한쪽을 바꾸면 다른 쪽도 바꾼다.
+ * 재상신은 시트의 기존 번호를 그대로 쓰므로(_resubmitCore) 옛 형식 문서도 막히지 않는다.
+ */
+function reqDocNoFormatError_(docNo, issueDate) {
+  var issue = toDateStr(issueDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(issue)) return '발행 일자를 입력해 주세요.';
+  var yy = issue.substring(2, 4);
+  var m = /^[A-Z]{2}-[A-Z]{2}-(\d{2})-\d{3}$/.exec(String(docNo || '').trim());
+  if (!m) {
+    return '품의번호 형식이 올바르지 않습니다. 영문 대문자 2자리-영문 대문자 2자리-발행연도 2자리-일련번호 3자리로 입력해 주세요. (예: TO-AP-' + yy + '-001)';
+  }
+  if (m[1] !== yy) {
+    return '품의번호의 연도(' + m[1] + ')가 발행 일자(' + issue + ')의 연도(' + yy + ')와 다릅니다.';
+  }
+  return '';
+}
+
 
 // ================================================================
 // 6. 첨부파일 합산 용량 검증 (FR-09a)
@@ -1236,6 +1256,10 @@ function _submitCore(data) {
   // 0단계: 기안자 본인 검증 (본인이 아니면 제출 차단)
   var drafterChk = assertDrafterIsSelf(data);
   if (drafterChk) return drafterChk;
+
+  // 0-1단계: 품의번호 형식 (화면에서도 막지만 doPost 등 다른 경로도 여기서 막는다)
+  var docNoErr = reqDocNoFormatError_(data.docNo, data.issueDate);
+  if (docNoErr) return { ok: false, message: docNoErr };
 
   // 단가 기준 — 화면 값을 그대로 믿지 않는다(외화·누락은 'excl'). 아래 계산·요약·메일이 모두 이 값을 쓴다.
   data.vatMode = normalizeVatMode(data.vatMode, data.items);

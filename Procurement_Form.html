@@ -167,7 +167,7 @@ table.vd-tbl tr.vd-row:focus-visible{outline:2px solid #185FA5;outline-offset:-2
 <div class="a4-wrap">
   <div class="doc-title">구 매 품 의 서</div>
   <div class="top-meta">
-    <span>품의번호: <b id="dno-disp">PRQ-2026-001</b></span>
+    <span>품의번호: <b id="dno-disp">-</b></span>
     <span>작성일: <b id="today-disp"></b></span>
   </div>
   <p class="required-note"><span style="color:#c0392b;">*</span> 표시 항목은 필수 입력사항입니다.</p>
@@ -178,10 +178,10 @@ table.vd-tbl tr.vd-row:focus-visible{outline:2px solid #185FA5;outline-offset:-2
       <div class="row c4">
         <div class="field">
           <label>품의번호 <span class="req">*</span></label>
-          <input type="text" id="doc-no" value="PRQ-2026-001" oninput="onDocNoInput()" onblur="checkDupDocNo()">
+          <input type="text" id="doc-no" placeholder="예: TO-AP-26-001" oninput="onDocNoInput()" onblur="checkDupDocNo()">
           <div class="dup-msg" id="dup-msg"></div>
         </div>
-        <div class="field"><label>발행 일자 <span class="req">*</span></label><input type="date" id="issue-date"></div>
+        <div class="field"><label>발행 일자 <span class="req">*</span></label><input type="date" id="issue-date" onchange="checkDupDocNo()"></div>
         <div class="field"><label>기안자 <span class="req">*</span></label><input type="text" id="drafter" placeholder="본인 자동 입력" readonly style="background:#f7f7f7"></div>
         <div class="field"><label>소속 부서</label><input type="text" id="dept" placeholder="구매팀"></div>
       </div>
@@ -494,13 +494,37 @@ function applySelfAsDrafter(){
   }
 }
 
+// ─── 품의번호 형식 ─────────────────────────────
+// 영문 대문자 2자리-영문 대문자 2자리-발행 일자 연도 끝 2자리-일련번호 3자리 (예: TO-AP-26-001)
+// 서버 reqDocNoFormatError_(Code.gs)와 같은 규칙·문구 — 한쪽을 바꾸면 다른 쪽도 바꾼다.
+var DOC_NO_RE = /^[A-Z]{2}-[A-Z]{2}-(\d{2})-\d{3}$/;
+function issueYY(issueDate){
+  var m = /^(\d{4})-\d{2}-\d{2}/.exec(issueDate || '');
+  return m ? m[1].substring(2) : '';
+}
+// 맞으면 '' / 틀리면 문구. short=true는 입력란 아래 한 줄 안내용
+function docNoFormatError(docNo, issueDate, short){
+  var yy = issueYY(issueDate);
+  if(!yy) return short ? '발행 일자를 먼저 입력해 주세요' : '발행 일자를 입력해 주세요.';
+  var m = DOC_NO_RE.exec(docNo || '');
+  if(!m){
+    return short ? '형식 오류 — 예: TO-AP-' + yy + '-001'
+      : '품의번호 형식이 올바르지 않습니다. 영문 대문자 2자리-영문 대문자 2자리-발행연도 2자리-일련번호 3자리로 입력해 주세요. (예: TO-AP-' + yy + '-001)';
+  }
+  if(m[1] !== yy){
+    return short ? '연도는 ' + yy + ' (발행 일자 기준)'
+      : '품의번호의 연도(' + m[1] + ')가 발행 일자(' + issueDate.substring(0, 10) + ')의 연도(' + yy + ')와 다릅니다.';
+  }
+  return '';
+}
+
 // ─── 품의번호 중복 검사 ─────────────────────────────
 function onDocNoInput(){
   var inpEl = document.getElementById('doc-no');
   var up = (inpEl.value || '').toUpperCase();
   if(inpEl.value !== up){ inpEl.value = up; }
   var v = up;
-  document.getElementById('dno-disp').textContent = v;
+  document.getElementById('dno-disp').textContent = v || '-';
   var msg = document.getElementById('dup-msg');
   var inp = document.getElementById('doc-no');
   inp.classList.remove('dup-ok','dup-err');
@@ -512,10 +536,16 @@ function onDocNoInput(){
 function checkDupDocNo(){
   var docNo = document.getElementById('doc-no').value.trim();
   if(!docNo){setDupMsg('',''); return;}
+  // 형식이 틀리면 중복 조회 없이 형식부터 안내
+  var fmtErr = docNoFormatError(docNo, document.getElementById('issue-date').value, true);
+  if(fmtErr){ docNoDuplicated = false; setDupMsg('err', fmtErr); return; }
   if(typeof google === 'undefined') return;
   setDupMsg('loading','확인 중...');
   google.script.run
     .withSuccessHandler(function(res){
+      // 응답 전에 번호·발행 일자를 고쳤으면 이 결과는 버린다 (그쪽 안내가 이미 떠 있다)
+      if(document.getElementById('doc-no').value.trim() !== docNo
+        || docNoFormatError(docNo, document.getElementById('issue-date').value, true)) return;
       if(!res || !res.ok){setDupMsg('err','확인 실패'); return;}
       if(res.duplicated){
         docNoDuplicated = true;
@@ -1026,6 +1056,14 @@ function submitForm(){
     showBanner('error','필수 항목(품의번호, 기안자, 품의제목)을 입력해 주세요.');
     return;
   }
+  // 품의번호 형식 — 다른 항목보다 먼저 확인 (서버 _submitCore도 같은 규칙으로 다시 막는다)
+  var issueDate = document.getElementById('issue-date').value;
+  var docNoErr = docNoFormatError(docNo, issueDate);
+  if(docNoErr){
+    setDupMsg('err', docNoFormatError(docNo, issueDate, true));
+    showBanner('error', docNoErr);
+    return;
+  }
   // 공급업체 필수: 업체명, 담당자, 담당자 이메일
   var vName = document.getElementById('vendorName').value.trim();
   var vContact = document.getElementById('vendorContact').value.trim();
@@ -1214,8 +1252,8 @@ function resetAll(){
 function doResetAll(){
   document.querySelectorAll('.a4-wrap input[type=text],.a4-wrap input[type=number],.a4-wrap input[type=email],.a4-wrap textarea').forEach(function(el){
     if(el.id === 'doc-no'){
-      el.value = 'PRQ-2026-001';
-      document.getElementById('dno-disp').textContent = 'PRQ-2026-001';
+      el.value = '';
+      document.getElementById('dno-disp').textContent = '-';
     } else if(el.id === 'deliveryAddr'){
       el.value = '대전광역시 유성구 테크노2로 187(용산동) 미건테크노월드 2차 A동 204호';
     } else el.value = '';
@@ -1242,6 +1280,7 @@ function doResetAll(){
 var today = new Date();
 document.getElementById('today-disp').textContent = today.toLocaleDateString('ko-KR');
 document.getElementById('issue-date').value = today.toISOString().split('T')[0];
+document.getElementById('doc-no').placeholder = '예: TO-AP-' + issueYY(document.getElementById('issue-date').value) + '-001';
 addRow(); addRow(); addRow();
 addApprover('기안자');
 addApprover('결재자 1');
