@@ -40,6 +40,8 @@
     "rfmtl":          { "shipper": "RFMTL(RF Materials)", "file": "RFMTL" },
     "한국생산기술연구원": { "shipper": "한국생산기술연구원" },
     "미르글로벌테크":   { "shipper": "미르글로벌테크" },
+    "소프트플러스":     { "shipper": "소프트플러스", "remark": "QUO DATE" },
+    "제이에스엔지니어링": { "shipper": "제이에스엔지니어링", "remark": "QUO NO." },
     "viadcad":        { "shipper": "VIADCAD", "remark": "견적일자" },
     "coherent":       { "shipper": "COHERENT", "file": "Coherent", "base": "fx" },
     "hitronics":      { "shipper": "HI-TRONICS", "file": "Hitronics", "base": "fx" },
