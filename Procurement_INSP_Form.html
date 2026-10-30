@@ -45,6 +45,7 @@
   .pi img{width:100%;height:104px;object-fit:cover;display:block;}
   .pi .m{font-size:10.5px;color:var(--ink-mute);padding:4px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .pi .d{position:absolute;top:5px;right:5px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;cursor:pointer;font-size:11px;line-height:1;}
+  .pi .wait{height:104px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink-mute);}
   .notice{margin-top:10px;font-size:11.5px;color:var(--ink-soft);background:#fef3e2;border:1px solid #f3dcb8;border-radius:7px;padding:8px 11px;}
   .fc{display:flex;align-items:flex-start;gap:9px;background:var(--insp-soft);border:1px solid #c8e2de;border-radius:8px;padding:11px 13px;margin-top:13px;cursor:pointer;}
   .fc input{margin-top:3px;}
@@ -146,6 +147,9 @@ var WEBAPP_URL  = '<?= webappUrl ?>';
 
 var FORM = null, APPROVERS = [], CURRENT_USER = null, RESUB = null;
 var STATE = { verdict:'', isFinal:false, photos:[], appr:[null,null,null] };
+// 검수 사진 한도 — 서버 INSP.gs의 INSP_PHOTO_MAX_COUNT / INSP_PHOTO_MAX_TOTAL과 같은 값 (합계는 줄인 사본 기준)
+var PHOTO_MAX_COUNT = 6;
+var PHOTO_MAX_TOTAL = 15 * 1024 * 1024;
 var DD = { el:null, slot:-1 };
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
@@ -213,10 +217,10 @@ function render(){
     +      ' ondragover="event.preventDefault();this.classList.add(\'dragover\');"'
     +      ' ondragleave="this.classList.remove(\'dragover\');"'
     +      ' ondrop="event.preventDefault();this.classList.remove(\'dragover\');addPhotos(event.dataTransfer.files);">'
-    +   '📷 클릭하거나 사진을 이곳에 끌어놓아 추가 — 최대 6장, 장당 5MB (업로드 시 자동 압축)</div>'
+    +   '📷 클릭하거나 사진을 이곳에 끌어놓아 추가 — 최대 '+PHOTO_MAX_COUNT+'장 (원본 크기 제한 없음 · 첨부할 때 자동으로 줄여서 올립니다)</div>'
     + '<input type="file" id="f-photos" accept="image/*" multiple style="display:none" onchange="addPhotos(this.files)">'
     + '<div class="pg" id="pg"></div>'
-    + '<div class="notice">ℹ️ 사진은 결재 완료 시 <b>PDF에 삽입된 후 원본은 보관되지 않습니다.</b></div>'
+    + '<div class="notice">ℹ️ 사진은 <b>긴 변 1600px로 줄인 사본</b>이 올라가 결재 완료 후 검수보고서 PDF에 들어갑니다. 촬영 원본(원래 해상도·촬영일시 정보)은 올라가지 않습니다.</div>'
     + '<label class="fc"><input type="checkbox" id="f-final"'+(STATE.isFinal?' checked':'')+' onchange="STATE.isFinal=this.checked">'
     + '<div><b>최종 검수 (이번 입고로 본 품의의 납품 완료)</b>'
     + '<div class="ds">체크 후 결재가 완료되면 본 품의가 <b>검수 완료(종결)</b> 처리되고 추가 제출이 차단됩니다.</div></div></label>'
@@ -249,37 +253,69 @@ function today(){return new Date().toISOString().slice(0,10);}
 function setV(v){STATE.verdict=v;document.querySelectorAll('.verdict').forEach(function(e){e.classList.remove('sel');});var el=document.querySelector('.verdict.'+(v==='합격'?'pass':'fail'));if(el)el.classList.add('sel');}
 
 // ── 사진 (canvas 압축) ──
+// 원본 크기는 보지 않는다 — 고르는 즉시 긴 변 1600px·JPEG 80%로 줄이고, 줄인 사본의 합계만 제한한다.
+//  (예전 '장당 5MB'는 압축 전 원본에 걸려, 줄이면 수백 KB인 휴대폰 사진까지 막았다 — 2026-10-30)
+// 순서: 고른 순서대로 자리(pending)를 먼저 잡고 압축이 끝나면 채운다. 압축은 끝나는 순서가 제각각이라
+//  끝난 순서대로 쌓으면 PDF 사진 순서가 고른 순서와 달라졌다.
 function addPhotos(files){
-  var remain=6-STATE.photos.length, warns=[];
+  var remain=PHOTO_MAX_COUNT-STATE.photos.length, warns=[];
   // 드래그앤드롭은 accept="image/*" 필터를 우회하므로 이미지 여부를 직접 검사
   var imgs=Array.from(files).filter(function(file){
     if(file.type && file.type.indexOf('image/')!==0){warns.push('"'+file.name+'" — 이미지 파일만 첨부할 수 있습니다.');return false;}
     return true;
   });
-  imgs.slice(0,remain).forEach(function(file){
-    if(file.size>5*1024*1024){warns.push('"'+file.name+'" — 장당 5MB 초과로 제외되었습니다.');return;}
-    compressImage(file,function(dataUrl,blobSize){
-      STATE.photos.push({name:file.name.replace(/\.[^.]+$/,'.jpg'),size:blobSize,dataUrl:dataUrl});
+  if(imgs.length>remain) warns.push('사진은 최대 '+PHOTO_MAX_COUNT+'장까지 첨부 가능합니다.');
+  var batch=imgs.slice(0,Math.max(remain,0)).map(function(file){
+    var slot={name:file.name.replace(/\.[^.]+$/,'.jpg'),size:0,dataUrl:'',pending:true};
+    STATE.photos.push(slot);
+    return {file:file,slot:slot};
+  });
+  // 여러 파일이 한꺼번에 걸려도 모달 한 장에 모아 보여준다 (토스트처럼 앞 메시지를 덮어쓰지 않도록)
+  //  압축 실패·합계 초과는 압축이 끝나야 알 수 있으므로 이번에 고른 사진이 모두 끝난 뒤에 띄운다.
+  function report(){ if(warns.length) showAlertModal('일부 파일을 첨부하지 못했습니다.', warns); }
+  drawPhotos();
+  if(!batch.length){ report(); return; }
+  var left=batch.length;
+  batch.forEach(function(b){
+    compressImage(b.file,function(dataUrl,blobSize){
+      var i=STATE.photos.indexOf(b.slot);
+      if(i>=0){
+        if(!dataUrl){
+          STATE.photos.splice(i,1);
+          warns.push('"'+b.file.name+'" — 사진을 열 수 없습니다. 아이폰 HEIC처럼 브라우저가 읽지 못하는 형식이면 JPG로 바꿔 다시 첨부해 주세요.');
+        } else if(photoBytes()+blobSize>PHOTO_MAX_TOTAL){
+          STATE.photos.splice(i,1);
+          warns.push('"'+b.file.name+'" — 사진 합계가 '+(PHOTO_MAX_TOTAL/1048576)+'MB를 넘어 제외되었습니다.');
+        } else {
+          b.slot.size=blobSize; b.slot.dataUrl=dataUrl; b.slot.pending=false;
+        }
+      }
       drawPhotos();
+      if(--left===0) report();
     });
   });
-  if(imgs.length>remain) warns.push('사진은 최대 6장까지 첨부 가능합니다.');
-  // 여러 파일이 한꺼번에 걸려도 모달 한 장에 모아 보여준다 (토스트처럼 앞 메시지를 덮어쓰지 않도록)
-  if(warns.length) showAlertModal('일부 파일을 첨부하지 못했습니다.', warns);
 }
+// 줄인 사본의 합계 (처리 중인 자리는 0)
+function photoBytes(){ return STATE.photos.reduce(function(s,p){ return s+(p.pending?0:p.size); },0); }
+// 결과는 cb(dataUrl, 바이트) — 읽지 못하면 cb(null, 0)
 function compressImage(file,cb){
   var reader=new FileReader();
+  reader.onerror=function(){cb(null,0);};
   reader.onload=function(e){
     var img=new Image();
+    // HEIC 등 브라우저가 그리지 못하는 형식 — 예전엔 onload가 오지 않아 첨부도 경고도 없이 사라졌다
+    img.onerror=function(){cb(null,0);};
     img.onload=function(){
-      var max=1600, w=img.width, h=img.height;
-      if(w>max||h>max){ if(w>h){h=Math.round(h*max/w);w=max;}else{w=Math.round(w*max/h);h=max;} }
-      var canvas=document.createElement('canvas');
-      canvas.width=w; canvas.height=h;
-      canvas.getContext('2d').drawImage(img,0,0,w,h);
-      var dataUrl=canvas.toDataURL('image/jpeg',0.8);
-      var size=Math.round((dataUrl.length-dataUrl.indexOf(',')-1)*3/4);
-      cb(dataUrl,size);
+      try{
+        var max=1600, w=img.width, h=img.height;
+        if(w>max||h>max){ if(w>h){h=Math.round(h*max/w);w=max;}else{w=Math.round(w*max/h);h=max;} }
+        var canvas=document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        var dataUrl=canvas.toDataURL('image/jpeg',0.8);
+        var size=Math.round((dataUrl.length-dataUrl.indexOf(',')-1)*3/4);
+        cb(dataUrl,size);
+      }catch(err){ cb(null,0); }
     };
     img.src=e.target.result;
   };
@@ -288,6 +324,7 @@ function compressImage(file,cb){
 function drawPhotos(){
   var g=document.getElementById('pg'); if(!g)return;
   g.innerHTML=STATE.photos.map(function(p,i){
+    if(p.pending) return '<div class="pi"><div class="wait">사진 줄이는 중…</div><div class="m">'+esc(p.name)+'</div></div>';
     return '<div class="pi"><img src="'+p.dataUrl+'"><button class="d" onclick="STATE.photos.splice('+i+',1);drawPhotos()">✕</button><div class="m">'+esc(p.name)+' · '+(p.size/1024).toFixed(0)+'KB</div></div>';
   }).join('');
 }
@@ -356,6 +393,7 @@ function submit(){
   if(sels.length===0){showAlertModal('결재자를 1명 이상 지정해 주세요.');return;}
   var lastFilled=-1; STATE.appr.forEach(function(a,i){if(a)lastFilled=i;});
   for(var k=0;k<lastFilled;k++){ if(!STATE.appr[k]){showAlertModal('결재자 '+(k+1)+' 칸이 비어 있습니다. 순서대로 채워 주세요.');return;} }
+  if(STATE.photos.some(function(p){return p.pending;})){showAlertModal('사진을 줄이는 중입니다. 잠시 후 다시 눌러 주세요.');return;}
 
   // approvers[0]=기안자(제출 본인, 자기결재), [1..]=결재자 — REQ/PRC 동일 구조
   // 검수보고서의 기안자 = 실제 제출자(로그인 사용자). 원본 REQ 기안자와 다를 수 있음(같은 부서 대리 제출 허용).

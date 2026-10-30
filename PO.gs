@@ -375,6 +375,9 @@ function _buildPoManifest_(prc, reqRow) {
     issueDate:     payload.issueDate,
     items:         items,                  // [{name,spec,qty,price,currency}]
     totalAmt:      payload.totalAmt,
+    // 단가에 부가세가 포함된 건('incl')은 품목 합 = totalVat(P열)이다 — 렌더러가 검사 기준·합계행 문구를 바꾼다
+    vatMode:       payload.vatMode,
+    totalVat:      payload.totalVat,
     currency:      currency,
     orderFolderId: PO_CONFIG.ORDER_FOLDER_ID,   // 업로드 대상 = 주문서 폴더
     generatedAt:   toDateTimeStr(new Date()),

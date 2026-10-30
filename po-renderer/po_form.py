@@ -216,6 +216,8 @@ class PoOrder:
     currency: str = "KRW"
     subject: str = ""
     prc_token: str = ""
+    total_vat: float | None = None   # 품의서 부가세포함합계(P열) — 단가에 부가세가 포함된 건의 대조 기준
+    vat_included: bool = False       # 품의서에서 '단가 기준: 부가세 포함'을 고른 건 → 합계행 '부가세포함'
 
     @property
     def kind(self) -> str:
@@ -225,6 +227,20 @@ class PoOrder:
     @property
     def calc_total(self) -> float:
         return sum(i.amount for i in self.items)
+
+    @property
+    def expected_total(self) -> float | None:
+        """품목 합(단가 × 수량)과 같아야 하는 품의서 금액 — 부가세 포함 건은 P열(합계), 그 외는 O열(공급가액)."""
+        return self.total_vat if self.vat_included else self.total_amt
+
+
+def detect_vat_included(items: list, total_amt, total_vat) -> bool:
+    """품의서 행의 단가 기준 판별 — GAS detectVatMode(Code.gs)와 같은 규칙.
+    원화이고 품목 합이 P열과 같으면서 O열과 다르면 '부가세 포함'. 별도 건은 품목 합 = O열이다."""
+    if not items or str(items[0].currency or "KRW").upper() != "KRW" or total_vat is None:
+        return False
+    s = sum(i.amount for i in items)
+    return abs(s - float(total_vat)) < 0.5 and abs(s - float(total_amt or 0)) >= 0.5
 
 
 def split_unit_spec(second_field: str):
@@ -519,6 +535,10 @@ def fill(layout: FormLayout, order: PoOrder, rules: VendorRules):
 
     _set(ws, f"G{layout.sum_row}", f"=SUM(G{layout.item_first}:G{layout.item_last})")
     ws.cell(layout.sum_row, COL_AMT).number_format = fmt
+    # 내자 양식 합계행 H는 '부가세별도'. 품의서가 '부가세 포함' 단가면 견적 단가를 그대로 싣고 문구만 바꾼다
+    #  (2026-10-30 사용자 결정 A3 — 단가를 ÷1.1로 환산하지 않는다)
+    if kind == "krw" and order.vat_included:
+        _set(ws, f"H{layout.sum_row}", "부가세포함")
 
     terms_key, terms_items = rules.terms_override(order.vendor_name)
     if terms_items:
@@ -559,11 +579,13 @@ def verify(layout: FormLayout, order: PoOrder):
     ws = layout.sheet
     errors = []
 
-    if order.total_amt is not None:
-        diff = abs(order.calc_total - float(order.total_amt))
+    expected = order.expected_total
+    if expected is not None:
+        diff = abs(order.calc_total - float(expected))
         if diff > 0.5:
+            label = "품의서 부가세포함합계" if order.vat_included else "품의서 합계금액"
             errors.append(f"합계 불일치: 품목 계산합 {order.calc_total:,.2f} "
-                          f"≠ 품의서 합계금액 {float(order.total_amt):,.2f}")
+                          f"≠ {label} {float(expected):,.2f}")
 
     # 기준 양식의 원 업체 흔적이 남았는가 (오염된 주문서 발행 방지)
     own = f"{order.vendor_name} {order.po_no} {ws[CELL_SHIPPER].value or ''}".lower()

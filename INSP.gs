@@ -412,6 +412,20 @@ function getInspFormDataForClient(prcToken, resubToken) {
 // [INSP Step 3] 검수보고서 제출 / 재상신
 // ================================================================
 
+// 검수 사진 한도 — 화면(Procurement_INSP_Form.html PHOTO_MAX_COUNT / PHOTO_MAX_TOTAL)과 같은 값.
+//  사진은 화면에서 긴 변 1600px·JPEG 80%로 줄인 뒤 올라오므로 원본 크기는 보지 않고 올라온 압축본 합계만 본다.
+//  (예전의 장당 5MB 검사는 압축 전 원본에 걸려, 줄이면 수백 KB인 휴대폰 사진까지 막았다 — 2026-10-30 변경.
+//   압축본은 이론상 최악(정사각형·노이즈)도 장당 약 1.55MB라 6장 9.3MB → 여유를 둬 15MB)
+var INSP_PHOTO_MAX_COUNT = 6;
+var INSP_PHOTO_MAX_TOTAL = 15 * 1024 * 1024;
+
+// base64 문자열을 디코딩했을 때의 바이트 수 — 디코딩 없이 길이로 계산한다(화면이 보낸 size 숫자는 믿지 않는다)
+function _base64Bytes_(s) {
+  s = String(s || '');
+  var pad = s.slice(-2) === '==' ? 2 : (s.slice(-1) === '=' ? 1 : 0);
+  return Math.max(0, Math.floor(s.length * 3 / 4) - pad);
+}
+
 /**
  * 검수보고서 제출 (신규 또는 재상신)
  * - 권한·종결·중복회차 검증은 락 안에서 (동시 제출 경합 방지 — 회차 채번 포함)
@@ -449,13 +463,16 @@ function _submitInspCore(data) {
       return { ok: false, message: '기안자는 본인만 지정할 수 있습니다. (로그인: ' + actor + ' / 기안자: ' + drafterAppr + ')' };
     }
 
-    // 사진 사전 검증 (락 밖)
+    // 사진 사전 검증 (락 밖) — 장수 + 올라온 압축본의 합계
     var photos = data.photos || [];
-    if (photos.length > 6) return { ok: false, message: '검수 사진은 최대 6장까지 첨부 가능합니다.' };
-    for (var p = 0; p < photos.length; p++) {
-      if (photos[p].size && photos[p].size > 5 * 1024 * 1024) {
-        return { ok: false, message: '검수 사진은 장당 5MB를 초과할 수 없습니다: ' + (photos[p].name || '') };
-      }
+    if (photos.length > INSP_PHOTO_MAX_COUNT) {
+      return { ok: false, message: '검수 사진은 최대 ' + INSP_PHOTO_MAX_COUNT + '장까지 첨부 가능합니다.' };
+    }
+    var photoBytes = 0;
+    for (var p = 0; p < photos.length; p++) photoBytes += _base64Bytes_(photos[p] && photos[p].data);
+    if (photoBytes > INSP_PHOTO_MAX_TOTAL) {
+      return { ok: false, message: '검수 사진 합계(' + (photoBytes / 1048576).toFixed(1) + 'MB)가 한도 ' +
+        (INSP_PHOTO_MAX_TOTAL / 1048576) + 'MB를 넘습니다. 사진 수를 줄여 주세요.' };
     }
 
     // ── 락 안: 검증 + 행 기록 (회차 채번 경합 방지) ──

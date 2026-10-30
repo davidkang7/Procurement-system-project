@@ -16,7 +16,7 @@ import re
 from datetime import date, datetime
 from pathlib import Path
 
-from po_form import PoItem, PoOrder, split_unit_spec
+from po_form import PoItem, PoOrder, detect_vat_included, split_unit_spec
 
 SUPPORTED_SCHEMAS = ("po-manifest-v1", "po-manifest-v2")
 DB_SHEET = "품의서목록"
@@ -80,6 +80,9 @@ def from_manifest(m: dict) -> PoOrder:
         currency=currency,
         subject=str(m.get("subject") or "").strip(),
         prc_token=str(m.get("prcToken") or "").strip(),
+        # 단가 기준 — GAS가 판별해 넣는다(2026-10-30~). 이전 매니페스트에는 없으며 그때는 '별도'
+        total_vat=(_to_num(m.get("totalVat")) if m.get("totalVat") not in (None, "") else None),
+        vat_included=str(m.get("vatMode") or "") == "incl",
     )
 
 
@@ -172,6 +175,8 @@ def from_db(db_path: Path, po_no: str, require_approved: bool = True) -> PoOrder
     items = parse_items(val(target, "품목내역"))
     currency = items[0].currency if items else "KRW"
     payment_raw = str(val(target, "구매조건") or val(target, "구매방법") or "").strip()
+    total_amt = _to_num(val(target, "합계금액"))
+    total_vat = _to_num(val(target, "부가세포함합계")) if "부가세포함합계" in idx else None
 
     return PoOrder(
         po_no=po_no,
@@ -180,8 +185,10 @@ def from_db(db_path: Path, po_no: str, require_approved: bool = True) -> PoOrder
         issue_date=_to_date(val(target, "발행일자")),
         delivery_date=_to_date(val(target, "납기일")),
         payment_terms_raw=payment_raw,
-        total_amt=_to_num(val(target, "합계금액")),
+        total_amt=total_amt,
         currency=currency,
         subject=str(val(target, "품의제목") or "").strip(),
         prc_token=str(val(target, "토큰") or "").strip(),
+        total_vat=total_vat,
+        vat_included=detect_vat_included(items, total_amt, total_vat),   # 단가 기준은 열이 없어 O/P열로 판별
     )

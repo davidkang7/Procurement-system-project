@@ -43,6 +43,16 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
 .add-row-btn{font-size:11px;color:#1a6fc4;background:none;border:none;cursor:pointer;margin-top:6px;padding:2px 0;font-family:inherit;}
 .del-btn{background:none;border:none;cursor:pointer;color:#c0392b;font-size:14px;line-height:1;font-family:inherit;}
 .del-btn:disabled{color:#ccc;cursor:not-allowed;}
+/* 단가 기준(부가세 별도/포함) 선택 — 원화일 때만 보인다 (품의 작성 화면과 같은 모양) */
+.form-card-head.with-vat{display:flex;align-items:center;gap:1.1em;}
+.vat-mode{margin-left:auto;display:inline-flex;align-items:center;gap:6px;letter-spacing:0;}
+.vat-mode .vm-lbl{font-size:10px;color:#777;font-weight:600;}
+.vat-seg{display:inline-flex;border:1px solid #bbb;border-radius:4px;overflow:hidden;background:#fff;}
+.vat-seg button{border:none;background:#fff;color:#666;font-size:10.5px;font-weight:600;padding:2px 10px;cursor:pointer;font-family:inherit;}
+.vat-seg button+button{border-left:1px solid #bbb;}
+.vat-seg button.on{background:#1a6fc4;color:#fff;}
+.vm-na{margin-left:auto;font-size:10px;color:#999;font-weight:400;letter-spacing:0;}
+.price-note{display:block;font-size:9px;font-weight:700;color:#1a6fc4;letter-spacing:0;}
 .total-bar{display:flex;justify-content:flex-end;align-items:center;gap:16px;padding-top:6px;}
 .total-bar .tl{font-size:11px;color:#666;}
 .total-bar .tv{font-size:14px;font-weight:700;color:#111;}
@@ -143,18 +153,29 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
     </div>
   </div>
   <div class="form-card">
-    <div class="form-card-head">품목 내역</div>
+    <div class="form-card-head with-vat">품목 내역
+      <div class="vat-mode" id="vat-mode"><span class="vm-lbl">단가 기준</span>
+        <div class="vat-seg" role="radiogroup" aria-label="단가 기준">
+          <button type="button" role="radio" data-mode="excl" class="on" aria-checked="true" onclick="setVatMode('excl')">부가세 별도</button><button type="button" role="radio" data-mode="incl" aria-checked="false" onclick="setVatMode('incl')">부가세 포함</button>
+        </div>
+      </div>
+      <span class="vm-na" id="vat-mode-na" style="display:none">외화 · 부가세 없음</span>
+    </div>
     <div class="form-card-body">
       <div class="tbl-wrap">
         <table class="items">
           <colgroup><col style="width:32px"><col style="width:28%"><col style="width:12%"><col style="width:9%"><col style="width:14%"><col style="width:15%"><col style="width:26px"></colgroup>
-          <thead><tr><th>No.</th><th>품목명</th><th>규격/단위</th><th>수량</th><th>단가 (원)</th><th>금액 (원)</th><th></th></tr></thead>
+          <thead><tr><th>No.</th><th>품목명</th><th>규격/단위</th><th>수량</th><th>단가 (<span class="cur-label">원</span>)<span class="price-note" id="price-note" style="display:none">부가세 포함</span></th><th>금액 (<span class="cur-label">원</span>)</th><th></th></tr></thead>
           <tbody id="items-body"></tbody>
-          <tfoot><tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">합 계</td><td class="amt" id="grand-total">0</td><td style="background:#f0f0f0;"></td></tr></tfoot>
+          <tfoot>
+            <tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;" id="supply-row-label">공급가액</td><td class="amt" id="supply-total">0</td><td style="background:#f0f0f0;"></td></tr>
+            <tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;" id="vat-row-label">부가세 (10%)</td><td class="amt" id="vat-amt">0</td><td style="background:#f0f0f0;"></td></tr>
+            <tr class="foot"><td colspan="5" style="text-align:right;color:#111;padding-right:10px;">합계 금액</td><td class="amt" id="grand-total">0</td><td style="background:#f0f0f0;"></td></tr>
+          </tfoot>
         </table>
       </div>
       <button class="add-row-btn" onclick="addRow()">+ 품목 추가</button>
-      <div class="total-bar"><span class="tl">총 금액 (부가세 포함)</span><span class="tv" id="total-vat">0 원</span></div>
+      <div class="total-bar"><span class="tl" id="total-label">총 금액 (부가세 포함)</span><span class="tv" id="total-vat">0 원</span></div>
     </div>
   </div>
   <div class="form-card">
@@ -229,6 +250,8 @@ function loadData(){
       });
       document.getElementById('items-body').innerHTML = '';
       rowCount = 0;
+      setDocCurrency((d.items && d.items[0] && d.items[0].currency) || 'KRW');
+      setVatMode(d.vatMode === 'incl' ? 'incl' : 'excl');
       (d.items || []).forEach(function(it){addRow(it);});
       if(!d.items || d.items.length === 0){addRow();addRow();addRow();}
       calcTotal();
@@ -258,6 +281,9 @@ function addRow(item){
   var id = 'r' + rowCount;
   var tr = document.createElement('tr');
   tr.id = id;
+  // 통화는 화면에서 고칠 수 없지만 서버로 그대로 돌려보내야 한다 — 빠지면 서버가 원화로 처리해
+  //  외화 품의가 재상신 때 원화 + 부가세 10%로 바뀐다. 새로 추가한 행은 문서 통화를 따른다.
+  tr.setAttribute('data-cur', (item && item.currency) || DOC_CUR);
   tr.innerHTML = '<td class="no-cell" style="text-align:center;font-size:11px;color:#666;"></td>'+
     '<td><input type="text" class="item-name" placeholder="품목명" style="min-width:100px" value="'+esc(item&&item.name||'')+'"></td>'+
     '<td><input type="text" class="item-spec" placeholder="단위/규격" style="text-align:center" value="'+esc(item&&item.spec||'')+'"></td>'+
@@ -297,8 +323,45 @@ function calcTotal(){
   document.querySelectorAll('#items-body .row-amt').forEach(function(c){
     t += parseFloat(c.textContent.replace(/,/g,'')) || 0;
   });
-  document.getElementById('grand-total').textContent = fmt(t);
-  document.getElementById('total-vat').textContent = fmt(Math.round(t * 1.1)) + ' 원';
+  var isKrw = (DOC_CUR === 'KRW');
+  var incl = isKrw && VAT_MODE === 'incl';
+  var tt = computeTotals(t, isKrw, VAT_MODE);   // 원화만 부가세 10%, 외화는 0 (B안)
+  var sym = isKrw ? '원' : DOC_CUR;
+  document.getElementById('vat-mode').style.display = isKrw ? '' : 'none';
+  document.getElementById('vat-mode-na').style.display = isKrw ? 'none' : '';
+  document.getElementById('price-note').style.display = incl ? '' : 'none';
+  document.getElementById('supply-row-label').textContent = incl ? '공급가액 (합계 ÷ 1.1)' : '공급가액';
+  document.getElementById('supply-total').textContent = fmt(tt.supply);
+  document.getElementById('vat-row-label').textContent = isKrw ? (incl ? '부가세 (10% · 단가에 포함)' : '부가세 (10%)') : '부가세 (해당없음)';
+  document.getElementById('vat-amt').textContent = isKrw ? fmt(tt.vat) : '-';
+  document.getElementById('grand-total').textContent = fmt(tt.grand);
+  document.getElementById('total-label').textContent = isKrw ? '총 금액 (부가세 포함)' : '총 금액 (부가세 없음)';
+  document.getElementById('total-vat').textContent = fmt(tt.grand) + ' ' + sym;
+}
+
+// ─── 단가 기준 (부가세 별도/포함) · 문서 통화 ─────────────────────────────
+// 'excl' = 단가는 부가세 별도(기본) / 'incl' = 단가에 부가세 포함. 원화만 해당 — 외화는 부가세 0 (B안)
+// 반려 전 값은 서버가 O/P열로 판별해 내려준다(d.vatMode). 통화는 첫 품목 기준(단일통화 문서).
+var VAT_MODE = 'excl', DOC_CUR = 'KRW';
+function setVatMode(m){
+  VAT_MODE = (m === 'incl') ? 'incl' : 'excl';
+  document.querySelectorAll('#vat-mode button').forEach(function(b){
+    var on = b.getAttribute('data-mode') === VAT_MODE;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  calcTotal();
+}
+// 서버 computeTotals(Code.gs)와 같은 규칙 — 시트 O열 = supply(공급가액), P열 = grand(합계)
+function computeTotals(sum, isKrw, mode){
+  if(!isKrw) return { supply: sum, vat: 0, grand: sum };
+  if(mode === 'incl'){ var supply = Math.round(sum / 1.1); return { supply: supply, vat: sum - supply, grand: sum }; }
+  var vat = Math.round(sum * 0.1);
+  return { supply: sum, vat: vat, grand: sum + vat };
+}
+function setDocCurrency(cur){
+  DOC_CUR = cur || 'KRW';
+  document.querySelectorAll('table.items thead .cur-label').forEach(function(el){ el.textContent = DOC_CUR === 'KRW' ? '원' : DOC_CUR; });
 }
 
 function validateFile(f){
@@ -437,7 +500,8 @@ function collectData(){
       name: name,
       spec: tr.querySelector('.item-spec') ? tr.querySelector('.item-spec').value : '',
       qty: tr.querySelector('.qty') ? num(tr.querySelector('.qty').value) : 0,
-      price: tr.querySelector('.price') ? num(tr.querySelector('.price').value) : 0
+      price: tr.querySelector('.price') ? num(tr.querySelector('.price').value) : 0,
+      currency: tr.getAttribute('data-cur') || DOC_CUR
     });
   });
   return {
@@ -455,6 +519,7 @@ function collectData(){
     deliveryAddr: document.getElementById('deliveryAddr').value,
     remarks: document.getElementById('remarks').value,
     items: items,
+    vatMode: DOC_CUR === 'KRW' ? VAT_MODE : 'excl',
     approvers: cachedApprovers
   };
 }

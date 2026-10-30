@@ -33,6 +33,9 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f5
 .field label{font-size:10px;color:#777;font-weight:600;}
 .field .val{font-size:12px;color:#111;padding:4px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;min-height:26px;}
 .tbl-wrap{overflow-x:auto;}
+/* 단가에 부가세가 포함된 문서 표시 */
+.vm-badge{font-size:10px;font-weight:700;color:#1a6fc4;background:#eef5fc;border:1px solid #b9d5f0;border-radius:3px;padding:0 6px;letter-spacing:0;}
+.price-note{display:block;font-size:9px;font-weight:700;color:#1a6fc4;letter-spacing:0;}
 table.items{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
 table.items th{background:#f0f0f0;color:#444;font-weight:700;padding:5px 4px;border:1px solid #ccc;text-align:center;font-size:10px;}
 table.items td{border:1px solid #ccc;padding:5px 6px;color:#111;font-size:11px;}
@@ -203,9 +206,13 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
     var _cur = (items[0] && items[0].currency) ? String(items[0].currency) : 'KRW';
     var _sym = (_cur === 'KRW') ? '원' : _cur;
     var _isKrw = (_cur === 'KRW');
-    var totalAmt = items.reduce(function(s,it){return s + (parseFloat(it.qty)||0) * (parseFloat(it.price)||0);}, 0);
-    var _vat = _isKrw ? Math.round(totalAmt * 0.1) : 0;   // 원화만 부가세 10%, 외화는 0 (B안)
-    var totalVat = totalAmt + _vat;
+    var _sum = items.reduce(function(s,it){return s + (parseFloat(it.qty)||0) * (parseFloat(it.price)||0);}, 0);
+    // 단가 기준은 서버가 시트 O/P열로 판별해 준다(d.vatMode). 계산 규칙은 서버 computeTotals와 같다.
+    //  별도: 공급가액 = 품목 합, 부가세 = round(× 0.1) / 포함: 합계 = 품목 합, 공급가액 = round(÷ 1.1)
+    var _incl = _isKrw && d.vatMode === 'incl';
+    var totalAmt, _vat, totalVat;
+    if(_incl){ totalVat = _sum; totalAmt = Math.round(_sum / 1.1); _vat = totalVat - totalAmt; }
+    else { totalAmt = _sum; _vat = _isKrw ? Math.round(totalAmt * 0.1) : 0; totalVat = totalAmt + _vat; }   // 원화만 부가세 10%, 외화는 0 (B안)
 
     // 결재 현황 — 현재 결재 순번에 current 클래스 부여
     var apprRows = (d.approvers || []).map(function(ap, i){
@@ -343,14 +350,14 @@ table.items tr.foot td{background:#f0f0f0;font-weight:700;font-size:11px;padding
         +'</div>' : '')
       +'</div></div>'
 
-      +'<div class="section"><div class="sec-header"><span>품목 내역</span></div><div class="sec-body">'
+      +'<div class="section"><div class="sec-header"><span>품목 내역</span>'+(_incl?'<span class="vm-badge">단가 = 부가세 포함</span>':'')+'</div><div class="sec-body">'
       +'<div class="tbl-wrap"><table class="items">'
       +'<colgroup><col style="width:32px"><col style="width:28%"><col style="width:12%"><col style="width:9%"><col style="width:14%"><col style="width:15%"></colgroup>'
-      +'<thead><tr><th>No.</th><th>품목명</th><th>규격/단위</th><th>수량</th><th>단가 ('+escHtml(_cur)+')</th><th>금액 ('+escHtml(_cur)+')</th></tr></thead>'
+      +'<thead><tr><th>No.</th><th>품목명</th><th>규격/단위</th><th>수량</th><th>단가 ('+escHtml(_cur)+')'+(_incl?'<span class="price-note">부가세 포함</span>':'')+'</th><th>금액 ('+escHtml(_cur)+')</th></tr></thead>'
       +'<tbody>'+itemRows+'</tbody>'
       +'<tfoot>'
-      +'<tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">공급가액</td><td class="amt">'+fmt(totalAmt)+'</td></tr>'
-      +'<tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">'+(_isKrw?'부가세 (10%)':'부가세 (해당없음)')+'</td><td class="amt">'+(_isKrw?fmt(_vat):'-')+'</td></tr>'
+      +'<tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">'+(_incl?'공급가액 (합계 ÷ 1.1)':'공급가액')+'</td><td class="amt">'+fmt(totalAmt)+'</td></tr>'
+      +'<tr class="foot"><td colspan="5" style="text-align:right;color:#666;padding-right:10px;">'+(_isKrw?(_incl?'부가세 (10% · 단가에 포함)':'부가세 (10%)'):'부가세 (해당없음)')+'</td><td class="amt">'+(_isKrw?fmt(_vat):'-')+'</td></tr>'
       +'<tr class="foot"><td colspan="5" style="text-align:right;color:#111;padding-right:10px;font-weight:700;">합계 금액</td><td class="amt" style="font-weight:700;">'+fmt(totalVat)+'</td></tr>'
       +'</tfoot>'
       +'</table></div>'

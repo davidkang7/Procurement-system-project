@@ -48,6 +48,16 @@ body{font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif;background:#f4
 .original-val b{color:#666;}
 
 .tbl-wrap{overflow-x:auto;}
+/* 단가 기준(부가세 별도/포함) 선택 — 원화일 때만 보인다. 품의서와 다르게 바꾸면 changed */
+.vat-mode{margin-left:auto;display:inline-flex;align-items:center;gap:6px;letter-spacing:0;}
+.vat-mode .vm-lbl{font-size:10px;color:#777;font-weight:600;}
+.vat-seg{display:inline-flex;border:1px solid #bbb;border-radius:4px;overflow:hidden;background:#fff;}
+.vat-seg button{border:none;background:#fff;color:#666;font-size:10.5px;font-weight:600;padding:2px 10px;cursor:pointer;font-family:inherit;}
+.vat-seg button+button{border-left:1px solid #bbb;}
+.vat-seg button.on{background:#1a6fc4;color:#fff;}
+.vat-mode.changed .vat-seg{border-color:#d97706;box-shadow:0 0 0 2px #fff3cd;}
+.vm-na{margin-left:auto;font-size:10px;color:#999;font-weight:400;letter-spacing:0;}
+.price-note{display:block;font-size:9px;font-weight:700;color:#1a6fc4;letter-spacing:0;}
 table.items{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed;}
 table.items th{background:#f0f0f0;color:#444;font-weight:700;padding:5px 4px;border:1px solid #ccc;text-align:center;font-size:10px;}
 table.items td{border:1px solid #ccc;padding:2px 4px;overflow:hidden;}
@@ -275,7 +285,14 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 
   <!-- 4. 품목내역 (프리필) -->
   <div class="section">
-    <div class="sec-header">④ 품목 내역</div>
+    <div class="sec-header">④ 품목 내역
+      <div class="vat-mode" id="vat-mode"><span class="badge-changed" id="vat-changed" style="display:none"></span><span class="vm-lbl">단가 기준</span>
+        <div class="vat-seg" role="radiogroup" aria-label="단가 기준">
+          <button type="button" role="radio" data-mode="excl" class="on" aria-checked="true" onclick="setVatMode('excl')">부가세 별도</button><button type="button" role="radio" data-mode="incl" aria-checked="false" onclick="setVatMode('incl')">부가세 포함</button>
+        </div>
+      </div>
+      <span class="vm-na" id="vat-mode-na" style="display:none">외화 · 부가세 없음</span>
+    </div>
     <div class="sec-body">
       <div class="tbl-wrap">
         <table class="items">
@@ -285,13 +302,13 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
           </colgroup>
           <thead>
             <tr>
-              <th>No.</th><th>품목명</th><th>규격</th><th>수량</th><th>단가</th><th>금액</th><th></th>
+              <th>No.</th><th>품목명</th><th>규격</th><th>수량</th><th>단가<span class="price-note" id="price-note" style="display:none">부가세 포함</span></th><th>금액</th><th></th>
             </tr>
           </thead>
           <tbody id="items-body"></tbody>
           <tfoot>
             <tr class="foot-row">
-              <td colspan="5" style="text-align:right">공급가액</td>
+              <td colspan="5" style="text-align:right" id="supply-row-label">공급가액</td>
               <td class="amt" id="supply-total">0 원</td>
               <td></td>
             </tr>
@@ -508,6 +525,10 @@ function applyPrefill(d){
   if(d.items && d.items.length && d.items[0] && d.items[0].currency){
     prcCurrency = String(d.items[0].currency);
   }
+
+  // 단가 기준 상속 (부모 REQ — 서버가 O/P열로 판별해 내려준다)
+  PARENT_VAT_MODE = d.vatMode === 'incl' ? 'incl' : 'excl';
+  setVatMode(PARENT_VAT_MODE);
 
   // 품목 프리필
   (d.items || []).forEach(function(it){ addRow(it); });
@@ -750,6 +771,35 @@ function markItemChange(el){
   else el.classList.remove('changed');
 }
 function curSym(c){ return c === 'KRW' ? '원' : c; }
+
+// ─── 단가 기준 (부가세 별도/포함) ─────────────────────────────
+// 'excl' = 단가는 부가세 별도(기본) / 'incl' = 단가에 부가세 포함. 원화만 해당 — 외화는 부가세 0 (B안)
+// 품의서 값(서버가 판별해 내려준 PREFILL_DATA.vatMode)을 이어받고, 다르게 바꾸면 다른 필드처럼 표시한다.
+var VAT_MODE = 'excl', PARENT_VAT_MODE = 'excl';
+var VAT_MODE_LABEL = { excl: '부가세 별도', incl: '부가세 포함' };
+function setVatMode(m){
+  VAT_MODE = (m === 'incl') ? 'incl' : 'excl';
+  document.querySelectorAll('#vat-mode button').forEach(function(b){
+    var on = b.getAttribute('data-mode') === VAT_MODE;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  var changed = VAT_MODE !== PARENT_VAT_MODE;
+  document.getElementById('vat-mode').classList.toggle('changed', changed);
+  var badge = document.getElementById('vat-changed');
+  badge.style.display = changed ? '' : 'none';
+  badge.textContent = '품의서: ' + VAT_MODE_LABEL[PARENT_VAT_MODE];
+  calcTotal();
+}
+// 서버 computeTotals(Code.gs)와 같은 규칙 — 시트 O열 = supply(공급가액), P열 = grand(합계)
+function computeTotals(sum, isKrw, mode){
+  if(!isKrw) return { supply: sum, vat: 0, grand: sum };
+  if(mode === 'incl'){ var supply = Math.round(sum / 1.1); return { supply: supply, vat: sum - supply, grand: sum }; }
+  var vat = Math.round(sum * 0.1);
+  return { supply: sum, vat: vat, grand: sum + vat };
+}
+// 서버로 보내는 값 — 외화면 'excl'
+function effectiveVatMode(){ return prcCurrency === 'KRW' ? VAT_MODE : 'excl'; }
 function calcTotal(){
   var sym = curSym(prcCurrency);
   var total = 0;
@@ -761,11 +811,16 @@ function calcTotal(){
     total += amt;
   });
   var isKrw = (prcCurrency === 'KRW');
-  var vat = isKrw ? Math.round(total * 0.1) : 0;   // 원화만 부가세 10%, 외화는 0 (B안)
-  var grand = total + vat;
-  document.getElementById('supply-total').textContent = total.toLocaleString() + ' ' + sym;
+  var incl = isKrw && VAT_MODE === 'incl';
+  var tt = computeTotals(total, isKrw, VAT_MODE);   // 원화만 부가세 10%, 외화는 0 (B안)
+  var vat = tt.vat, grand = tt.grand;
+  document.getElementById('vat-mode').style.display = isKrw ? '' : 'none';
+  document.getElementById('vat-mode-na').style.display = isKrw ? 'none' : '';
+  document.getElementById('price-note').style.display = incl ? '' : 'none';
+  document.getElementById('supply-row-label').textContent = incl ? '공급가액 (합계 ÷ 1.1)' : '공급가액';
+  document.getElementById('supply-total').textContent = tt.supply.toLocaleString() + ' ' + sym;
   document.getElementById('vat-amt').textContent = isKrw ? (vat.toLocaleString() + ' ' + sym) : '-';
-  document.getElementById('vat-row-label').textContent = isKrw ? '부가세 (10%)' : '부가세 (해당없음)';
+  document.getElementById('vat-row-label').textContent = isKrw ? (incl ? '부가세 (10% · 단가에 포함)' : '부가세 (10%)') : '부가세 (해당없음)';
   document.getElementById('total-vat').textContent = grand.toLocaleString() + ' ' + sym;
   document.getElementById('grand-label').textContent = isKrw ? '합계 (부가세 포함):' : '합계 (부가세 없음):';
   document.getElementById('total-amt').textContent = grand.toLocaleString() + ' ' + sym;
@@ -1203,6 +1258,12 @@ function submitFormConfirmed(docNo, subject, approvers){
       to:   '(' + items.length + '개 품목)',
     };
   }
+  // 단가 기준을 품의서와 다르게 바꿨으면 변경 이력에 남긴다 (같으면 이전과 동일하게 아무것도 넣지 않음)
+  if(effectiveVatMode() !== PARENT_VAT_MODE){
+    changedFields['vatMode'] = { label: '단가 기준', from: VAT_MODE_LABEL[PARENT_VAT_MODE], to: VAT_MODE_LABEL[effectiveVatMode()] };
+  } else {
+    delete changedFields['vatMode'];
+  }
 
   var btn = document.getElementById('submit-btn');
   btn.disabled = true;
@@ -1233,6 +1294,7 @@ function submitFormConfirmed(docNo, subject, approvers){
       paymentInfo: document.getElementById('payment-info').value,
       remarks: document.getElementById('prc-memo').value,   // PRC 레코드 비고(Q열) = 구매팀 메모 입력값
       items: items,
+      vatMode: effectiveVatMode(),
       approvers: approvers,
       attachments: attaches,
       existingAttachments: existingAtt,

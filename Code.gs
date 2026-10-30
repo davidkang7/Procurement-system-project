@@ -1237,6 +1237,9 @@ function _submitCore(data) {
   var drafterChk = assertDrafterIsSelf(data);
   if (drafterChk) return drafterChk;
 
+  // 단가 기준 — 화면 값을 그대로 믿지 않는다(외화·누락은 'excl'). 아래 계산·요약·메일이 모두 이 값을 쓴다.
+  data.vatMode = normalizeVatMode(data.vatMode, data.items);
+
   // 1단계: 합산 용량 사전 검증 (락 밖에서 미리 검사 — 성능 개선)
   try {
     validateTotalAttachmentSize(data.attachments || []);
@@ -1258,8 +1261,9 @@ function _submitCore(data) {
       var token        = Utilities.getUuid();
       var folder       = getOrCreateFolder(data.docNo, data.issueDate, 'staging');
       var itemsSummary = buildItemsSummary(data.items);
-      var totalAmt     = calcTotal(data.items);
-      var totalVat     = totalAmt + computeVat(totalAmt, data.items);
+      var totals       = computeTotals(data.items, data.vatMode);
+      var totalAmt     = totals.supply;
+      var totalVat     = totals.total;
       var approvers    = data.approvers || [];
 
       var newRow = [
@@ -1366,10 +1370,9 @@ function _submitCore(data) {
 
     // 요약 파일 저장 (오류 시에도 진행)
     try {
-      var totalAmt = calcTotal(data.items);
-      var totalVat = totalAmt + computeVat(totalAmt, data.items);
+      var totals = computeTotals(data.items, data.vatMode);
       var itemsSummary = buildItemsSummary(data.items);
-      saveSummaryToDrive(folder, data, itemsSummary, totalAmt, totalVat, data.approvers || []);
+      saveSummaryToDrive(folder, data, itemsSummary, totals.supply, totals.total, data.approvers || []);
     } catch(_) {}
   } catch(e) {
     return { ok: false, message: '시트 업데이트 실패: ' + e.toString() };
@@ -1957,6 +1960,9 @@ function resubmitRequisitionForClient(payload) {
 }
 
 function _resubmitCore(payload) {
+  // 단가 기준 — _submitCore와 같이 서버에서 정규화한다
+  if (payload && payload.data) payload.data.vatMode = normalizeVatMode(payload.data.vatMode, payload.data.items);
+
   // 사전 검증
   try {
     validateTotalAttachmentSize((payload.data && payload.data.attachments) || []);
@@ -2018,8 +2024,9 @@ function _resubmitCore(payload) {
       var resubCount   = parseInt(r[COL.RESUB_COUNT] || 0) + 1;
       var newToken     = Utilities.getUuid();
       var itemsSummary = buildItemsSummary(data.items);
-      var totalAmt     = calcTotal(data.items);
-      var totalVat     = totalAmt + computeVat(totalAmt, data.items);
+      var totals       = computeTotals(data.items, data.vatMode);
+      var totalAmt     = totals.supply;
+      var totalVat     = totals.total;
       var approvers    = data.approvers || [];
 
       // 폴더
@@ -2133,10 +2140,9 @@ function _resubmitCore(payload) {
     var label = lockResult.resubCount + '차_재상신_' +
                 Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
     var itemsSummary = buildItemsSummary(payload.data.items);
-    var totalAmt = calcTotal(payload.data.items);
-    var totalVat = totalAmt + computeVat(totalAmt, payload.data.items);
+    var totals = computeTotals(payload.data.items, payload.data.vatMode);
     createFileInFolder(folder, payload.data.docNo + '_' + label + '.txt',
-      buildSummaryText(payload.data, itemsSummary, totalAmt, totalVat, payload.data.approvers || []),
+      buildSummaryText(payload.data, itemsSummary, totals.supply, totals.total, payload.data.approvers || []),
       MimeType.PLAIN_TEXT);
   } catch(_) {}
 
@@ -3576,6 +3582,7 @@ function getPrefillDataForClient(parentToken) {
         deliveryAddr:  String(r[COL.DELIVERY_ADDR] || ''),
         remarks:       String(r[COL.REMARKS] || ''),
         items:         items,
+        vatMode:       detectVatMode(items, r[COL.TOTAL_AMT], r[COL.TOTAL_VAT]),   // 구매 작성 화면이 이어받는다
         attachments:   attachments,
         attachmentsSize: totalSize,
         maxTotalSize:    CONFIG.MAX_TOTAL_SIZE,
@@ -3629,6 +3636,9 @@ function _submitPrcCore(data) {
   var drafterChk = assertDrafterIsSelf(data);
   if (drafterChk) return drafterChk;
 
+  // 단가 기준 — _submitCore와 같이 서버에서 정규화한다
+  data.vatMode = normalizeVatMode(data.vatMode, data.items);
+
   // 사전 검증 (원본 REQ의 기존 첨부 + 신규 첨부 합산)
   try {
     var existingSize = 0;
@@ -3667,8 +3677,9 @@ function _submitPrcCore(data) {
       var token        = Utilities.getUuid();
       var folder       = getOrCreateFolder(data.docNo, data.issueDate, 'staging');
       var itemsSummary = buildItemsSummary(data.items);
-      var totalAmt     = calcTotal(data.items);
-      var totalVat     = totalAmt + computeVat(totalAmt, data.items);
+      var totals       = computeTotals(data.items, data.vatMode);
+      var totalAmt     = totals.supply;
+      var totalVat     = totals.total;
       var approvers    = data.approvers || [];
 
       var newRow = [
@@ -3769,10 +3780,9 @@ function _submitPrcCore(data) {
   sheet.getRange(lockResult.rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(savedFiles));
 
   try {
-    var totalAmt = calcTotal(data.items);
-    var totalVat = totalAmt + computeVat(totalAmt, data.items);
+    var totals = computeTotals(data.items, data.vatMode);
     var itemsSummary = buildItemsSummary(data.items);
-    saveSummaryToDrive(folder, data, itemsSummary, totalAmt, totalVat, data.approvers || []);
+    saveSummaryToDrive(folder, data, itemsSummary, totals.supply, totals.total, data.approvers || []);
   } catch(_) {}
 
   // 이메일
@@ -4336,6 +4346,7 @@ function getRequisitionForViewer(token, urlIdxHint) {
         docType:       String(r[COL.DOC_TYPE] || 'REQ'),
         parentToken:   String(r[COL.PARENT_DOC_ID] || ''),
         items:         items,
+        vatMode:       detectVatMode(items, r[COL.TOTAL_AMT], r[COL.TOTAL_VAT]),
         approvers:     approvers,
         attachments:   attachments,
         myApproverIdx: myApproverIdx,
@@ -4401,6 +4412,7 @@ function _getRejectDataCore(token) {
         rejectTime:    rejectTime,
         rejectReason:  rejectReason,
         items:         items,
+        vatMode:       detectVatMode(items, r[COL.TOTAL_AMT], r[COL.TOTAL_VAT]),
       }
     };
   } catch(err) {
@@ -4622,9 +4634,10 @@ function sendApprovalEmailWithRetry(approver, data, token, rowNum, idx) {
 
   // 부가정보: 폼 payload 경로(최초제출/재상신/PRC제출)는 data에서 직접 만들고,
   // 다음 결재자 경로(_decisionCore)는 시트 row로 미리 만들어 data.extra로 받는다.
+  //  '부가세 제외 금액'은 공급가액이다 — 단가에 부가세가 포함된 건은 품목 합이 아니다(computeTotals).
   var extra = data.extra || buildMailExtraInfo(
     data.purpose, data.vendorName, data.items,
-    (data.totalAmt != null ? data.totalAmt : calcTotal(data.items)), data.remarks);
+    (data.totalAmt != null ? data.totalAmt : computeTotals(data.items, data.vatMode).supply), data.remarks);
 
   var base = CONFIG.WEBAPP_URL +
     '?token=' + encodeURIComponent(token) +
@@ -6050,8 +6063,10 @@ function buildSummaryText(data, itemsSummary, totalAmt, totalVat, approvers) {
     '공급가액:     ' + Number(totalAmt).toLocaleString() + ' ' + _cur,
     '부가세:       ' + Number(totalVat - totalAmt).toLocaleString() + ' ' + _cur,
     '합계:         ' + Number(totalVat).toLocaleString() + ' ' + _cur,
-    '', '[결재자]',
   ];
+  // 단가에 부가세가 포함된 건만 한 줄 더한다 (별도 건의 요약 파일은 이전과 같다)
+  if (data.vatMode === 'incl') lines.push('단가 기준:    부가세 포함');
+  lines.push('', '[결재자]');
   approvers.forEach(function(ap, i) {
     lines.push((i + 1) + '. ' + ap.label + ' / ' + ap.name + ' <' + ap.email + '>');
   });
@@ -6258,15 +6273,45 @@ function getItemsCurrency(items) {
   return 'KRW';
 }
 
-// 부가세 계산: 원화(KRW)만 10%, 외화는 0 (B안)
-function computeVat(totalAmt, items) {
-  return getItemsCurrency(items) === 'KRW' ? Math.round(totalAmt * 0.1) : 0;
-}
-
 function calcTotal(items) {
   return (items || []).reduce(function(s, it) {
     return s + toNum(it.qty) * toNum(it.price);
   }, 0);
+}
+
+// 단가 기준(vatMode): 'excl' = 단가는 부가세 별도(기본) / 'incl' = 단가에 부가세 포함.
+//  원화(KRW)만 해당 — 외화는 언제나 'excl'이고 부가세 0이다 (B안).
+//  선택값은 따로 저장하지 않는다. 품의서목록은 33번째 열부터 결재자 블록이 결재자 수만큼 이어져
+//  새 열을 끼울 자리가 없다 → O열(공급가액)·P열(부가세포함합계)의 뜻은 그대로 두고,
+//  품목 합이 어느 열과 같은지로 판별한다(detectVatMode).
+function normalizeVatMode(mode, items) {
+  return (mode === 'incl' && getItemsCurrency(items) === 'KRW') ? 'incl' : 'excl';
+}
+
+// 품목 → { supply: O열 공급가액, vat, total: P열 합계, vatMode }. 작성 화면 3개의 computeTotals와 같은 규칙.
+//  별도: 공급가액 = 품목 합,  부가세 = round(공급가액 × 0.1), 합계 = 공급가액 + 부가세
+//  포함: 합계 = 품목 합,      공급가액 = round(합계 ÷ 1.1),   부가세 = 합계 − 공급가액
+function computeTotals(items, vatMode) {
+  var sum = calcTotal(items);
+  if (getItemsCurrency(items) !== 'KRW') return { supply: sum, vat: 0, total: sum, vatMode: 'excl' };
+  if (normalizeVatMode(vatMode, items) === 'incl') {
+    var supply = Math.round(sum / 1.1);
+    return { supply: supply, vat: sum - supply, total: sum, vatMode: 'incl' };
+  }
+  var vat = Math.round(sum * 0.1);
+  return { supply: sum, vat: vat, total: sum + vat, vatMode: 'excl' };
+}
+
+// 저장된 행의 단가 기준 판별 — 품목 합이 P열과 같고 O열과는 다르면 '포함'.
+//  별도 행은 품목 합 = O열이라 언제나 '별도'로 읽힌다(이 기능 전의 행 전부 포함).
+function detectVatMode(items, totalAmt, totalVat) {
+  if (getItemsCurrency(items) !== 'KRW') return 'excl';
+  var sum = calcTotal(items), o = Number(totalAmt) || 0, p = Number(totalVat) || 0;
+  return (Math.abs(sum - p) < 0.5 && Math.abs(sum - o) >= 0.5) ? 'incl' : 'excl';
+}
+
+function detectRowVatMode_(row) {
+  return detectVatMode(parseItemsSummary(String(row[COL.ITEMS] || '')), row[COL.TOTAL_AMT], row[COL.TOTAL_VAT]);
 }
 
 // ================================================================
@@ -6597,6 +6642,7 @@ function buildPdfPayload(row) {
     items:         parseItemsSummary(String(row[COL.ITEMS] || '')),
     totalAmt:      Number(row[COL.TOTAL_AMT]) || 0,
     totalVat:      Number(row[COL.TOTAL_VAT]) || 0,
+    vatMode:       detectRowVatMode_(row),   // PDF 단가 머리글 · 주문서 매니페스트(PO.gs)
     approvers:     approvers,
     parentApprovers: [],
     hasParentApprovers: false,

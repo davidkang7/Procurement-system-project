@@ -114,6 +114,14 @@ class Page:
         self.ctx.close()
 
 
+def wrap_html(p):
+    """작성 화면 전체 HTML — 사진 안내·주의 문구 두 줄은 2026-10-30 사진 한도 변경으로 바뀌어 비교에서 뺀다
+    (나머지 화면은 그대로 이전 코드와 같아야 한다)."""
+    html = p.page.inner_html('#wrap')
+    html = re.sub(r'(<div class="pz"[^>]*>).*?</div>', r'\1[사진 안내]</div>', html, flags=re.S)
+    return re.sub(r'<div class="notice">.*?</div>', '<div class="notice">[사진 주의]</div>', html, flags=re.S)
+
+
 def admin_discard(browser):
     print('\n[D] 관리자 — 강제 폐기 화면')
     resp = {'adminListDiscardableForClient': {'mode': 'ok', 'value': FIX['adminList']},
@@ -216,7 +224,7 @@ def insp_form(browser):
         p.page.wait_for_selector('#submit-btn')
     h, n = pg['HEAD'], pg['NEW']
     check('E1 신규 제출 화면에는 폐기 버튼 없음 (HEAD와 같은 화면)',
-          n.page.locator('#discard-btn').count() == 0 and h.page.inner_html('#wrap') == n.page.inner_html('#wrap'))
+          n.page.locator('#discard-btn').count() == 0 and wrap_html(h) == wrap_html(n))
     for p in (h, n):
         p.page.click('.verdict.pass')
         p.page.fill('#f-note', '지그 본체 2EA')
@@ -237,7 +245,7 @@ def insp_form(browser):
         p.page.wait_for_selector('#submit-btn')
     h, n = pg['HEAD'], pg['NEW']
     check('E3 동료의 재상신 화면: 폐기 버튼 없음 + HEAD와 같은 화면',
-          n.page.locator('#discard-btn').count() == 0 and h.page.inner_html('#wrap') == n.page.inner_html('#wrap'))
+          n.page.locator('#discard-btn').count() == 0 and wrap_html(h) == wrap_html(n))
     for p in (h, n):
         p.page.evaluate("STATE.appr[0] = {name:'이결재', dept:'경영팀', rank:'', email:'lee@inlct.com'}; renderApprTable();")
         p.page.click('#submit-btn')

@@ -216,6 +216,9 @@ def render_one(order: PoOrder, rules: VendorRules, args) -> dict:
 
     print(f"  · 기준 양식: {layout.template.name} ({'내자' if kind == 'krw' else '외자'}) "
           f"/ 품목칸 {layout.item_first}~{layout.item_last}행 / 합계 G{layout.sum_row}")
+    if order.vat_included:
+        print(f"  · 단가 기준: 부가세 포함 — 견적 단가 그대로, 합계행 H{layout.sum_row} '부가세포함', "
+              f"대조 기준 = 품의서 부가세포함합계 {float(order.total_vat or 0):,.0f}")
 
     if args.destination:
         order.destination = args.destination
@@ -265,8 +268,9 @@ def render_one(order: PoOrder, rules: VendorRules, args) -> dict:
     if info.get("HASH_CELLS"):
         print(f"  ✗ 열 너비 부족(### 표시): {info['HASH_CELLS']} — Excel에서 열 너비를 넓히세요.")
     amount = float(info.get("AMOUNT") or 0)
-    if order.total_amt is not None and abs(amount - float(order.total_amt)) > 0.5:
-        print(f"  ✗ 재계산 합계 불일치: 주문서 {amount:,.2f} ≠ 품의서 {float(order.total_amt):,.2f}")
+    expected = order.expected_total
+    if expected is not None and abs(amount - float(expected)) > 0.5:
+        print(f"  ✗ 재계산 합계 불일치: 주문서 {amount:,.2f} ≠ 품의서 {float(expected):,.2f}")
     else:
         print(f"  · 합계 확인: {amount:,.2f} {order.currency}")
 

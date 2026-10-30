@@ -212,7 +212,7 @@
     </colgroup>
     <thead>
       <tr>
-        <th>No.</th><th>품목명</th><th>규격</th><th>수량</th><th>단가 (<?= _cur ?>)</th><th>금액 (<?= _cur ?>)</th>
+        <th>No.</th><th>품목명</th><th>규격</th><th>수량</th><th>단가 (<?= _cur ?>)<? if (vatMode === 'incl') { ?><br>부가세 포함<? } ?></th><th>금액 (<?= _cur ?>)</th>
       </tr>
     </thead>
     <tbody>
@@ -229,11 +229,11 @@
     </tbody>
     <tfoot>
       <tr>
-        <td colspan="5" class="label">공급가액</td>
+        <td colspan="5" class="label"><?= vatMode === 'incl' ? '공급가액 (합계 ÷ 1.1)' : '공급가액' ?></td>
         <td class="value"><?= Number(totalAmt).toLocaleString() ?> <?= _sym ?></td>
       </tr>
       <tr>
-        <td colspan="5" class="label"><?= _isKrw ? '부가세 (10%)' : '부가세 (해당없음)' ?></td>
+        <td colspan="5" class="label"><?= _isKrw ? (vatMode === 'incl' ? '부가세 (10% · 단가에 포함)' : '부가세 (10%)') : '부가세 (해당없음)' ?></td>
         <td class="value"><?= _isKrw ? (_vat.toLocaleString() + ' ' + _sym) : '-' ?></td>
       </tr>
       <tr>
