@@ -7381,3 +7381,69 @@ function clearQueue() {
   Logger.log('[Queue] 전체 초기화됨 (by ' + actor + ')');
   return { ok: true, message: '큐 초기화 완료' };
 }
+
+// ================================================================
+// [임시] 테스트 데이터 삭제 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-10-30 초기 테스트 건(Test_123) 4행 삭제 — 사용자 요청.
+ *   품의서목록     PRQ-2026-001     (REQ)
+ *   품의서목록     PO-2026-4146     (PRC)
+ *   주문서목록     PO-2026-4146
+ *   검수보고서목록 PRQ-2026-001-01
+ *  문서번호·토큰·제목(Test_123)이 모두 맞는 행이 대상마다 정확히 하나일 때만 지운다.
+ *  하나라도 어긋나면 아무것도 지우지 않는다. 지운 행 원본은 시스템로그 payload에 남긴다.
+ *  행이 당겨지므로 다른 쓰기와 겹치지 않게 스크립트 락 안에서 처리한다.
+ */
+function _tmp_deleteTestDocs_20261030() {
+  var actor = _assertPoOperator_('_tmp_deleteTestDocs_20261030');
+  var SUBJECT = 'Test_123';
+  var targets = [
+    // [시트명, 문서번호 열, 문서번호, 토큰 열, 토큰, 제목 열, docType]
+    [CONFIG.SHEET_NAME,      COL.DOC_NO,      'PRQ-2026-001',    COL.TOKEN,        '05772945-7231-464a-9922-84cf78384c43', COL.SUBJECT,      'REQ'],
+    [CONFIG.SHEET_NAME,      COL.DOC_NO,      'PO-2026-4146',    COL.TOKEN,        '36d4de1b-9677-4abd-b026-02e3eadc797f', COL.SUBJECT,      'PRC'],
+    [CONFIG.PO_SHEET_NAME,   PO_COL.PO_NO,    'PO-2026-4146',    PO_COL.PRC_TOKEN, '36d4de1b-9677-4abd-b026-02e3eadc797f', PO_COL.SUBJECT,   'PO'],
+    [CONFIG.INSP_SHEET_NAME, INSP_COL.DOC_NO, 'PRQ-2026-001-01', INSP_COL.TOKEN,   'a2be9fdf-4cb5-4886-aca0-4bef175c1f27', INSP_COL.SUBJECT, 'INSP'],
+  ];
+
+  var out = withLock(function () {
+    var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+
+    // 1) 전부 찾아 검증 — 문서번호나 토큰 중 하나라도 걸리는 행이 정확히 1개이고 세 값이 모두 맞아야 한다.
+    var found = targets.map(function (t) {
+      var sheet = ss.getSheetByName(t[0]);
+      if (!sheet) throw new Error('시트 없음: ' + t[0]);
+      var rows = sheet.getDataRange().getValues();
+      var hits = [];
+      for (var i = 1; i < rows.length; i++) {
+        if (String(rows[i][t[1]] || '') === t[2] || String(rows[i][t[3]] || '') === t[4]) hits.push(i);
+      }
+      if (hits.length !== 1) throw new Error(t[0] + ' ' + t[2] + ': 후보 행 ' + hits.length + '개 (1개여야 함)');
+      var r = rows[hits[0]];
+      if (String(r[t[1]] || '') !== t[2] || String(r[t[3]] || '') !== t[4] || String(r[t[5]] || '') !== SUBJECT) {
+        throw new Error(t[0] + ' ' + t[2] + ': 문서번호·토큰·제목 불일치 (행 ' + (hits[0] + 1) + ')');
+      }
+      return { sheet: sheet, sheetName: t[0], rowNum: hits[0] + 1, row: r, docNo: t[2], token: t[4], docType: t[6] };
+    });
+
+    // 2) 아래 행부터 지운다 — 같은 시트의 위 행 번호가 밀리지 않게.
+    found.sort(function (a, b) {
+      return a.sheetName === b.sheetName ? b.rowNum - a.rowNum : (a.sheetName < b.sheetName ? -1 : 1);
+    });
+    return found.map(function (f) {
+      f.sheet.deleteRow(f.rowNum);
+      try {
+        writeAuditLog({ eventType: 'ADMIN_TEST_DATA_DELETE', actor: actor, docNo: f.docNo, docToken: f.token,
+          docType: f.docType, reason: '초기 테스트 데이터(Test_123) 행 삭제 — 2026-10-30 사용자 요청',
+          payload: { sheet: f.sheetName, rowNum: f.rowNum, row: f.row } });
+      } catch (_) {}
+      return f.sheetName + ' ' + f.docNo + ' (행 ' + f.rowNum + ') → 삭제';
+    });
+  });
+
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
