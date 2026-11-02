@@ -683,29 +683,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
-//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-11-02 생성분 마감 — TO-PO-26-339~340 (2건).
- *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지, PDF 육안 확인):
- *    TO-PO-26-339_Hitronics   USD 2,958.00
- *    TO-PO-26-340_Hitronics   USD 10,239.40
- */
-function _tmp_markPoDone_20261102() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일 ID]
-    ['TO-PO-26-339', 'd7efc8df-2ad2-4c16-ae3b-ab50bc985f5b', '13Rf5UFnpNntJW44gd5np_nnP-iBYbW-u'],
-    ['TO-PO-26-340', '3dd14b83-08e2-47af-ac60-48a5ff42fece', '1GROKTo5cMYC0Wgb43dgZrnDi30h6Hhap'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
