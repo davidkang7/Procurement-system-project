@@ -683,31 +683,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감용 무인자 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
-//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-11-03 생성분 마감 — TO-PO-26-341·342 (생성대기 2건) + 336 (생성불요였다가 사용자 요청으로 생성).
- *  주문서 폴더 업로드 완료 (xlsx + pdf, 2페이지, PDF 육안 확인):
- *    TO-PO-26-336_태성테크   KRW 7,380,000  (Payment Terms 익월말 — 품의서 원문은 지원금 메모라 지정)
- *    TO-PO-26-341_Coherent   USD 5,618.00
- *    TO-PO-26-342_옵텔콤     KRW 350,000
- */
-function _tmp_markPoDone_20261103() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일 ID]
-    ['TO-PO-26-336', '5c92ae19-fe40-420a-acb3-3254a8ffb95d', '1BlR0IvbCXGzHYsvx2LB3Iz5xYrGBsVe3'],
-    ['TO-PO-26-341', 'd3196103-2a56-4398-8d5e-cb35d912c1de', '1ag8DCx1PKFawx8Nfc85FtU1-GhQDjKJS'],
-    ['TO-PO-26-342', '38fb00e8-43fb-4d3d-aa7b-da6686cb1a86', '1X9N8YXyQNgIX1-q_w26fd4Uz-JjFfeOS'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
