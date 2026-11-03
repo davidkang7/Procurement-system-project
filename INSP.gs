@@ -2267,3 +2267,46 @@ function _cleanupInspPhotos(row) {
   return '사진 ' + deleted + '장 삭제';
 }
 
+
+// ================================================================
+// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-11-03 PENDING_PDF 1건 마감.
+ *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료 (판정 '합격', 사진 2장 임베드):
+ *    TO-PO-26-337  TP-AP-26-024-01  Chamber 수리 및 점검 (1회차 · 최종)
+ *  → moveStatus를 FINAL로 마감한다.
+ */
+function _tmp_markInspPdfDone_20261103() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
+    ['TO-PO-26-337', 'TP-AP-26-024-01', '5f263ff7-d10e-4775-8c55-073bbbe94471', '1An0lkP21dM0GZ7YPAubebepDt93kNJ43'],
+  ];
+
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2], fileId = j[3];
+    // 토큰-문서번호 대조: 한 건이라도 어긋나면 그 건만 건너뛴다(오기입 방지).
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return docNo + ' → SKIP / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return docNo + ' → SKIP / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return docNo + ' → SKIP / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return docNo + ' → SKIP / 이미 FINAL 마감됨';
+    }
+    var res = markInspPdfDone(token, fileId);
+    return docNo + ' → ' + (res.ok ? 'OK' : 'FAIL') + ' / ' + res.message;
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
