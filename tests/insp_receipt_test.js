@@ -435,7 +435,10 @@ console.log('\n[M] 뷰어 · 매니페스트 v2');
 // =================================================================
 console.log('\n[B] 레거시 회차 백필 임시 래퍼');
 // =================================================================
-{
+// 래퍼는 2026-11-05 운영 실행(11행 백필) 후 커밋에서 제거됐다. 다시 넣으면(다른 백필) 이 블록이 그대로 검증한다.
+if (typeof makeEnv('PROBE', readWT).sb._tmp_backfillInspReceipt_20261105 !== 'function') {
+  console.log('  (생략 — 백필 래퍼 제거됨 2026-11-05)');
+} else {
   // 실제 백필 대상 중 TO-PO-26-300 두 회차를 흉내낸다 (품목 4행, 1회차 CLx1 100 / 2회차 CLx2 100)
   const ITEMS300 = '1. Small Mirror (M1) | EA | 400개 | 10.5 USD\n2. Large Mirror (M2) | EA | 200개 | 20.57 USD\n3. Cylindrical Lens X (CLx1) | EA | 100개 | 19.65 USD\n4. Cylindrical Lens (CLx2) | EA | 100개 | 24.2 USD';
   const n = seed(makeEnv('NEW', readWT), {
