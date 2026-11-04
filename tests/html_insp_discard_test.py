@@ -115,11 +115,38 @@ class Page:
 
 
 def wrap_html(p):
-    """작성 화면 전체 HTML — 사진 안내·주의 문구 두 줄은 2026-10-30 사진 한도 변경으로 바뀌어 비교에서 뺀다
-    (나머지 화면은 그대로 이전 코드와 같아야 한다)."""
-    html = p.page.inner_html('#wrap')
+    """작성 화면 전체 HTML — 의도된 차이는 비교에서 뺀다:
+    사진 안내·주의 문구(2026-10-30 사진 한도 변경), 입고 품목 표·입고 내역 한 줄·최종 검수 안내문(2026-11-05 품목별 입고 v1.1).
+    나머지 화면은 그대로 이전 코드와 같아야 한다."""
+    html = p.page.evaluate("""() => {
+      const w = document.getElementById('wrap').cloneNode(true);
+      // 수정본: 입고 품목 섹션 통째로 / 이전: '입고 내역' 라벨+입력 칸
+      w.querySelectorAll('#rc-table').forEach(t => t.closest('.sec').remove());
+      w.querySelectorAll('.lbl').forEach(l => { if (l.textContent.trim() === '입고 내역 *') { const v = l.nextElementSibling; l.remove(); if (v) v.remove(); } });
+      w.querySelectorAll('.fc .ds').forEach(d => { d.innerHTML = '[최종 안내]'; });
+      w.querySelectorAll('#f-final').forEach(c => c.removeAttribute('onchange'));
+      return w.innerHTML;
+    }""")
     html = re.sub(r'(<div class="pz"[^>]*>).*?</div>', r'\1[사진 안내]</div>', html, flags=re.S)
     return re.sub(r'<div class="notice">.*?</div>', '<div class="notice">[사진 주의]</div>', html, flags=re.S)
+
+
+def fill_receipt(p):
+    """입고 기록 — 이전 코드는 '입고 내역' 한 줄, 수정본은 품목 표 첫 행 체크(잔량 자동 입력)."""
+    if p.page.locator('#f-note').count():
+        p.page.fill('#f-note', '지그 본체 2EA')
+    else:
+        p.page.check('#rc-chk-0')          # 잔량 10 자동 입력
+        p.page.fill('#rc-qty-0', '5')      # 부분 입고로 두어 '중간 회차' 선택이 되묻기 없이 바로 제출된다
+
+
+def submit_payloads(p):
+    """제출 페이로드 — v1.1에서 바뀐 두 키(receivedNote → receiptItems)는 빼고 비교한다."""
+    out = []
+    for c in p.calls('submitInspForClient'):
+        a = dict(c['args'][0]); a.pop('receivedNote', None); a.pop('receiptItems', None)
+        out.append(a)
+    return out
 
 
 def admin_discard(browser):
@@ -227,13 +254,16 @@ def insp_form(browser):
           n.page.locator('#discard-btn').count() == 0 and wrap_html(h) == wrap_html(n))
     for p in (h, n):
         p.page.click('.verdict.pass')
-        p.page.fill('#f-note', '지그 본체 2EA')
+        fill_receipt(p)
         p.page.evaluate("STATE.appr[0] = {name:'이결재', dept:'경영팀', rank:'', email:'lee@inlct.com'}; renderApprTable();")
         p.page.click('#submit-btn')
         p.page.click('#fin-no')
         p.wait_calls('submitInspForClient', 1)
-    check('E1 제출 페이로드 HEAD와 동일', h.calls('submitInspForClient') == n.calls('submitInspForClient'),
-          [h.calls('submitInspForClient'), n.calls('submitInspForClient')])
+    check('E1 제출 페이로드 HEAD와 동일 (입고 기록 키 제외)', submit_payloads(h) == submit_payloads(n),
+          [submit_payloads(h), submit_payloads(n)])
+    a1 = n.calls('submitInspForClient')[0]['args'][0]
+    check('E1 수정본 페이로드: receivedNote 없음 · receiptItems 품목별 수량',
+          'receivedNote' not in a1 and a1.get('receiptItems') == [{'idx': 0, 'qty': 5, 'reason': ''}], a1.get('receiptItems'))
     for p in pg.values():
         p.close()
 
@@ -247,12 +277,14 @@ def insp_form(browser):
     check('E3 동료의 재상신 화면: 폐기 버튼 없음 + HEAD와 같은 화면',
           n.page.locator('#discard-btn').count() == 0 and wrap_html(h) == wrap_html(n))
     for p in (h, n):
+        if p.page.locator('#rc-chk-0').count():
+            p.page.check('#rc-chk-0')   # 수정본: 잔량을 채워야 '최종'이 미입고 사유 단계 없이 바로 제출된다
         p.page.evaluate("STATE.appr[0] = {name:'이결재', dept:'경영팀', rank:'', email:'lee@inlct.com'}; renderApprTable();")
         p.page.click('#submit-btn')
         p.page.click('#fin-yes')
         p.wait_calls('submitInspForClient', 1)
-    check('E6 재상신 페이로드 HEAD와 동일', h.calls('submitInspForClient') == n.calls('submitInspForClient'),
-          [h.calls('submitInspForClient'), n.calls('submitInspForClient')])
+    check('E6 재상신 페이로드 HEAD와 동일 (입고 기록 키 제외)', submit_payloads(h) == submit_payloads(n),
+          [submit_payloads(h), submit_payloads(n)])
     for p in pg.values():
         p.close()
 

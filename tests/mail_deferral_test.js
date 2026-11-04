@@ -237,7 +237,8 @@ function seed(env) {
   const isheet = sb.ensureInspSheet();
   const I = sb.INSP_COL;
   function insp(o) {
-    const row = new Array(sb.INSP_TOTAL_COLS).fill('');
+    // v1.1(2026-11-05)부터 INSP_TOTAL_COLS가 53. 시드는 배포 전 회차(51폭)로 두어 BASE/NEW 시트 비교가 흔들리지 않게 한다
+    const row = new Array(I.APPR_START + I.MAX_APPROVERS * I.APPR_COLS).fill('');
     row[I.SUBMIT_AT] = new FakeDate('2026-10-25T09:00:00+09:00'); row[I.DOC_NO] = o.docNo; row[I.SEQ] = 1;
     row[I.PRC_TOKEN] = 'tok-prc'; row[I.REQ_TOKEN] = 'tok-par'; row[I.PO_NO] = 'TO-PO-26-901'; row[I.REQ_NO] = 'TH-AP-26-104';
     row[I.SUBJECT] = '시험 품목'; row[I.VENDOR_NAME] = '라인테크'; row[I.DRAFTER] = KIM; row[I.DRAFTER_NAME] = NAMES[KIM];
@@ -265,7 +266,8 @@ function check(name, fn) {
 }
 const norm = x => JSON.parse(JSON.stringify(x === undefined ? null : x, (k, v) => (v instanceof RealDate ? 'D' + v.getTime() : v)));
 const same = (a, b) => JSON.stringify(norm(a)) === JSON.stringify(norm(b)) || ('\n      BASE=' + JSON.stringify(norm(a)).slice(0, 600) + '\n      NEW =' + JSON.stringify(norm(b)).slice(0, 600));
-const sheets = env => ({ main: env.main().rows, insp: env.insp().rows });
+// INSP v1.1(2026-11-05): ensureInspSheet 헤더가 53열(확장 2열). 결재 흐름은 확장 열을 쓰지 않으므로 51열까지만 비교한다
+const sheets = env => ({ main: env.main().rows, insp: env.insp().rows.map(r => r.slice(0, 51)) });
 const DECIDE = { REQ: 'processDecisionFromClient', INSP: 'processInspDecisionFromClient' };
 const SCEN = [
   { name: 'REQ 중간 승인 → 다음 결재자',          fn: DECIDE.REQ,  token: 'tok-mid',   decision: 'approve', mails: 1 },

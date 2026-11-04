@@ -77,6 +77,8 @@ class FakeSheet {
   getName() { return this.name; }
   getLastRow() { return this.rows.length; }
   getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0); }
+  getMaxColumns() { return Math.max(26, this.getLastColumn(), this._maxCols || 0); }   // v1.1 확장 열 보장이 호출
+  insertColumnsAfter(after, n) { this._maxCols = this.getMaxColumns() + n; return this; }
   appendRow(vals) { this.rows.push(vals.slice()); return this; }
   getRange(row, col, nRows = 1, nCols = 1) { return new FakeRange(this, row, col, nRows, nCols); }
   getDataRange() { return this.getRange(1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
@@ -423,6 +425,7 @@ console.log('\n[P] 검수 사진 — 장당 5MB 삭제 · 합계 15MB · 6장');
   const inspPayload = photos => ({
     prcToken: 'tok-none', resubToken: '', receivedDate: '2026-10-30', receivedNote: '2EA', verdict: '합격', isFinal: false, comment: '',
     approvers: [{ label: '기안자', name: NAMES[KIM], email: KIM }, { label: '결재자 1', name: NAMES[LEE], email: LEE }], photos,
+    receiptItems: [],   // v1.1: 품목별 입고 키가 있어야 락 안(대상 문서 조회)까지 간다. 이전 코드는 무시
   });
   // 사진 검사를 통과하면 락 안의 '대상 구매 문서 없음'에서 멈춘다 — 그 메시지가 곧 '사진 검사 통과'
   const PASSED = '대상 구매 문서를 찾을 수 없습니다.';

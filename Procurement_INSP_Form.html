@@ -52,6 +52,41 @@
   .fc b{color:var(--insp);}
   .fc .ds{font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
 
+  /* [v1.1] 입고 품목 표 — PRC 품목별 이번 회차 입고 수량 (2026-11-05) */
+  .rc-wrap{padding:12px 16px 6px;overflow-x:auto;}
+  table.rc{border-collapse:collapse;width:100%;min-width:720px;font-variant-numeric:tabular-nums;}
+  .rc th{background:#f6f7f9;font-size:10.5px;font-weight:700;color:var(--ink-soft);padding:7px 8px;border-bottom:1.5px solid var(--line);text-align:center;white-space:nowrap;}
+  .rc th.l,.rc td.l{text-align:left;}
+  .rc td{padding:6px 8px;border-bottom:1px solid var(--line-soft);font-size:12px;text-align:center;vertical-align:middle;}
+  .rc tr.done td{color:var(--ink-mute);}
+  .rc .nm{font-weight:600;}
+  .rc .num{font-weight:700;}
+  .rc .remain{color:#b4530a;font-weight:700;}
+  .rc tr.done .remain{color:var(--ok);}
+  .rc input[type=number]{width:84px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12.5px;font-family:inherit;text-align:right;}
+  .rc input[type=number]:disabled{background:var(--bg);color:#aaa;}
+  .rc input.rc-reason{width:100%;min-width:150px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:11.5px;font-family:inherit;}
+  .rc input.rc-reason:disabled{background:transparent;border-color:transparent;}
+  .rc input.rc-reason.need{border-color:var(--danger);background:#fff8f8;}
+  .st{display:inline-block;font-size:10px;font-weight:700;border-radius:9px;padding:1px 7px;white-space:nowrap;}
+  .st.done{background:var(--ok-soft);color:var(--ok);}
+  .st.part{background:var(--neutral-soft);color:var(--ink-soft);}
+  .st.over{background:var(--danger-soft);color:var(--danger);}
+  .st.short{background:#fef3e2;color:#a35f00;}
+  .st.wait{background:var(--bg);color:var(--ink-mute);}
+  .rc-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-soft);padding:6px 16px 0;}
+  .rc-foot b{color:var(--insp);}
+  .rc-hint{font-size:11px;color:var(--ink-mute);padding:4px 16px 12px;}
+  .rc-legacy{margin:12px 16px 0;font-size:11.5px;color:var(--ink-soft);background:#fef3e2;border:1px solid #f3dcb8;border-radius:7px;padding:8px 11px;}
+  .rc-legacy ul{margin:4px 0 0 16px;}
+  /* 최종 확인 모달 — 입고 현황·미입고 사유 입력 단계 */
+  .ov-ok{margin-top:14px;text-align:left;font-size:11.5px;color:#1d6b40;background:var(--ok-soft);border:1px solid #bfe3cd;border-radius:7px;padding:8px 11px;}
+  .rs-list{margin-top:12px;display:flex;flex-direction:column;gap:8px;text-align:left;}
+  .rs-row .n{font-weight:700;}
+  .rs-row .q{color:#a35f00;font-weight:700;margin-left:6px;}
+  .rs-row input{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;margin-top:3px;}
+  .rs-row input.need{border-color:var(--danger);background:#fff8f8;}
+
   /* 결재란 — 기존 Form 패턴 */
   .appr-wrap{padding:12px 16px 10px;overflow-x:auto;}
   .appr-table{border-collapse:collapse;}
@@ -119,7 +154,7 @@
   /* 인쇄 — 품의/구매 화면과 동일 (A4 세로, 화면 전용 요소 숨김) */
   @media print{
     body{background:#fff;padding:0;}
-    .topbar,.home-btn,.actions,.pz,.notice,.overlay,.addb,.delb,.pi .d{display:none!important;}
+    .topbar,.home-btn,.actions,.pz,.notice,.overlay,.addb,.delb,.pi .d,.rc-hint,.rc-foot{display:none!important;}
     .wrap{max-width:none;margin:0;padding:0;}
     .sec{break-inside:avoid;}
     input,select,textarea{border:none!important;background:transparent!important;}
@@ -146,7 +181,9 @@ var RESUB_TOKEN = '<?= resubToken ?>';
 var WEBAPP_URL  = '<?= webappUrl ?>';
 
 var FORM = null, APPROVERS = [], CURRENT_USER = null, RESUB = null;
-var STATE = { verdict:'', isFinal:false, photos:[], appr:[null,null,null] };
+// [v1.1] 품목별 입고 — 서버가 준 PRC 품목(발주·기입고·잔량)과 레거시 회차. itemsUnavailable이면 자유 텍스트 폴백
+var RECEIPT = null;
+var STATE = { verdict:'', isFinal:false, photos:[], appr:[null,null,null], rc:[] };
 // 검수 사진 한도 — 서버 INSP.gs의 INSP_PHOTO_MAX_COUNT / INSP_PHOTO_MAX_TOTAL과 같은 값 (합계는 줄인 사본 기준)
 var PHOTO_MAX_COUNT = 6;
 var PHOTO_MAX_TOTAL = 15 * 1024 * 1024;
@@ -176,9 +213,11 @@ function boot(){
         return;
       }
       FORM=res.form; APPROVERS=res.approverList||[]; CURRENT_USER=res.currentUser||null; RESUB=res.resub||null;
+      RECEIPT=res.receipt||null;
       if(RESUB){
         STATE.verdict=RESUB.verdict||''; STATE.isFinal=!!RESUB.isFinal;
       }
+      initReceipt();
       render();
     })
     .withFailureHandler(function(err){
@@ -203,8 +242,12 @@ function render(){
     + row('업체명', esc(f.vendorName), '')
     + row('기안 일자', esc(f.issueDate), '')
     + '<div class="lbl">입고 일자 *</div><div class="val"><input type="date" id="f-received" value="'+esc(RESUB?RESUB.receivedDate:today())+'"></div>'
-    + '<div class="lbl">입고 내역 *</div><div class="val span3"><input type="text" id="f-note" maxlength="200" placeholder="이번 회차 입고 품목·수량 (예: 지그 본체 2EA — 2차분)" value="'+esc(RESUB?RESUB.receivedNote:'')+'"></div>'
+    // 입고 내역 한 줄 입력은 품목 표로 대체됐다(v1.1). 품목내역을 해석할 수 없는 옛 품의에서만 폴백으로 남긴다.
+    + (rcMode()?'':'<div class="lbl">입고 내역 *</div><div class="val span3"><input type="text" id="f-note" maxlength="200" placeholder="이번 회차 입고 품목·수량 (예: 지그 본체 2EA — 2차분)" value="'+esc(RESUB?RESUB.receivedNote:'')+'"></div>')
     + '</div></div>';
+
+  // 1-1. 입고 품목 (v1.1) — PRC 품목별 이번 회차 입고 수량
+  html+=renderReceiptSection();
 
   // 2. 검수 결과
   html+='<div class="sec"><div class="sec-h"><span class="dot"></span>검수 결과</div><div class="body">'
@@ -221,9 +264,10 @@ function render(){
     + '<input type="file" id="f-photos" accept="image/*" multiple style="display:none" onchange="addPhotos(this.files)">'
     + '<div class="pg" id="pg"></div>'
     + '<div class="notice">ℹ️ 사진은 <b>긴 변 1600px로 줄인 사본</b>이 올라가 결재 완료 후 검수보고서 PDF에 들어갑니다. 촬영 원본(원래 해상도·촬영일시 정보)은 올라가지 않습니다.</div>'
-    + '<label class="fc"><input type="checkbox" id="f-final"'+(STATE.isFinal?' checked':'')+' onchange="STATE.isFinal=this.checked">'
+    + '<label class="fc"><input type="checkbox" id="f-final"'+(STATE.isFinal?' checked':'')+' onchange="STATE.isFinal=this.checked;drawReceipt()">'
     + '<div><b>최종 검수 (이번 입고로 본 품의의 납품 완료)</b>'
-    + '<div class="ds">체크 후 결재가 완료되면 본 품의가 <b>검수 완료(종결)</b> 처리되고 추가 제출이 차단됩니다.</div></div></label>'
+    + '<div class="ds">체크 후 결재가 완료되면 본 품의가 <b>검수 완료(종결)</b> 처리되고 추가 제출이 차단됩니다.'
+    + (rcMode()?' 잔량이 남은 품목은 미입고 사유를 적어야 합니다.':'')+'</div></div></label>'
     + '</div></div>';
 
   // 3. 결재란
@@ -243,8 +287,101 @@ function render(){
     + '</div>';
 
   document.getElementById('wrap').innerHTML=html;
-  drawPhotos(); renderApprTable();
+  drawPhotos(); renderApprTable(); drawReceipt();
 }
+
+// ── [v1.1] 입고 품목 표 ──
+// STATE.rc[i] = {idx, checked, qty, reason} — RECEIPT.items[i]와 같은 순서(idx = 품의 품목내역 행 번호)
+var RC_ST={over:'초과',done:'완료',short:'미입고',part:'부분',wait:'대기'};
+function rcMode(){ return !!(RECEIPT && !RECEIPT.itemsUnavailable && (RECEIPT.items||[]).length); }
+function initReceipt(){
+  STATE.rc=[];
+  if(!rcMode()) return;
+  STATE.rc=RECEIPT.items.map(function(it){ return {idx:it.idx, checked:false, qty:0, reason:''}; });
+  // 재상신: 반려된 회차의 수량·사유를 그대로 채운다 (기입고는 서버가 본인 행을 빼고 다시 계산해 줬다)
+  if(RESUB && RESUB.receipt && RESUB.receipt.items){
+    RESUB.receipt.items.forEach(function(p){
+      var l=STATE.rc[p.idx]; if(!l) return;
+      l.qty=parseInt(p.qty,10)||0; l.reason=String(p.reason||''); l.checked=l.qty>0||!!l.reason;
+    });
+  }
+}
+function renderReceiptSection(){
+  if(!rcMode()) return '';
+  var h='<div class="sec"><div class="sec-h"><span class="dot"></span>입고 품목 *'
+    + '<span style="font-weight:400;color:var(--ink-mute);font-size:11px;margin-left:auto;">기입고 = 결재 진행 중 회차 포함 누계</span></div>';
+  if((RECEIPT.legacyRounds||[]).length){
+    h+='<div class="rc-legacy">⚠ 이전 '+RECEIPT.legacyRounds.length+'회차는 품목별 수량 없이(자유 입력) 기록되어 <b>기입고에 반영되지 않았습니다</b>. 아래 입고 내역을 참고해 이번 수량을 조정하세요.<ul>'
+      + RECEIPT.legacyRounds.map(function(r){ return '<li>'+esc(r.docNo)+' · '+esc(r.receivedDate)+' · '+esc(r.receivedNote)+' ('+esc(r.status)+')</li>'; }).join('')
+      + '</ul></div>';
+  }
+  if(RECEIPT.snapshotMismatch || RECEIPT.orphanQty>0){
+    h+='<div class="rc-legacy">⚠ 발주 수량이 이전 회차 기록과 다릅니다(품의 수량 정정). 기입고·잔량은 현재 품의 수량 기준입니다.'
+      + (RECEIPT.orphanQty>0?' (삭제된 품목의 입고분 '+RECEIPT.orphanQty+')':'')+'</div>';
+  }
+  h+='<div class="rc-wrap"><table class="rc" id="rc-table"><thead><tr>'
+    + '<th><input type="checkbox" id="rc-all" title="전체 선택" aria-label="전체 선택" onchange="rcToggleAll(this.checked)"></th>'
+    + '<th>No</th><th class="l">품명</th><th>규격</th><th>발주</th><th>기입고</th><th>잔량</th><th>이번 입고</th><th class="l">수량 상이 사유</th><th>상태</th>'
+    + '</tr></thead><tbody id="rc-body"></tbody></table></div>'
+    + '<div class="rc-foot"><div id="rc-sum"></div><div>체크하면 잔량이 자동 입력되고 수정할 수 있습니다</div></div>'
+    + '<div class="rc-hint">초과 입고(누계 &gt; 발주)는 해당 행의 사유를 적어야 제출됩니다. 최종 검수를 체크하면 잔량이 남는 행에 미입고 종결 사유 칸이 열립니다.</div>'
+    + '</div>';
+  return h;
+}
+function rcState(i){
+  var it=RECEIPT.items[i], l=STATE.rc[i], cum=it.prev+l.qty;
+  if(cum>it.ordered) return 'over';
+  if(cum===it.ordered) return 'done';
+  return STATE.isFinal?'short':(l.qty>0?'part':'wait');
+}
+// 초과는 이번 회차 입고분이 있을 때만 사유 (이전 회차에서 이미 초과된 품목의 0 입고는 묻지 않음 — 서버 규칙과 동일)
+function rcNeedReason(i){ var s=rcState(i); return (s==='over'&&STATE.rc[i].qty>0)||s==='short'; }
+function rcPlaceholder(i){ var s=rcState(i); return rcNeedReason(i)?(s==='over'?'초과 입고 사유 (필수)':'미입고 종결 사유 (필수)'):'-'; }
+function drawReceipt(){
+  var tb=document.getElementById('rc-body'); if(!tb||!rcMode()) return;
+  tb.innerHTML=RECEIPT.items.map(function(it,i){
+    var l=STATE.rc[i], s=rcState(i), need=rcNeedReason(i);
+    return '<tr'+(it.remaining===0&&l.qty===0?' class="done"':'')+'>'
+      + '<td><input type="checkbox" class="rc-chk" id="rc-chk-'+i+'"'+(l.checked?' checked':'')+' onchange="rcSetChecked('+i+',this.checked)" aria-label="'+esc(it.name)+' 선택"></td>'
+      + '<td>'+(i+1)+'</td><td class="l nm">'+esc(it.name)+'</td><td>'+esc(it.spec)+'</td>'
+      + '<td class="num">'+it.ordered+'</td><td>'+it.prev+'</td><td class="remain">'+it.remaining+'</td>'
+      + '<td><input type="number" min="0" step="1" inputmode="numeric" class="rc-qty" id="rc-qty-'+i+'" value="'+l.qty+'"'+(l.checked?'':' disabled')+' oninput="rcOnQty('+i+',this.value)" aria-label="이번 입고 수량"></td>'
+      + '<td class="l"><input type="text" class="rc-reason'+(need&&!l.reason?' need':'')+'" id="rc-rs-'+i+'" maxlength="200" value="'+esc(l.reason)+'"'+(need?'':' disabled')+' placeholder="'+rcPlaceholder(i)+'" oninput="rcOnReason('+i+',this.value)" aria-label="수량 상이 사유"></td>'
+      + '<td><span class="st '+s+'" id="rc-st-'+i+'">'+RC_ST[s]+'</span></td></tr>';
+  }).join('');
+  rcSummary();
+}
+function rcSetChecked(i,on){ var it=RECEIPT.items[i], l=STATE.rc[i]; l.checked=on; l.qty=on?it.remaining:0; if(!on) l.reason=''; drawReceipt(); }
+function rcToggleAll(on){ STATE.rc.forEach(function(l,i){ var it=RECEIPT.items[i]; l.checked=on; l.qty=on?it.remaining:0; if(!on) l.reason=''; }); drawReceipt(); }
+function rcOnQty(i,v){ var n=parseInt(v,10); STATE.rc[i].qty=(v===''||isNaN(n)||n<0)?0:n; rcUpdateRow(i); }
+function rcOnReason(i,v){ STATE.rc[i].reason=String(v||'').trim(); var el=document.getElementById('rc-rs-'+i); if(el) el.classList.toggle('need', rcNeedReason(i)&&!STATE.rc[i].reason); }
+// 수량 입력 중에는 행만 갱신한다 (전체 재렌더는 포커스를 잃는다)
+function rcUpdateRow(i){
+  var s=rcState(i), need=rcNeedReason(i), l=STATE.rc[i];
+  var st=document.getElementById('rc-st-'+i); if(st){ st.className='st '+s; st.textContent=RC_ST[s]; }
+  var rs=document.getElementById('rc-rs-'+i); if(rs){ rs.disabled=!need; rs.placeholder=rcPlaceholder(i); rs.classList.toggle('need', need&&!l.reason); }
+  rcSummary();
+}
+function rcSummary(){
+  var el=document.getElementById('rc-sum'); if(!el) return;
+  var n=0, done=0;
+  RECEIPT.items.forEach(function(it,i){ var l=STATE.rc[i]; if(l.qty>0) n++; if(it.prev+l.qty>=it.ordered) done++; });
+  el.innerHTML='이번 회차 입고 <b>'+n+'</b>개 품목 · 반영 후 완료 <b>'+done+'</b>/'+RECEIPT.items.length+' 품목';
+  var all=document.getElementById('rc-all'); if(all) all.checked=STATE.rc.length>0&&STATE.rc.every(function(l){return l.checked;});
+}
+// 이번 회차 반영 후 현황 — 제출 검증·최종 확인 모달 공용
+function rcAnalysis(){
+  var over=[], short=[], anyQty=false, doneN=0;
+  RECEIPT.items.forEach(function(it,i){
+    var l=STATE.rc[i], cum=it.prev+l.qty;
+    if(l.qty>0) anyQty=true;
+    if(cum>it.ordered) over.push({it:it,l:l,cum:cum});
+    else if(cum<it.ordered) short.push({it:it,l:l,cum:cum});
+    else doneN++;
+  });
+  return {over:over, short:short, anyQty:anyQty, doneN:doneN, total:RECEIPT.items.length, allDone:short.length===0&&over.length===0};
+}
+function rcPayloadItems(){ return STATE.rc.map(function(l){ return {idx:l.idx, qty:l.qty, reason:l.reason}; }); }
 
 function row(label,value,autoTag){
   return '<div class="lbl">'+esc(label)+'</div><div class="val ro">'+value+(autoTag?'<span class="auto">'+esc(autoTag)+'</span>':'')+'</div>';
@@ -387,8 +524,20 @@ function pickAppr(email){
 // ── 제출 ──
 function submit(){
   if(STATE.verdict!=='합격'&&STATE.verdict!=='불합격'){showAlertModal('검수 판정(합격/불합격)을 선택해 주세요.');return;}
-  var note=document.getElementById('f-note').value.trim();
-  if(!note){showAlertModal('입고 내역을 입력해 주세요.');return;}
+  // [v1.1] 입고 품목: 초과 입고 사유 누락은 여기서 막는다. 입고 합계 0·미입고 사유는 최종/중간 선택에 따라 모달에서 가른다.
+  var fallbackNote='';
+  if(rcMode()){
+    var an=rcAnalysis();
+    var missOver=an.over.filter(function(o){return o.l.qty>0&&!o.l.reason;});
+    if(missOver.length){
+      showAlertModal('초과 입고 품목의 수량 상이 사유를 입력해 주세요.', missOver.map(function(o){ return (o.it.idx+1)+'. '+o.it.name+' — 누계 '+o.cum+'/'+o.it.ordered; }));
+      return;
+    }
+  } else {
+    var noteEl=document.getElementById('f-note');
+    fallbackNote=noteEl?noteEl.value.trim():'';
+    if(!fallbackNote){showAlertModal('입고 내역을 입력해 주세요.');return;}
+  }
   var sels=STATE.appr.filter(Boolean);
   if(sels.length===0){showAlertModal('결재자를 1명 이상 지정해 주세요.');return;}
   var lastFilled=-1; STATE.appr.forEach(function(a,i){if(a)lastFilled=i;});
@@ -414,13 +563,15 @@ function submit(){
   var payload={
     prcToken:PRC_TOKEN, resubToken:RESUB_TOKEN||'',
     receivedDate:document.getElementById('f-received').value,
-    receivedNote:note,
     verdict:STATE.verdict,
     isFinal:STATE.isFinal,
     comment:document.getElementById('f-comment').value,
     approvers:approvers,
     photos:STATE.photos.map(function(p){return {name:p.name,size:p.size,type:'image/jpeg',data:p.dataUrl.split(',')[1]};}),
   };
+  // [v1.1] 입고 내역 한 줄 대신 품목별 수량. 품목내역을 해석할 수 없는 옛 품의만 자유 텍스트(폴백)
+  if(rcMode()) payload.receiptItems=rcPayloadItems();
+  else payload.receivedNoteFallback=fallbackNote;
 
   // 사진 없음·결재자 중복은 따로 묻지 않고 최종 확인 모달 한 장에 함께 보여준다
   var warns=[];
@@ -431,6 +582,7 @@ function submit(){
     STATE.isFinal=isFinal;
     var cb=document.getElementById('f-final'); if(cb) cb.checked=isFinal;
     payload.isFinal=isFinal;
+    if(rcMode()){ drawReceipt(); payload.receiptItems=rcPayloadItems(); }   // 모달 2단계에서 적은 미입고 사유 반영
     sendSubmit(payload);
   });
 }
@@ -445,7 +597,8 @@ function sendSubmit(payload){
         showSuccess(res);
       }else{
         document.getElementById('submit-btn').disabled=false;
-        showAlertModal('제출에 실패했습니다.', res?res.message:'알 수 없는 오류');
+        // 서버 검증 메시지는 품목별 한 줄씩(\n) 올 수 있다
+        showAlertModal('제출에 실패했습니다.', String(res&&res.message?res.message:'알 수 없는 오류').split('\n'));
       }
     })
     .withFailureHandler(function(err){
@@ -458,23 +611,81 @@ function sendSubmit(payload){
 // 제출 직전 최종 확인 — 체크박스와 관계없이 매번 '최종 / 중간'을 직접 고르게 한다.
 // 2026-09-23 TO-PO-26-253·258·259 세 건이 '최종 검수' 체크 없이 제출돼 isFinal을 소급 보정했다 (재발 방지).
 // 기본 선택은 두지 않는다: 포커스를 빼서 Enter로 넘어가지 않고, 두 버튼 중 하나를 눌러야 제출된다.
+// [v1.1] 품목별 입고 현황을 같은 카드에 보여준다: 잔량이 남은 채 '최종'을 고르면 같은 창에서 미입고 사유를 받고,
+//  입고 수량이 전부 0이면 '중간'은 막는다(종결 전용 회차는 최종만 가능). 전 품목 완료인데 '중간'이면 한 번 되묻는다.
 function showFinalCheckModal(warns, onChoose){
+  var ctx=rcMode()?rcAnalysis():null;
   var html='<div class="q-icon">?</div>'
     + '<div class="ov-msg">이번 회차가 최종 검수입니까?</div>'
     + '<div class="ov-sub">'+esc(FORM.docNo)+' · '+esc(FORM.nextSeq)+'회차 · '+esc(STATE.verdict)+'</div>';
+  if(ctx){
+    html+='<div class="'+(ctx.allDone?'ov-ok':'ov-warn')+'" id="fin-status"><b>이번 회차 반영 후 입고 현황</b> — 완료 '+ctx.doneN+'/'+ctx.total+' 품목'
+      + (ctx.anyQty?'':'<div>· 이번 회차 입고 수량이 없습니다 (종결 전용 회차)</div>')
+      + ctx.short.map(function(o){ return '<div>· 미입고 — '+(o.it.idx+1)+'. '+esc(o.it.name)+' 잔량 '+(o.it.ordered-o.cum)+'</div>'; }).join('')
+      + ctx.over.map(function(o){ return '<div>· 초과 — '+(o.it.idx+1)+'. '+esc(o.it.name)+' 누계 '+o.cum+'/'+o.it.ordered+(o.l.reason?' ('+esc(o.l.reason)+')':(o.l.qty>0?'':' (이전 회차 초과분)'))+'</div>'; }).join('')
+      + (ctx.allDone?'<div>· 모든 품목이 발주 수량만큼 입고됩니다 — 최종 검수를 권장합니다</div>':'')
+      + '</div>';
+  }
   if(warns.length){
     html+='<div class="ov-warn"><b>제출 전 확인</b>'+warns.map(function(w){return '<div>· '+esc(w)+'</div>';}).join('')+'</div>';
   }
   html+='<div class="fin-opts">'
-    + '<button class="fin-opt" id="fin-yes"><b>예 — 최종 검수로 제출</b><span>이번 입고로 납품이 끝났습니다. 결재가 완료되면 품의가 검수 완료(종결)되고 추가 제출이 차단됩니다.</span></button>'
+    + '<button class="fin-opt" id="fin-yes"><b>예 — 최종 검수로 제출</b><span>이번 입고로 납품이 끝났습니다. 결재가 완료되면 품의가 검수 완료(종결)되고 추가 제출이 차단됩니다.'
+    + (ctx&&ctx.short.length?' 잔량 품목의 미입고 사유를 다음 단계에서 입력합니다.':'')+'</span></button>'
     + '<button class="fin-opt" id="fin-no"><b>아니요 — 중간 회차로 제출</b><span>남은 입고분이 있습니다. 이후 회차의 검수보고서를 이어서 제출할 수 있습니다.</span></button>'
     + '</div>'
     + '<div class="ov-actions"><button class="btn gray" id="fin-cancel">취소</button></div>';
   document.getElementById('ov-card').innerHTML=html;
   document.getElementById('overlay').classList.add('on');
-  document.getElementById('fin-yes').onclick=function(){onChoose(true);};
-  document.getElementById('fin-no').onclick=function(){onChoose(false);};
+  document.getElementById('fin-yes').onclick=function(){
+    if(ctx && ctx.short.some(function(o){return !o.l.reason;})){ showShortReasonStep(ctx, onChoose); return; }
+    onChoose(true);
+  };
+  document.getElementById('fin-no').onclick=function(){
+    if(ctx && !ctx.anyQty){ showAlertModal('입고 수량이 없는 회차는 중간 회차로 제출할 수 없습니다.', ['입고 없이 종결하려면 최종 검수로 제출해 주세요.']); return; }
+    if(ctx && ctx.allDone){ showAllDoneConfirm(function(){ onChoose(false); }); return; }
+    onChoose(false);
+  };
   document.getElementById('fin-cancel').onclick=hideOverlay;
+  if(document.activeElement) document.activeElement.blur();
+}
+
+// 최종 검수인데 잔량이 남은 품목 — 품목마다 미입고 종결 사유를 받는다 (전부 채워야 제출 버튼 활성)
+function showShortReasonStep(ctx, onChoose){
+  var html='<div class="q-icon">?</div>'
+    + '<div class="ov-msg">미입고 품목의 종결 사유를 입력해 주세요</div>'
+    + '<div class="ov-sub">최종 검수로 제출하면 아래 잔량은 입고되지 않은 채 종결됩니다</div>'
+    + '<div class="rs-list">';
+  ctx.short.forEach(function(o){
+    html+='<div class="rs-row"><div><span class="n">'+(o.it.idx+1)+'. '+esc(o.it.name)+'</span><span class="q">잔량 '+(o.it.ordered-o.cum)+'</span></div>'
+      + '<input type="text" id="rs-in-'+o.it.idx+'" maxlength="200" value="'+esc(o.l.reason)+'" placeholder="예: 생산 취소 · 주문 취소(업체 통보 11/3)" class="'+(o.l.reason?'':'need')+'"></div>';
+  });
+  html+='</div><div class="ov-actions"><button class="btn gray" id="rs-back">돌아가기</button><button class="btn insp" id="rs-ok">최종 검수로 제출</button></div>';
+  document.getElementById('ov-card').innerHTML=html;
+  var ok=document.getElementById('rs-ok');
+  function refresh(){
+    var all=true;
+    ctx.short.forEach(function(o){
+      var inp=document.getElementById('rs-in-'+o.it.idx), v=inp.value.trim();
+      STATE.rc[o.it.idx].reason=v; inp.classList.toggle('need',!v); if(!v) all=false;
+    });
+    ok.disabled=!all;
+  }
+  ctx.short.forEach(function(o){ document.getElementById('rs-in-'+o.it.idx).addEventListener('input', refresh); });
+  refresh();
+  document.getElementById('rs-back').onclick=function(){ hideOverlay(); drawReceipt(); };
+  ok.onclick=function(){ if(ok.disabled) return; onChoose(true); };
+  if(document.activeElement) document.activeElement.blur();
+}
+
+// 전 품목이 발주 수량만큼 채워지는데 '중간 회차'를 고른 경우 — 한 번 되묻는다
+function showAllDoneConfirm(onYes){
+  document.getElementById('ov-card').innerHTML='<div class="q-icon">?</div>'
+    + '<div class="ov-msg">모든 품목이 발주 수량만큼 입고되는데 중간 회차로 제출합니다.</div>'
+    + '<div class="ov-sub">최종 검수로 제출하지 않으면 품의가 종결되지 않고 다음 회차를 계속 받을 수 있는 상태로 남습니다.</div>'
+    + '<div class="ov-actions"><button class="btn gray" id="ad-back">돌아가기</button><button class="btn insp" id="ad-ok">중간 회차로 제출</button></div>';
+  document.getElementById('ad-back').onclick=hideOverlay;
+  document.getElementById('ad-ok').onclick=onYes;
   if(document.activeElement) document.activeElement.blur();
 }
 

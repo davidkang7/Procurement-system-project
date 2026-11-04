@@ -45,6 +45,19 @@
   .photos a{display:block;border:1px solid var(--line);border-radius:6px;overflow:hidden;}
   .photos img{width:100%;display:block;background:#fafafa;min-height:80px;}
   .no-photo{color:var(--ink-mute);font-size:11.5px;margin-top:8px;}
+  /* [v1.1] 품목별 입고 표 (레거시 회차는 입고 내역 한 줄만) */
+  .rct-wrap{overflow-x:auto;}
+  table.rct{width:100%;border-collapse:collapse;font-size:11.5px;font-variant-numeric:tabular-nums;min-width:520px;}
+  table.rct th{background:#f6f7f9;color:var(--ink-soft);font-size:10.5px;font-weight:700;padding:5px 7px;border:1px solid #e3e6eb;text-align:center;white-space:nowrap;}
+  table.rct td{border:1px solid #e9ecef;padding:5px 7px;text-align:center;}
+  table.rct td.rm{white-space:nowrap;}
+  table.rct th.l,table.rct td.l{text-align:left;}
+  table.rct td.q{font-weight:700;color:var(--insp);}
+  table.rct tr.over td.rm{color:var(--danger);font-weight:700;}
+  table.rct tr.short td.rm{color:var(--warn);font-weight:700;}
+  table.rct tr.done td.rm{color:var(--ok);}
+  .rct-note{margin-top:6px;font-size:11px;color:var(--ink-soft);white-space:pre-wrap;}
+  .rct-sum{margin-top:6px;font-size:11px;color:var(--ink-mute);}
 
   .appr-sec{margin-top:22px;}
   .appr-title{font-size:12px;font-weight:700;color:var(--insp);margin-bottom:8px;}
@@ -152,6 +165,24 @@ function boot(onComplete){
     .getInspViewerDataForClient(TOKEN, IDX_HINT||null);
 }
 
+// [v1.1] 품목별 입고 표 — 발주/기입고/이번 입고/누계/잔량/비고(수량 상이 사유)
+function receiptRow(d){
+  var rc=d.receipt, unit=esc(rc.unit||'EA');
+  var h='<div class="rct-wrap"><table class="rct"><thead><tr>'
+    + '<th>No</th><th class="l">품명</th><th>규격</th><th>발주</th><th>기입고</th><th>이번 입고</th><th>누계</th><th>잔량</th><th class="l">비고</th>'
+    + '</tr></thead><tbody>';
+  rc.items.forEach(function(o){
+    var rm = o.state==='over' ? ('+'+(o.cum-o.ordered)+' 초과') : (o.state==='done' ? '완료' : String(o.remaining));
+    h+='<tr class="'+esc(o.state)+'"><td>'+(o.idx+1)+'</td><td class="l">'+esc(o.name)+'</td><td>'+esc(o.spec)+'</td>'
+      + '<td>'+o.ordered+'</td><td>'+o.prev+'</td><td class="q">'+o.qty+'</td><td>'+o.cum+'</td><td class="rm">'+rm+'</td>'
+      + '<td class="l">'+(o.reason?esc(o.reason):'')+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div class="rct-sum">단위 '+unit+' · 기입고 = 이 회차 제출 시점까지의 누계(결재 진행 중 회차 포함)</div>';
+  if(d.qtyDiffNote) h+='<div class="rct-note"><b>수량 상이 사유</b>\n'+esc(d.qtyDiffNote)+'</div>';
+  return '<tr><th style="vertical-align:top;padding-top:12px;">입 고 품 목</th><td>'+h+'</td></tr>';
+}
+
 function render(){
   var d=DATA.doc, aps=DATA.approvers||[], cur=DATA.curIdx;
   var vClass=d.verdict==='합격'?'pass':'fail';
@@ -177,7 +208,8 @@ function render(){
     + tr('업 체 명', esc(d.vendorName))
     + tr('기 안 일 자', esc(d.issueDate))
     + tr('입 고 일 자', esc(d.receivedDate))
-    + tr('입 고 내 역', esc(d.receivedNote))
+    // [v1.1] 품목별 입고가 있으면 표로, 레거시 회차(배포 전)는 입고 내역 한 줄 그대로
+    + (d.receipt && d.receipt.items && d.receipt.items.length ? receiptRow(d) : tr('입 고 내 역', esc(d.receivedNote)))
     + '<tr><th style="vertical-align:top;padding-top:14px;">검 수 결 과</th><td class="result-cell">'
     +   '<span class="verdict-badge '+vClass+'">'+(esc(d.verdict)||'(미판정)')+'</span>'
     +   (d.comment?'<div class="comment">'+esc(d.comment)+'</div>':'')

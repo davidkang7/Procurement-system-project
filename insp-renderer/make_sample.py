@@ -8,6 +8,7 @@
     .\\.venv\\Scripts\\python.exe make_sample.py            # 사진 3장 (기본)
     .\\.venv\\Scripts\\python.exe make_sample.py --photos 6  # 사진 6장 (2페이지 확인)
     .\\.venv\\Scripts\\python.exe make_sample.py --photos 0  # 사진 없음
+    .\\.venv\\Scripts\\python.exe make_sample.py --legacy    # v1 매니페스트(입고 내역 한 줄) — 하위호환 확인
 
 결과: out/SAMPLE_검수보고서_사진{N}장.pdf  +  같은 이름의 .png (미리보기)
 """
@@ -52,9 +53,9 @@ def make_png(path: Path, w: int, h: int, rgb: tuple[int, int, int]) -> None:
     path.write_bytes(png)
 
 
-def build_manifest(n_photos: int) -> dict:
-    return {
-        "schemaVersion": "insp-manifest-v1",
+def build_manifest(n_photos: int, legacy: bool = False) -> dict:
+    m = {
+        "schemaVersion": "insp-manifest-v1" if legacy else "insp-manifest-v2",
         "token": "SAMPLE-TOKEN-0000",
         "docNo": "TH-AP-26-029-01",
         "seq": 1,
@@ -67,7 +68,8 @@ def build_manifest(n_photos: int) -> dict:
         "dept": "기술팀",
         "issueDate": "2026-07-10",
         "receivedDate": "2026-07-15",
-        "receivedNote": "3EA 입고, 외관 이상 없음. 납품서 대조 완료.",
+        "receivedNote": ("3EA 입고, 외관 이상 없음. 납품서 대조 완료." if legacy
+                         else "오리피스 플레이트 DN50 3EA (3/3) · 가스켓 세트 10EA (12/10)"),
         "verdict": "합격",
         "comment": ("치수 및 작동 상태 정상 확인.\n"
                     "- 오리피스 내경 측정값 규격 내\n"
@@ -82,12 +84,27 @@ def build_manifest(n_photos: int) -> dict:
         "finalFolderId": "SAMPLE_FOLDER",
         "generatedAt": "2026-07-19 16:31",
     }
+    if not legacy:
+        # v2: 품목별 입고 — 완료·초과·미입고(최종 종결) 세 가지 상태를 한 번에 본다
+        m["receiptItems"] = [
+            {"idx": 0, "name": "오리피스 플레이트 DN50", "spec": "SUS316 / EA", "ordered": 3, "prev": 0, "qty": 3,
+             "cum": 3, "remaining": 0, "state": "done", "reason": ""},
+            {"idx": 1, "name": "가스켓 세트", "spec": "EA", "ordered": 10, "prev": 2, "qty": 10,
+             "cum": 12, "remaining": 0, "state": "over", "reason": "업체가 예비 2EA 추가 납품"},
+            {"idx": 2, "name": "볼트/너트 M16", "spec": "SET", "ordered": 4, "prev": 0, "qty": 0,
+             "cum": 0, "remaining": 4, "state": "short", "reason": "자체 재고 사용으로 주문 취소"},
+        ]
+        m["qtyUnit"] = "EA"
+        m["qtyDiffNote"] = ("2. 가스켓 세트 [초과] 발주 10 / 누계 12 — 업체가 예비 2EA 추가 납품\n"
+                            "3. 볼트/너트 M16 [미입고] 발주 4 / 누계 0 — 자체 재고 사용으로 주문 취소")
+    return m
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="샘플 검수보고서 PDF 생성 (인증 불필요)")
     ap.add_argument("--photos", type=int, default=3, choices=range(0, 7),
                     help="가짜 사진 장수 (0~6, 기본 3)")
+    ap.add_argument("--legacy", action="store_true", help="v1 매니페스트(입고 내역 한 줄만)로 생성 — 하위호환 확인용")
     args = ap.parse_args()
 
     OUT_DIR.mkdir(exist_ok=True)
@@ -109,9 +126,9 @@ def main() -> None:
 
         workdir = tmpdir / "work"
         workdir.mkdir()
-        pdf = render_insp.render_pdf(build_manifest(args.photos), workdir, drive=None)
+        pdf = render_insp.render_pdf(build_manifest(args.photos, legacy=args.legacy), workdir, drive=None)
 
-        stem = f"SAMPLE_검수보고서_사진{args.photos}장"
+        stem = f"SAMPLE_검수보고서_사진{args.photos}장" + ("_v1" if args.legacy else "_v2")
         pdf_out = OUT_DIR / f"{stem}.pdf"
         shutil.copy(pdf, pdf_out)
 

@@ -46,6 +46,18 @@
     width: 90px; font-size: 10px; padding: 7px 9px; text-align: center; font-weight: 700;
   }
   table.meta td { border: 0.8px solid #d6e3e1; padding: 7px 11px; font-size: 11px; }
+  /* 품목별 입고 표 (manifest v2) — 폰트를 작게 잡아 1페이지 안에 사진 4장이 함께 들어가게 한다 */
+  table.meta td.items-cell { padding: 5px 6px; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 9px; font-variant-numeric: tabular-nums; }
+  table.items th { background: #f6f7f9; color: #4a5260; border: 0.6px solid #d6e3e1; padding: 3px 5px; font-weight: 700; text-align: center; white-space: nowrap; }
+  table.items td { border: 0.6px solid #e3e9e8; padding: 3px 5px; text-align: center; }
+  table.items th.l, table.items td.l { text-align: left; }
+  table.items td.q { font-weight: 700; color: #0a5e56; }
+  table.items tr.over td.rm { color: #c0392b; font-weight: 700; }
+  table.items tr.short td.rm { color: #a35f00; font-weight: 700; }
+  table.items tr.done td.rm { color: #1f8b4c; }
+  .items-sum { margin-top: 3px; font-size: 8px; color: #999; }
+  .items-note { margin-top: 4px; font-size: 9px; color: #333; white-space: pre-wrap; }
 
   .result-head {
     background: #0e7d72; color: #fff; font-size: 11px; font-weight: 700;
@@ -118,6 +130,24 @@
       <th>입고일자</th><td>{{ m.receivedDate }}</td>
     </tr>
     <tr><th>입고내역</th><td colspan="3">{{ m.receivedNote }}</td></tr>
+    {% if m.receiptItems %}
+    <tr><th>입고품목</th><td colspan="3" class="items-cell">
+      <table class="items">
+        <tr><th>No</th><th class="l">품명</th><th>규격</th><th>발주</th><th>기입고</th><th>이번 입고</th><th>누계</th><th>잔량</th><th class="l">비고</th></tr>
+        {% for it in m.receiptItems %}
+        <tr class="{{ it.state }}">
+          <td>{{ it.idx + 1 }}</td><td class="l">{{ it.name }}</td><td>{{ it.spec }}</td>
+          <td>{{ it.ordered }}</td><td>{{ it.prev }}</td><td class="q">{{ it.qty }}</td><td>{{ it.cum }}</td>
+          <td class="rm">{% if it.state == 'over' %}+{{ it.cum - it.ordered }} 초과{% elif it.state == 'done' %}완료{% else %}{{ it.remaining }}{% endif %}</td>
+          <td class="l">{{ it.reason }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      <div class="items-sum">단위 {{ m.qtyUnit or 'EA' }} · 기입고 = 이 회차 제출 시점까지의 누계</div>
+      {% if m.qtyDiffNote %}<div class="items-note"><b>수량 상이 사유</b>
+{{ m.qtyDiffNote }}</div>{% endif %}
+    </td></tr>
+    {% endif %}
   </table>
 
   <div class="result-head">검 수 결 과</div>

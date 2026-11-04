@@ -52,7 +52,8 @@ TEMPLATE_NAME = "insp_report.html"
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 MANIFEST_NAME = "manifest.json"
-SUPPORTED_SCHEMA = "insp-manifest-v1"
+# v1: 입고 내역 한 줄 / v2(2026-11-05): + receiptItems(품목별 입고)·qtyDiffNote — 둘 다 렌더한다
+SUPPORTED_SCHEMAS = ("insp-manifest-v1", "insp-manifest-v2")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -258,8 +259,8 @@ def main() -> None:
         manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
 
     schema = manifest.get("schemaVersion")
-    if schema != SUPPORTED_SCHEMA:
-        print(f"  · [경고] 매니페스트 스키마 불일치: {schema} (지원: {SUPPORTED_SCHEMA})")
+    if schema not in SUPPORTED_SCHEMAS:
+        print(f"  · [경고] 매니페스트 스키마 불일치: {schema} (지원: {', '.join(SUPPORTED_SCHEMAS)})")
 
     doc_no = manifest.get("docNo", "")
     print(f"      문서번호 {doc_no} / {manifest.get('subject', '')} / 판정 {manifest.get('verdict', '')}")

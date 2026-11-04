@@ -293,3 +293,27 @@ AUDIT_EVENT: INSP_SUBMIT, INSP_APPROVE, INSP_REJECT, INSP_RESUBMIT, INSP_FINALIZ
 ---
 
 *── 검수보고서(INSP) 구현 설계서 v1.1 (구현 완료본) 끝 (2026-06-20) ──*
+---
+
+## 10. v1.1 — 품목별 입고 (2026-11-05)
+
+> 입고 기록이 '입고 내역' 한 줄(자유 텍스트)뿐이라 PO 품목이 다 들어왔는지 데이터로 판단할 수 없던 문제를 고쳤다. 코드가 기준이며 아래는 의도·맥락 요약.
+
+| 항목 | v1.0 | v1.1 |
+|---|---|---|
+| 입고 기록 | `RECEIVED_NOTE` 한 줄 (필수 입력) | 품목별 이번 회차 입고 수량(JSON) + 서버 자동 요약문을 `RECEIVED_NOTE`에 저장 |
+| 시트 열 | 51 (27 + 4×6) | **53** — `RECEIPT_ITEMS`(51) `QTY_DIFF_NOTE`(52) 추가. `INSP_COL.EXT_START=51`, `_VERSION='insp-v1.1'` |
+| 잔량 | 작성자 기억 | 폼이 PRC 품목(`parseItemsSummary`, 읽기만)과 기존 회차(반려·폐기 제외, 결재 중 포함)로 기입고·잔량 계산 |
+| 수량 상이 | 기록 불가 | 품목별 사유: 이번 회차 입고분으로 누계 > 발주(초과)면 필수, 최종 검수인데 누계 < 발주(미입고 종결)면 필수. `QTY_DIFF_NOTE`에 사람이 읽는 요약 |
+| 종결 전용 회차 | — | 입고 0이어도 최종 검수 + 잔량 품목 사유가 있으면 제출 가능. 중간 회차 입고 0은 거부 |
+| 레거시 회차 | — | `RECEIPT_ITEMS` 빈칸 = 누계 0 기여, 폼에 배너. 2026-11-05 기준 진행 중 7건·11회차는 임시 래퍼 `_tmp_backfillInspReceipt_20261105`로 백필 후 래퍼 제거 |
+| 화면 | 입고 내역 입력 | 입고 품목 표(체크·잔량 prefill·사유 칸), 최종 확인 모달에 입고 현황 + 미입고 사유 2단계 |
+| 뷰어·PDF | 한 줄 | 품목 표(발주/기입고/이번/누계/잔량/비고). 매니페스트 `insp-manifest-v2`(`receiptItems`, `qtyUnit`, `qtyDiffNote`), 렌더러는 v1도 그대로 |
+
+**바뀌지 않은 것**: 품의서목록·품목내역 텍스트 포맷·홈 집계(`_getInspGroupsByPrc`)·결재·메일·감사 로그·종결 판정(`isFinal` 기준). 품목 식별은 품목내역 행 번호(idx) — 운영 PRC에 품명+규격이 같은 행이 있어 이름으로는 못 맞춘다.
+
+**배포 순서**: clasp push → 편집기 `runInspReceiptMigration()`(헤더 52~53열; 생략해도 첫 제출이 처리) → 백필 래퍼 dryRun → 실행 → 기존 배포 편집·새 버전 → 래퍼 제거 커밋.
+
+**검증**: `node tests/insp_receipt_test.js`(품목 장부·검증·재상신·백필·비회귀 48건), `tests/html_insp_receipt_test.py`(화면 39건), 기존 테스트 전부 통과. `insp-renderer/make_sample.py`(v2) / `--legacy`(v1).
+
+**함정**: 재상신은 `getRange(row,1,1,53).setValues`라 시트 최대 열이 51이면 예외 → `_ensureInspExtColumns_`가 락 안에서 열을 먼저 늘린다. 배포 전에 열어 둔 구 화면의 페이로드(receiptItems 없음)는 락 밖에서 "새로고침" 안내로 거절한다.

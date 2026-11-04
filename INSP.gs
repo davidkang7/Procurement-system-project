@@ -26,7 +26,7 @@
 //      INSP_RESUBMIT:  'INSP_RESUBMIT',   // 반려 후 수정 재상신
 //      INSP_FINALIZED: 'INSP_FINALIZED',  // 최종 검수 승인 → 품의 종결
 //
-// 4. 편집기에서 ensureInspSheet() 실행 → '검수보고서목록' 시트(51컬럼) 생성 확인
+// 4. 편집기에서 ensureInspSheet() 실행 → '검수보고서목록' 시트(53컬럼) 생성 확인
 //    (설치 확인용 테스트 함수 testInspStep1은 2026-10-14 정리 때 삭제)
 // ================================================================
 
@@ -72,11 +72,22 @@ var INSP_COL = {
   APPR_START:    27,  // 결재 블록 시작 (블록0=기안자, 블록1~3=결재자 1~3 — REQ/PRC 동일 구조)
   APPR_COLS:     6,   // 블록당 컬럼 수: label, name, email, status, processedAt, comment
   MAX_APPROVERS: 4,   // 기안자 1 + 결재자 최대 3 (Q-INSP-03). approvers[0]=기안자
+  // ── 확장 열 (고정 4블록 뒤, 0-based 51부터) — insp-v1.1 품목별 입고 (2026-11-05) ──
+  //  결재 블록이 고정폭(4×6)이라 품의서목록과 달리 끝에 열을 붙일 수 있다.
+  //  배포 전 행은 이 열이 비어 있다 → '레거시 회차'(품목별 수량 없음)로 판정한다.
+  RECEIPT_ITEMS: 51,  // JSON {v:1, items:[{idx,name,spec,ordered,prev,qty,reason}]} — 이번 회차 품목별 입고 스냅샷
+  QTY_DIFF_NOTE: 52,  // 수량 상이 사유 (사람이 읽는 줄바꿈 텍스트 — 초과 입고·미입고 종결 품목만)
+  EXT_START:     51,  // 확장 열 시작 (= APPR_START + MAX_APPROVERS×APPR_COLS). 자가점검에서 메타로 취급
 };
-INSP_COL._VERSION = 'insp-v1.0';
+INSP_COL._VERSION = 'insp-v1.1';
 
-// 시트 총 컬럼 수 (헤더 검증 기준): 27 + 3×6 = 45
-var INSP_TOTAL_COLS = INSP_COL.APPR_START + (INSP_COL.MAX_APPROVERS * INSP_COL.APPR_COLS);
+// 확장 열 헤더 (RECEIPT_ITEMS, QTY_DIFF_NOTE 순서와 같아야 한다)
+var INSP_EXT_HEADERS = ['receiptItems', 'qtyDiffNote'];
+var INSP_EXT_COLS = INSP_EXT_HEADERS.length;
+// 시트 총 컬럼 수 (헤더 검증 기준): 27 + 4×6 + 2 = 53
+var INSP_TOTAL_COLS = INSP_COL.APPR_START + (INSP_COL.MAX_APPROVERS * INSP_COL.APPR_COLS) + INSP_EXT_COLS;
+// 입고 수량 단위 표기 (요약문·화면). 품의서목록 품목내역은 '개'로 저장되지만 검수 화면은 EA로 쓴다
+var INSP_QTY_UNIT = 'EA';
 
 /**
  * 검수보고서목록 시트 보장
@@ -109,6 +120,8 @@ function ensureInspSheet() {
       px + '_status', px + '_processedAt', px + '_comment'
     );
   }
+  // 확장 열 (insp-v1.1 품목별 입고) — 기존 시트는 _ensureInspExtColumns_가 뒤에 붙인다
+  headers = headers.concat(INSP_EXT_HEADERS);
 
   sheet.appendRow(headers);
   sheet.setFrozenRows(1);
@@ -137,13 +150,28 @@ function ensureInspSheet() {
  * @throws {Error} 스키마 불일치 시
  */
 function _inspSchemaSelfCheck() {
-  var META_KEYS = { APPR_COLS: true, MAX_APPROVERS: true, _VERSION: true };
+  var META_KEYS = { APPR_COLS: true, MAX_APPROVERS: true, _VERSION: true, EXT_START: true };
   var indices = [];
   for (var key in INSP_COL) {
     if (META_KEYS[key]) continue;
+    if (INSP_COL[key] >= INSP_COL.EXT_START) continue;   // 확장 열은 아래에서 따로 검사
     indices.push(INSP_COL[key]);
   }
   indices.sort(function (a, b) { return a - b; });
+
+  // 확장 열: 결재 블록 바로 뒤에 헤더 순서대로 빈틈없이 이어져야 한다
+  var extStart = INSP_COL.APPR_START + (INSP_COL.MAX_APPROVERS * INSP_COL.APPR_COLS);
+  var extKeys = ['RECEIPT_ITEMS', 'QTY_DIFF_NOTE'];
+  if (INSP_COL.EXT_START !== extStart || extKeys.length !== INSP_EXT_COLS ||
+      INSP_TOTAL_COLS !== extStart + INSP_EXT_COLS) {
+    throw new Error('[INSP] 스키마 자가 점검 실패: 확장 열 시작/총 컬럼 수 불일치 (EXT_START=' + INSP_COL.EXT_START +
+      ', 기대 ' + extStart + ', TOTAL=' + INSP_TOTAL_COLS + ')');
+  }
+  for (var e = 0; e < extKeys.length; e++) {
+    if (INSP_COL[extKeys[e]] !== extStart + e) {
+      throw new Error('[INSP] 스키마 자가 점검 실패: 확장 열 ' + extKeys[e] + '=' + INSP_COL[extKeys[e]] + ' (기대 ' + (extStart + e) + ')');
+    }
+  }
 
   for (var i = 0; i < indices.length; i++) {
     if (indices[i] !== i) {
@@ -177,6 +205,249 @@ function inspApprCol(stageIdx, offset) {
     throw new Error('[INSP] 잘못된 블록 오프셋: ' + offset);
   }
   return INSP_COL.APPR_START + (stageIdx * INSP_COL.APPR_COLS) + offset;
+}
+
+// ================================================================
+// [INSP v1.1] 품목별 입고 (2026-11-05)
+//  - 검수보고서가 '입고 내역' 한 줄 대신 PRC 품목별 이번 회차 입고 수량을 기록한다.
+//  - 누계(기입고)는 저장하지 않고 같은 PRC의 다른 회차 행을 합산해 매번 계산한다
+//    (반려·폐기 제외, 결재 진행 중 회차는 낙관적으로 포함 — 반려되면 자동 제외되고 재상신 시 다시 계산).
+//  - 품목 식별은 품의서목록 품목내역의 행 번호(idx). 운영 PRC에 품명+규격이 같은 행이 있어 이름으로는 못 맞춘다.
+//  - 품의서목록·품목내역 텍스트 포맷·parseItemsSummary는 읽기만 한다 (PO 렌더러 정규식이 의존).
+//  - RECEIVED_NOTE(입고 내역)는 서버가 품목 수량으로 요약문을 만들어 채운다 → 홈 아코디언·뷰어·PDF는 그대로 동작.
+// ================================================================
+
+var INSP_EXT_COLS_PROP = 'INSP_EXT_COLS_V1';   // 확장 열·헤더 확인 완료 표시 (제출마다 셀을 읽지 않기 위함)
+var INSP_RECEIPT_REASON_MAX = 200;
+var INSP_RECEIVED_NOTE_MAX = 200;              // 기존 입고 내역 입력 칸 maxlength와 동일 (홈 아코디언 열 폭)
+
+/**
+ * 검수보고서목록에 확장 열(receiptItems, qtyDiffNote)이 있도록 보장 — 멱등
+ *  1) 시트 최대 열이 53 미만이면 열을 늘린다. appendRow는 열을 자동으로 늘리지만
+ *     재상신의 getRange(row,1,1,53).setValues는 범위 밖이면 throw 하므로 먼저 늘려야 한다.
+ *  2) 1행 52~53열 헤더가 비어 있거나 다르면 써 넣는다 (ensureInspSheet는 빈 시트에만 헤더를 쓴다).
+ *  3) Script Property에 완료 표시 → 이후 제출에서는 읽기 없이 통과. 제출 락 안에서 호출한다(동시 확장 경합 방지).
+ * @param {Sheet} sheet 검수보고서목록
+ * @returns {boolean} 이번 호출에서 시트를 바꿨으면 true
+ */
+function _ensureInspExtColumns_(sheet) {
+  var props = null;
+  try { props = PropertiesService.getScriptProperties(); } catch (_) {}
+  try { if (props && props.getProperty(INSP_EXT_COLS_PROP) === '1') return false; } catch (_) {}
+
+  var changed = false;
+  var maxCols = sheet.getMaxColumns();
+  if (maxCols < INSP_TOTAL_COLS) {
+    sheet.insertColumnsAfter(maxCols, INSP_TOTAL_COLS - maxCols);
+    changed = true;
+  }
+  if (sheet.getLastRow() >= 1) {
+    var rng = sheet.getRange(1, INSP_COL.EXT_START + 1, 1, INSP_EXT_COLS);
+    var cur = rng.getValues()[0];
+    var need = false;
+    for (var i = 0; i < INSP_EXT_COLS; i++) {
+      if (String(cur[i] || '') !== INSP_EXT_HEADERS[i]) need = true;
+    }
+    if (need) {
+      rng.setValues([INSP_EXT_HEADERS]);
+      rng.setFontWeight('bold').setBackground('#e4f4f2');
+      changed = true;
+    }
+  }
+  try { if (props) props.setProperty(INSP_EXT_COLS_PROP, '1'); } catch (_) {}
+  return changed;
+}
+
+/**
+ * [편집기 1회 실행용] 검수보고서목록 확장 열 마이그레이션
+ *  배포 전에 실행해 헤더 52~53열(receiptItems, qtyDiffNote)을 만들어 둔다. 실행하지 않아도 첫 제출이 같은 일을 한다.
+ *  완료 표시를 지우고 다시 확인하므로 몇 번 실행해도 안전하다.
+ */
+function runInspReceiptMigration() {
+  var sheet = ensureInspSheet();
+  try { PropertiesService.getScriptProperties().deleteProperty(INSP_EXT_COLS_PROP); } catch (_) {}
+  var changed = _ensureInspExtColumns_(sheet);
+  var header = sheet.getRange(1, INSP_COL.EXT_START + 1, 1, INSP_EXT_COLS).getValues()[0];
+  var msg = '[INSP] 확장 열 마이그레이션: ' + (changed ? '시트 변경함' : '이미 적용됨') +
+    ' / 최대 열 ' + sheet.getMaxColumns() + ' / 헤더 ' + JSON.stringify(header);
+  Logger.log(msg);
+  return { ok: true, changed: changed, maxColumns: sheet.getMaxColumns(), header: header };
+}
+
+/**
+ * PRC 행의 품목내역 텍스트 → 검수용 품목 배열 (읽기 전용 — 저장 포맷은 바꾸지 않는다)
+ * @param {string} itemsText 품의서목록 COL.ITEMS 셀
+ * @returns {Array} [{idx, name, spec, ordered}] — idx는 품목내역 행 번호(0-based), ordered는 발주 수량(정수)
+ */
+function _prcItemsForInsp_(itemsText) {
+  var parsed = parseItemsSummary(itemsText);
+  return parsed.map(function (it, i) {
+    return { idx: i, name: String(it.name || ''), spec: String(it.spec || ''), ordered: parseInt(it.qty, 10) || 0 };
+  });
+}
+
+/**
+ * RECEIPT_ITEMS 셀 → {v, items[]} | null
+ *  null = 레거시 회차(배포 전 자유 텍스트 회차) 또는 깨진 JSON. 호출부는 null이면 누계에 0을 더한다.
+ */
+function _parseInspReceipt_(cell) {
+  var raw = (cell === undefined || cell === null) ? '' : String(cell).trim();
+  if (!raw) return null;
+  try {
+    var o = JSON.parse(raw);
+    if (!o || !Array.isArray(o.items)) return null;
+    return {
+      v: parseInt(o.v, 10) || 1,
+      items: o.items.map(function (li) {
+        return {
+          idx:     parseInt(li.idx, 10),
+          name:    String(li.name || ''),
+          spec:    String(li.spec || ''),
+          ordered: parseInt(li.ordered, 10) || 0,
+          prev:    parseInt(li.prev, 10) || 0,
+          qty:     parseInt(li.qty, 10) || 0,
+          reason:  String(li.reason || ''),
+        };
+      }),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * 품목별 입고 장부 — PRC 품목 × 기존 회차 → 품목별 누계(기입고)·잔량
+ *  집계 대상: '반려'·'폐기'가 아닌 모든 회차 ('검토중'·'결재중 (…)'·'최종승인(INSP)').
+ *  excludeToken: 재상신 때 자기 행(반려 상태라 어차피 빠지지만 명시적으로 제외).
+ * @param {Array} inspRows 검수보고서목록 전체 행(헤더 포함) — _readInspRows_ 결과
+ * @param {string} prcToken 대상 PRC 토큰
+ * @param {string} itemsText PRC 품목내역 텍스트
+ * @param {string=} excludeToken 제외할 INSP 토큰
+ * @returns {Object} { items:[{idx,name,spec,ordered,prev,remaining}], legacyRounds:[...], countedRounds, orphanQty, snapshotMismatch, itemsParsable }
+ */
+function _inspReceiptLedger_(inspRows, prcToken, itemsText, excludeToken) {
+  var items = _prcItemsForInsp_(itemsText);
+  items.forEach(function (L) { L.prev = 0; });
+  var out = {
+    items: items, legacyRounds: [], countedRounds: 0, orphanQty: 0,
+    snapshotMismatch: false,              // 과거 회차 스냅샷의 발주 수량이 현재 PRC와 다름 (수량 정정 이후)
+    itemsParsable: items.length > 0,      // false면 품목내역을 해석할 수 없는 옛 포맷 → 폼은 자유 텍스트 폴백
+  };
+  var rows = Array.isArray(inspRows) ? inspRows : [];
+  for (var i = 1; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r[INSP_COL.PRC_TOKEN] || '') !== prcToken) continue;
+    var status = String(r[INSP_COL.STATUS] || '');
+    if (status === '반려' || status === '폐기') continue;
+    if (excludeToken && String(r[INSP_COL.TOKEN] || '') === excludeToken) continue;
+
+    var rc = _parseInspReceipt_(r[INSP_COL.RECEIPT_ITEMS]);
+    if (!rc) {
+      out.legacyRounds.push({
+        docNo:        String(r[INSP_COL.DOC_NO] || ''),
+        seq:          parseInt(r[INSP_COL.SEQ]) || 0,
+        status:       status,
+        receivedDate: toDateStr(r[INSP_COL.RECEIVED_DATE]),
+        receivedNote: String(r[INSP_COL.RECEIVED_NOTE] || ''),
+      });
+      continue;
+    }
+    out.countedRounds++;
+    rc.items.forEach(function (li) {
+      var L = items[li.idx];
+      if (!L) { out.orphanQty += li.qty; return; }       // 품목이 줄어든 PRC — 사라진 행의 수량
+      L.prev += li.qty;
+      if (li.ordered !== L.ordered) out.snapshotMismatch = true;
+    });
+  }
+  items.forEach(function (L) { L.remaining = Math.max(0, L.ordered - L.prev); });
+  return out;
+}
+
+/**
+ * 제출 페이로드의 품목별 입고 검증 — 발주·누계는 서버 장부 값만 쓴다 (화면이 보낸 품명·발주수량은 보지 않는다)
+ *  규칙: idx 범위·중복, qty는 0 이상 정수, 이번 회차 입고분으로 누계 > 발주면 사유 필수(초과 입고),
+ *        최종 검수인데 누계 < 발주면 사유 필수(미입고 종결), 입고 합계 0은 최종 검수일 때만 허용.
+ * @param {Object} ledger _inspReceiptLedger_ 결과 (itemsParsable=true 전제)
+ * @param {Array} payloadItems [{idx, qty, reason}]
+ * @param {boolean} isFinal 최종 검수 여부
+ * @returns {Object} { ok, items:[{idx,name,spec,ordered,prev,qty,reason}], receivedNote, qtyDiffNote } | { ok:false, message }
+ */
+function _validateInspReceipt_(ledger, payloadItems, isFinal) {
+  if (!Array.isArray(payloadItems)) {
+    return { ok: false, message: '입고 품목 정보가 없습니다. 화면을 새로고침한 뒤 다시 제출해 주세요.' };
+  }
+  var n = ledger.items.length, seen = {}, qtyByIdx = {}, reasonByIdx = {}, problems = [];
+  for (var p = 0; p < payloadItems.length; p++) {
+    var it = payloadItems[p] || {};
+    var idx = parseInt(it.idx, 10);
+    if (!(idx >= 0 && idx < n)) { problems.push('품목 번호가 올바르지 않습니다. 화면을 새로고침해 주세요.'); continue; }
+    if (seen[idx]) { problems.push((idx + 1) + '번 품목이 중복 전송되었습니다.'); continue; }
+    seen[idx] = true;
+    var qs = String(it.qty === undefined || it.qty === null ? '' : it.qty).trim();
+    if (qs === '') qs = '0';
+    if (!/^\d+$/.test(qs)) { problems.push((idx + 1) + '. ' + ledger.items[idx].name + ': 이번 입고 수량은 0 이상의 정수여야 합니다.'); continue; }
+    qtyByIdx[idx] = parseInt(qs, 10);
+    reasonByIdx[idx] = String(it.reason || '').trim().slice(0, INSP_RECEIPT_REASON_MAX);
+  }
+  var items = ledger.items.map(function (L) {
+    return { idx: L.idx, name: L.name, spec: L.spec, ordered: L.ordered, prev: L.prev,
+             qty: qtyByIdx[L.idx] || 0, reason: reasonByIdx[L.idx] || '' };
+  });
+  var anyQty = false;
+  items.forEach(function (o) {
+    var cum = o.prev + o.qty;
+    if (o.qty > 0) anyQty = true;
+    // 초과 입고 사유는 이번 회차 입고분이 있을 때만 — 이전 회차에서 이미 초과된 품목을 0으로 두는 회차(예: 최종 종결)는 다시 묻지 않는다
+    if (cum > o.ordered && o.qty > 0 && !o.reason) {
+      problems.push((o.idx + 1) + '. ' + o.name + ': 누계 ' + cum + '/' + o.ordered + ' — 초과 입고 사유를 입력해 주세요.');
+    }
+    if (isFinal && cum < o.ordered && !o.reason) {
+      problems.push((o.idx + 1) + '. ' + o.name + ': 잔량 ' + (o.ordered - cum) + ' — 최종 검수로 종결하려면 미입고 사유를 입력해 주세요.');
+    }
+  });
+  if (!anyQty && !isFinal) {
+    problems.push('이번 회차 입고 수량이 없습니다. 입고 없이 종결하려면 최종 검수로 제출해 주세요.');
+  }
+  if (problems.length) return { ok: false, message: problems.join('\n') };
+  return { ok: true, items: items, receivedNote: _buildInspReceivedNote_(items, isFinal), qtyDiffNote: _buildInspQtyDiffNote_(items) };
+}
+
+/** 품목별 입고 → 입고 내역 요약문 (RECEIVED_NOTE에 저장 — 홈 아코디언·뷰어·PDF가 그대로 읽는다) */
+function _buildInspReceivedNote_(items, isFinal) {
+  var parts = items.filter(function (o) { return o.qty > 0; }).map(function (o) {
+    return o.name + ' ' + o.qty + INSP_QTY_UNIT + ' (' + (o.prev + o.qty) + '/' + o.ordered + ')';
+  });
+  var s = parts.length ? parts.join(' · ') : (isFinal ? '입고 없음 — 잔량 종결(사유 기재)' : '입고 없음');
+  if (s.length > INSP_RECEIVED_NOTE_MAX) s = s.slice(0, INSP_RECEIVED_NOTE_MAX - 1) + '…';
+  return s;
+}
+
+/** 품목별 사유 → 사람이 읽는 수량 상이 사유 (QTY_DIFF_NOTE). 사유가 있는 품목만, 줄바꿈 구분 */
+function _buildInspQtyDiffNote_(items) {
+  return items.filter(function (o) { return !!o.reason; }).map(function (o) {
+    var cum = o.prev + o.qty;
+    var tag = cum > o.ordered ? '초과' : (cum < o.ordered ? '미입고' : '비고');
+    return (o.idx + 1) + '. ' + o.name + ' [' + tag + '] 발주 ' + o.ordered + ' / 누계 ' + cum + ' — ' + o.reason;
+  }).join('\n');
+}
+
+/** INSP 행 → 뷰어·PDF용 품목별 입고 (null = 레거시 회차) */
+function _inspReceiptForView_(row) {
+  var rc = _parseInspReceipt_(row[INSP_COL.RECEIPT_ITEMS]);
+  if (!rc) return null;
+  return {
+    unit: INSP_QTY_UNIT,
+    items: rc.items.map(function (o) {
+      var cum = o.prev + o.qty;
+      return {
+        idx: o.idx, name: o.name, spec: o.spec, ordered: o.ordered, prev: o.prev, qty: o.qty,
+        cum: cum, remaining: Math.max(0, o.ordered - cum),
+        state: cum > o.ordered ? 'over' : (cum === o.ordered ? 'done' : 'short'),
+        reason: o.reason,
+      };
+    }),
+  };
 }
 
 // ================================================================
@@ -315,6 +586,7 @@ function getInspFormDataForClient(prcToken, resubToken) {
           vendorName:  String(r[COL.VENDOR_NAME] || ''),
           parentToken: String(r[COL.PARENT_DOC_ID] || ''),
           status:      String(r[COL.STATUS] || ''),
+          items:       String(r[COL.ITEMS] || ''),   // [v1.1] 품목별 입고 표
         };
       }
     }
@@ -336,8 +608,9 @@ function getInspFormDataForClient(prcToken, resubToken) {
       return { ok: false, message: '검수보고서는 원본 품의 기안자 또는 같은 부서 담당자만 제출할 수 있습니다.' };
     }
 
-    // 기존 검수보고서 그룹 (회차 채번 + 종결 차단 + 재상신 prefill)
-    var groups = _getInspGroupsByPrc(ss);
+    // 기존 검수보고서 그룹 (회차 채번 + 종결 차단 + 재상신 prefill) — 행은 한 번만 읽어 품목 장부와 공유
+    var inspRows = _readInspRows_(ss);
+    var groups = _getInspGroupsByPrc(ss, inspRows);
     var existing = groups[prcToken] || [];
 
     var locked = _isInspLocked(existing);
@@ -376,7 +649,29 @@ function getInspFormDataForClient(prcToken, resubToken) {
         rejectLog:    String(rr[INSP_COL.REJECT_LOG] || ''),
         // 폐기 버튼 노출용 표시값 — 실제 권한은 _discardInspCore가 서버에서 다시 판정한다 (제출자 본인만)
         canDiscard:   String(rr[inspApprCol(0, 2)] || '').trim().toLowerCase() === actor,
+        // [v1.1] 반려된 회차의 품목별 입고 (qty·reason prefill). 레거시 회차면 null
+        receipt:      _parseInspReceipt_(rr[INSP_COL.RECEIPT_ITEMS]),
       };
+    }
+
+    // [v1.1] 품목별 입고 — 발주·기입고(누계)·잔량. 재상신이면 본인 행은 누계에서 뺀다.
+    //  실패해도 폼은 열려야 하므로(fail-safe) 장부가 깨지면 자유 텍스트 폴백 모드로 내린다.
+    var receipt;
+    try {
+      var ledger = _inspReceiptLedger_(inspRows, prcToken, prc.items, resubToken || '');
+      receipt = {
+        items:            ledger.items,
+        legacyRounds:     ledger.legacyRounds,
+        countedRounds:    ledger.countedRounds,
+        orphanQty:        ledger.orphanQty,
+        snapshotMismatch: ledger.snapshotMismatch,
+        itemsUnavailable: !ledger.itemsParsable,
+        unit:             INSP_QTY_UNIT,
+      };
+    } catch (eLedger) {
+      console.error('[INSP] 품목 장부 계산 실패: ' + eLedger.toString());
+      receipt = { items: [], legacyRounds: [], countedRounds: 0, orphanQty: 0, snapshotMismatch: false,
+                  itemsUnavailable: true, unit: INSP_QTY_UNIT, error: true };
     }
 
     // 현재 로그인 사용자 (담당자 표시용)
@@ -400,6 +695,7 @@ function getInspFormDataForClient(prcToken, resubToken) {
         docNo:       (req ? req.docNo : prc.docNo) + '-' + _pad2(resub ? resub.seq : nextSeq),
       },
       resub:        resub,
+      receipt:      receipt,
       currentUser:  cur.user || null,
       approverList: apprList.approvers || [],
     };
@@ -443,12 +739,16 @@ function _submitInspCore(data) {
     var actor = (getActiveUserEmail() || '').toLowerCase();
     if (!actor) return { ok: false, message: '로그인 사용자를 확인할 수 없습니다.' };
 
-    // 판정/입고내역 필수
+    // 판정 필수
     if (data.verdict !== '합격' && data.verdict !== '불합격') {
       return { ok: false, message: '검수 판정(합격/불합격)을 선택해 주세요.' };
     }
-    if (!data.receivedNote || !String(data.receivedNote).trim()) {
-      return { ok: false, message: '입고 내역을 입력해 주세요.' };
+    // [v1.1] 품목별 입고 페이로드 필수 — 배포 전에 열어 둔 구 화면(입고 내역 한 줄만 보냄)은 락을 잡기 전에 거절한다.
+    //  receivedNoteFallback은 품목내역을 해석할 수 없는 옛 품의에서만 새 화면이 보낸다(폴백 모드).
+    var hasReceipt   = Array.isArray(data.receiptItems);
+    var noteFallback = String(data.receivedNoteFallback || '').trim();
+    if (!hasReceipt && !noteFallback) {
+      return { ok: false, message: '입고 품목 정보가 없습니다. 화면을 새로고침한 뒤 다시 제출해 주세요.' };
     }
     // approvers[0]=기안자(본인), [1..]=결재자 (REQ/PRC 동일 구조)
     var approvers = data.approvers || [];
@@ -481,6 +781,7 @@ function _submitInspCore(data) {
         var ss        = SpreadsheetApp.openById(CONFIG.SHEET_ID);
         var docSheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
         var inspSheet = ensureInspSheet();
+        _ensureInspExtColumns_(inspSheet);   // [v1.1] 확장 열 보장 (락 안 — 재상신 setValues 53폭이 범위 밖이면 throw)
 
         // 대상 PRC + 원본 REQ 재검증 (폼 데이터 신뢰 금지)
         var prc = _findRowByTokenInDoc(docSheet, data.prcToken);
@@ -496,8 +797,9 @@ function _submitInspCore(data) {
           return { ok: false, message: '원본 품의 기안자 또는 같은 부서 담당자만 제출할 수 있습니다.' };
         }
 
-        // 기존 INSP 그룹 (회차 + 종결)
-        var groups = _getInspGroupsByPrc(ss);
+        // 기존 INSP 그룹 (회차 + 종결) — 행은 한 번만 읽어 품목 장부와 공유
+        var inspRows = _readInspRows_(ss);
+        var groups = _getInspGroupsByPrc(ss, inspRows);
         var existing = groups[data.prcToken] || [];
         var locked = _isInspLocked(existing);
 
@@ -517,6 +819,19 @@ function _submitInspCore(data) {
               ? '이미 최종 검수가 승인되어 종결된 품의입니다.'
               : '최종 검수 보고서가 결재 진행 중입니다. 추가 제출이 불가합니다.' };
           }
+        }
+
+        // [v1.1] 품목별 입고 검증 — 발주·누계는 서버가 PRC·기존 회차에서 다시 계산한다 (화면 값 불신)
+        var ledger = _inspReceiptLedger_(inspRows, data.prcToken, String(prc.row[COL.ITEMS] || ''),
+                                         isResub ? String(resubRow.row[INSP_COL.TOKEN] || '') : '');
+        var receipt;
+        if (ledger.itemsParsable) {
+          receipt = _validateInspReceipt_(ledger, data.receiptItems, !!data.isFinal);
+          if (!receipt.ok) return receipt;
+        } else {
+          // 폴백: 품목내역을 해석할 수 없는 옛 품의 — 화면이 보낸 자유 텍스트 입고 내역을 그대로 받는다 (현재 운영 데이터엔 없음)
+          if (!noteFallback) return { ok: false, message: '품의 품목을 해석할 수 없어 입고 내역을 직접 입력해야 합니다.' };
+          receipt = { ok: true, items: null, receivedNote: noteFallback.slice(0, INSP_RECEIVED_NOTE_MAX), qtyDiffNote: '' };
         }
 
         // 스냅샷 (제출 시점 고정 — 원본 변경과 비동기화)
@@ -549,7 +864,7 @@ function _submitInspCore(data) {
         var folder = getOrCreateFolder('INSP_' + docNo, issueDate, 'staging');
         var folderId = folder.getId();
 
-        // 행 구성 (45컬럼)
+        // 행 구성 (53컬럼 = 본체 27 + 결재 4×6 + 확장 2)
         var firstApprName = approvers[0].name || '';
         var rowArr = new Array(INSP_TOTAL_COLS);
         rowArr[INSP_COL.SUBMIT_AT]     = new Date();
@@ -566,7 +881,9 @@ function _submitInspCore(data) {
         rowArr[INSP_COL.DEPT]          = dept;
         rowArr[INSP_COL.ISSUE_DATE]    = issueDate;
         rowArr[INSP_COL.RECEIVED_DATE] = data.receivedDate || '';
-        rowArr[INSP_COL.RECEIVED_NOTE] = String(data.receivedNote || '');
+        rowArr[INSP_COL.RECEIVED_NOTE] = receipt.receivedNote;          // [v1.1] 품목 수량 자동 요약 (폴백 모드만 화면 텍스트)
+        rowArr[INSP_COL.RECEIPT_ITEMS] = receipt.items ? JSON.stringify({ v: 1, items: receipt.items }) : '';
+        rowArr[INSP_COL.QTY_DIFF_NOTE] = receipt.qtyDiffNote || '';
         rowArr[INSP_COL.VERDICT]       = data.verdict;
         rowArr[INSP_COL.IS_FINAL]      = data.isFinal ? 'Y' : '';
         rowArr[INSP_COL.COMMENT]       = String(data.comment || '');
@@ -1835,6 +2152,9 @@ function getInspViewerDataForClient(token, hintIdx) {
         comment:      String(r[INSP_COL.COMMENT] || ''),
         status:       status,
         rejectLog:    String(r[INSP_COL.REJECT_LOG] || ''),
+        // [v1.1] 품목별 입고 (레거시 회차는 null → 화면은 입고 내역 한 줄만)
+        receipt:      _inspReceiptForView_(r),
+        qtyDiffNote:  String(r[INSP_COL.QTY_DIFF_NOTE] || ''),
       },
       approvers:     approvers,
       curIdx:        curIdx,
@@ -1906,7 +2226,7 @@ function _prepareInspPdfHandoff(token) {
 
 /**
  * INSP 행 → 파이썬 렌더러 입력 매니페스트 객체.
- *  - 파이썬이 시트 45컬럼 스키마를 몰라도 되도록 필요한 값을 이름표로 전부 담는다.
+ *  - 파이썬이 시트 53컬럼 스키마를 몰라도 되도록 필요한 값을 이름표로 전부 담는다.
  *  - 사진은 파일명이 아니라 Drive 파일 id로 참조 (위치 독립·자족).
  *  - finalFolderId는 REQ/PRC 파일이 들어 있는 FINAL PO 폴더 id.
  *    PRC 행의 DRIVE_ID(통합 완료 시 FINAL 폴더 id) 우선, 없으면 경로로 폴백.
@@ -1959,8 +2279,11 @@ function _buildInspManifest(ss, r) {
     });
   } catch (_) {}
 
+  // [v1.1] 품목별 입고 — 레거시 회차는 null (렌더러는 키가 없거나 null이면 품목 표를 생략한다)
+  var receiptView = _inspReceiptForView_(r);
+
   return {
-    schemaVersion: 'insp-manifest-v1',
+    schemaVersion: 'insp-manifest-v2',
     token:        String(r[INSP_COL.TOKEN] || ''),
     docNo:        docNo,
     seq:          parseInt(r[INSP_COL.SEQ]) || 0,
@@ -1974,6 +2297,9 @@ function _buildInspManifest(ss, r) {
     issueDate:    toDateStr(r[INSP_COL.ISSUE_DATE]),
     receivedDate: toDateStr(r[INSP_COL.RECEIVED_DATE]),
     receivedNote: String(r[INSP_COL.RECEIVED_NOTE] || ''),
+    receiptItems: receiptView ? receiptView.items : null,
+    qtyUnit:      INSP_QTY_UNIT,
+    qtyDiffNote:  String(r[INSP_COL.QTY_DIFF_NOTE] || ''),
     verdict:      String(r[INSP_COL.VERDICT] || ''),
     comment:      String(r[INSP_COL.COMMENT] || ''),
     approvers:    approvers,
@@ -2267,3 +2593,113 @@ function _cleanupInspPhotos(row) {
   return '사진 ' + deleted + '장 삭제';
 }
 
+
+// ================================================================
+// [임시 래퍼 — 사용 후 제거] 레거시 검수 회차 품목별 입고 백필 (2026-11-05)
+//  배경: 품목별 입고(v1.1) 배포 전 자유 텍스트로 기록된 11회차(진행 중 PRC 7건)에
+//        품목별 수량을 소급 기록해, 다음 회차 폼의 기입고·잔량이 정확히 나오게 한다.
+//  관례(ccf686c·7f9d44b): 무인자 래퍼 → 편집기에서 dryRun 먼저 실행해 로그 확인 → 실행 → 커밋에서 제거.
+//  안전장치: 관리자만, withLock, docNo·PO번호 대조, 반려/폐기 행 스킵, 이미 기록된 행 스킵(멱등),
+//            RECEIVED_NOTE(입고 내역 원문)는 덮지 않는다. 같은 PRC는 회차 순으로 처리해 prev(기입고)를 채운다.
+//  ★ 표시 행은 입고 내역 텍스트만으로 품목·수량을 단정할 수 없어 사용자 확인 후 실행한다.
+// ================================================================
+var _TMP_INSP_BACKFILL_20261105 = [
+  // TO-PO-26-229 TLC30 투입 팬아웃 — 0: G1PO1-021-A0_Fanout+LC Connector (30)
+  { docNo: 'TO-AP-26-003-01', poNo: 'TO-PO-26-229', items: [{ idx: 0, qty: 29 }] },               // 'Fanout-LC_96ch 29ea'
+  // TO-PO-26-238 양산 제품 구매_Fanout — 0: F4PO1-055-A1 (10) / 1: P1PO1-055-A2 (50) / 2: P1PO1-057-A0 (10)
+  { docNo: 'TO-AP-26-008-01', poNo: 'TO-PO-26-238', items: [{ idx: 1, qty: 49 }] },               // ★ 'FanOut-1.5m … (QDC08) 49ea' → P1PO1-055-A2?
+  { docNo: 'TO-AP-26-008-02', poNo: 'TO-PO-26-238', items: [{ idx: 0, qty: 10 }] },               // 'F4PO1-055-A1 FanOut-1.8m … 10ea'
+  { docNo: 'TO-AP-26-008-03', poNo: 'TO-PO-26-238', items: [{ idx: 2, qty: 10 }] },               // ★ 'FanOut-1.5m … 10ea' → P1PO1-057-A0?
+  // TO-PO-26-239 양산 제품 투입 자재_Optics — 0: F4PO1-012-A1_M1 (300) / 1: F4PO1-013-A3_M2 (100)
+  { docNo: 'TO-AP-26-009-01', poNo: 'TO-PO-26-239', items: [{ idx: 1, qty: 61 }] },               // 'M2 (Large Mirror) 61ea'
+  { docNo: 'TO-AP-26-009-02', poNo: 'TO-PO-26-239', items: [{ idx: 0, qty: 300 }] },              // 'M1 300EA'
+  // TO-PO-26-250 양산용 원자재 — 4: CLY_F4PO1-003-A (50)
+  { docNo: 'TO-AP-26-012-01', poNo: 'TO-PO-26-250', items: [{ idx: 4, qty: 50 }] },               // 'Cly 50EA'
+  // TO-PO-26-295 48CH Fiber Array + Feedthrough — 0: (150)
+  { docNo: 'TO-AP-26-024-01', poNo: 'TO-PO-26-295', items: [{ idx: 0, qty: 0 }] },                // ★ 'FA+FT 48ch' — 수량 미기재, 확인 후 입력
+  // TO-PO-26-300 Small Mirror(M1) 외 3건 — 0: M1 (400) / 1: M2 (200) / 2: CLx1 (100) / 3: CLx2 (100)
+  { docNo: 'TO-AP-26-028-01', poNo: 'TO-PO-26-300', items: [{ idx: 2, qty: 100 }] },              // 'CLx1 100ea'
+  { docNo: 'TO-AP-26-028-02', poNo: 'TO-PO-26-300', items: [{ idx: 3, qty: 100 }] },              // 'CLx2 100ea'
+  // TO-PO-26-308 E-BOX 외 1종 — 0: E-BOX (100) / 1: Frame (100)
+  { docNo: 'TO-AP-26-031-01', poNo: 'TO-PO-26-308', items: [{ idx: 0, qty: 100 }] },              // 'E-Box 100ea'
+];
+
+function _tmp_backfillInspReceipt_20261105_dryRun() { return _tmpBackfillInspReceiptCore_(true); }
+function _tmp_backfillInspReceipt_20261105()        { return _tmpBackfillInspReceiptCore_(false); }
+
+function _tmpBackfillInspReceiptCore_(dryRun) {
+  var actor = (getActiveUserEmail() || '').toLowerCase();
+  if (!isAdminUser(actor)) throw new Error('[INSP 백필] 관리자만 실행할 수 있습니다: ' + actor);
+
+  return withLock(function () {
+    var ss        = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    var docSheet  = ss.getSheetByName(CONFIG.SHEET_NAME);
+    var inspSheet = ensureInspSheet();
+    if (!dryRun) _ensureInspExtColumns_(inspSheet);
+
+    var rows = inspSheet.getDataRange().getValues();
+    var rowByDoc = {};
+    for (var i = 1; i < rows.length; i++) rowByDoc[String(rows[i][INSP_COL.DOC_NO] || '')] = { rowNum: i + 1, row: rows[i] };
+
+    // 같은 PRC는 회차(docNo 끝 2자리) 오름차순 — 앞 회차 수량이 다음 회차 prev(기입고)가 된다
+    var plan = _TMP_INSP_BACKFILL_20261105.slice().sort(function (a, b) { return a.docNo < b.docNo ? -1 : (a.docNo > b.docNo ? 1 : 0); });
+    var cumByPrc = {}, prcItemsCache = {}, log = [], written = 0, skipped = 0;
+
+    plan.forEach(function (entry) {
+      var info = rowByDoc[entry.docNo];
+      if (!info) { log.push('SKIP ' + entry.docNo + ' — 행 없음'); skipped++; return; }
+      var r = info.row;
+      var status = String(r[INSP_COL.STATUS] || '');
+      if (status === '반려' || status === '폐기') { log.push('SKIP ' + entry.docNo + ' — 상태 ' + status); skipped++; return; }
+      if (String(r[INSP_COL.PO_NO] || '') !== entry.poNo) { log.push('SKIP ' + entry.docNo + ' — PO 불일치 (' + r[INSP_COL.PO_NO] + ')'); skipped++; return; }
+      if (String(r[INSP_COL.RECEIPT_ITEMS] || '').trim()) { log.push('SKIP ' + entry.docNo + ' — 이미 품목별 입고 기록 있음'); skipped++; return; }
+
+      var prcToken = String(r[INSP_COL.PRC_TOKEN] || '');
+      if (!prcItemsCache[prcToken]) {
+        var prc = _findRowByTokenInDoc(docSheet, prcToken);
+        if (!prc) { log.push('SKIP ' + entry.docNo + ' — PRC 행 없음 (' + prcToken + ')'); skipped++; return; }
+        prcItemsCache[prcToken] = _prcItemsForInsp_(String(prc.row[COL.ITEMS] || ''));
+      }
+      var lines = prcItemsCache[prcToken];
+      if (!lines.length) { log.push('SKIP ' + entry.docNo + ' — PRC 품목 해석 불가'); skipped++; return; }
+
+      var qtyByIdx = {}, bad = null;
+      entry.items.forEach(function (it) {
+        if (!(it.idx >= 0 && it.idx < lines.length)) bad = 'idx ' + it.idx + ' 범위 밖(품목 ' + lines.length + '개)';
+        else if (!/^\d+$/.test(String(it.qty))) bad = 'qty ' + it.qty + ' 정수 아님';
+        else qtyByIdx[it.idx] = parseInt(it.qty, 10);
+      });
+      if (bad) { log.push('SKIP ' + entry.docNo + ' — ' + bad); skipped++; return; }
+
+      var cum = cumByPrc[prcToken] || (cumByPrc[prcToken] = {});
+      var items = lines.map(function (L) {
+        var prev = cum[L.idx] || 0, qty = qtyByIdx[L.idx] || 0;
+        return { idx: L.idx, name: L.name, spec: L.spec, ordered: L.ordered, prev: prev, qty: qty, reason: '' };
+      });
+      items.forEach(function (o) { cum[o.idx] = o.prev + o.qty; });
+
+      var json = JSON.stringify({ v: 1, items: items, backfilled: toDateStr(new Date()) + ' ' + actor });
+      var summary = items.filter(function (o) { return o.qty > 0; }).map(function (o) {
+        return o.name + ' ' + o.qty + INSP_QTY_UNIT + ' (' + (o.prev + o.qty) + '/' + o.ordered + ')';
+      }).join(' · ') || '(수량 0)';
+      log.push((dryRun ? 'PLAN ' : 'WRITE ') + entry.docNo + ' — ' + summary + '  | 원문: ' + String(r[INSP_COL.RECEIVED_NOTE] || ''));
+      if (!dryRun) {
+        inspSheet.getRange(info.rowNum, INSP_COL.RECEIPT_ITEMS + 1, 1, 2).setValues([[json, '']]);
+        written++;
+      }
+    });
+
+    if (!dryRun && written > 0) {
+      try {
+        writeAuditLog({
+          eventType: 'ADMIN_INSP_RECEIPT_BACKFILL', docType: 'INSP', actor: actor, actorRole: 'admin',
+          reason: '레거시 검수 회차 품목별 입고 백필 ' + written + '행 (2026-11-05 임시 래퍼)',
+          payload: { written: written, skipped: skipped, docNos: plan.map(function (e) { return e.docNo; }) },
+        });
+      } catch (_) {}
+    }
+    var out = { ok: true, dryRun: dryRun, written: written, skipped: skipped, log: log };
+    Logger.log('[INSP 백필] ' + (dryRun ? 'DRY RUN' : '실행') + ' — 기록 ' + written + ' / 스킵 ' + skipped + '\n' + log.join('\n'));
+    return out;
+  });
+}

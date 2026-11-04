@@ -75,6 +75,9 @@ class FakeSheet {
   getName() { return this.name; }
   getLastRow() { return this.rows.length; }
   getLastColumn() { return this.rows.reduce((m, r) => Math.max(m, r.length), 0); }
+  // 시트 최대 열 — INSP v1.1 확장 열 보장(_ensureInspExtColumns_)이 쓴다. 실제 Sheets의 기본 26열을 흉내낸다
+  getMaxColumns() { return Math.max(26, this.getLastColumn(), this._maxCols || 0); }
+  insertColumnsAfter(after, n) { this._guard(); this._maxCols = this.getMaxColumns() + n; return this; }
   appendRow(vals) { this._guard(); this.appendCount++; this.rows.push(vals.slice()); return this; }
   getRange(row, col, nRows = 1, nCols = 1) { return new FakeRange(this, row, col, nRows, nCols); }
   getDataRange() { return this.getRange(1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
@@ -316,7 +319,11 @@ function pair(fn, opts) {
   const rh = fn(h), rn = fn(n);
   return { h, n, rh, rn };
 }
-const sheetRows = env => ({ main: env.main().rows, insp: env.insp().rows });
+// INSP v1.1(품목별 입고): 수정본은 행 끝에 확장 열 2개(receiptItems·qtyDiffNote)를 쓰고 입고 내역(14열)을 자동 요약으로 채운다.
+//  이전 코드와 '같아야 하는' 비교에서는 그 세 칸을 뺀다 (새 기능 자체는 tests/insp_receipt_test.js가 단언).
+const INSP_LEGACY_COLS = 51, INSP_NOTE_COL = 14;
+const normInsp = rows => rows.map((r, i) => { const x = r.slice(0, INSP_LEGACY_COLS); if (i > 0) x[INSP_NOTE_COL] = ''; return x; });
+const sheetRows = env => ({ main: env.main().rows, insp: normInsp(env.insp().rows) });
 const rowOf = (env, sheet, token, col) => sheet.rows.find(r => r[col] === token);
 const mainRow = (env, token) => env.main().rows.find(r => r[env.sb.COL.TOKEN] === token);
 const mainRowByDoc = (env, docNo) => env.main().rows.find(r => r[env.sb.COL.DOC_NO] === docNo);
@@ -667,6 +674,7 @@ compareFlow('B17 구매 문서 제출 — 첨부 업로드 실패', env => { env
 const inspPayload = (who, prcToken) => ({
   prcToken: prcToken || 'tok-prc2', resubToken: '', receivedDate: '2026-10-14', receivedNote: '1차 입고', verdict: '합격', isFinal: false, comment: '',
   approvers: [{ label: '기안자', name: NAMES[who], email: who }, { label: '결재자 1', name: NAMES[LEE], email: LEE }], photos: [],
+  receiptItems: [{ idx: 0, qty: 10, reason: '' }],   // v1.1 품목별 입고 (이전 코드는 이 키를 무시한다)
 });
 {
   const r = compareFlow('B18 검수보고서 제출', env => { env.as(KIM); return env.call('submitInspForClient', inspPayload(KIM)); }, { deferred: ['INSP_SUBMIT'] });
@@ -917,7 +925,7 @@ console.log('\n[C9] INSP 폐기 — 제출자 본인 (반려 후)');
   check('C17 같은 부서 동료에게는 canDiscard=false (재상신은 그대로 가능)', () => (g.ok && g.resub.canDiscard === false) || g);
   const h = seed(makeEnv('HEAD', readHEAD)); h.as(KIM);
   const fh = h.call('getInspFormDataForClient', 'tok-prc1', 'tok-i2');
-  check('C17 나머지 응답은 HEAD와 동일 (canDiscard만 추가)', () => { const x = JSON.parse(JSON.stringify(f)); delete x.resub.canDiscard; return same(fh, x); });
+  check('C17 나머지 응답은 HEAD와 동일 (canDiscard · v1.1 receipt만 추가)', () => { const x = JSON.parse(JSON.stringify(f)); delete x.resub.canDiscard; delete x.resub.receipt; delete x.receipt; return same(fh, x); });
 }
 
 // =================================================================
