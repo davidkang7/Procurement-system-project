@@ -347,6 +347,15 @@ def _fit_desc_height(ws: Worksheet, row: int, text) -> None:
     ws.row_dimensions[row].height = 13.5 * lines
 
 
+def _ensure_desc_merge(ws: Worksheet, row: int) -> None:
+    """품목명 칸은 B:C 병합이 전제다. 기준 양식에는 병합이 빠진 행이 있어(외자는 29행~, 내자는 28·30·32행)
+    16번째 품목부터 B열 폭에서 줄바꿈되며 잘렸다(2026-11-04 TO-PO-26-343 Coherent 16건 — PDF 육안으로만 보임)."""
+    for m in ws.merged_cells.ranges:
+        if m.min_row <= row <= m.max_row and m.min_col <= COL_DESC + 1 and m.max_col >= COL_DESC:
+            return
+    ws.merge_cells(start_row=row, start_column=COL_DESC, end_row=row, end_column=COL_DESC + 1)
+
+
 def _shrink(ws: Worksheet, row: int, col: int):
     """좁은 열(단위·납기)의 글자 잘림 방지 — 자동 검사로 못 잡는 결함이라 항상 켠다."""
     c = ws.cell(row, col)
@@ -516,6 +525,8 @@ def fill(layout: FormLayout, order: PoOrder, rules: VendorRules):
                 f"품목 {idx}번부터 양식 품목칸({layout.item_first}~{layout.item_last}행)을 넘어 "
                 f"기재하지 못했습니다. 행을 추가해 수동 입력하거나 주문을 분할하세요.")
             break
+        for rr in range(row, row + need):
+            _ensure_desc_merge(ws, rr)
         ws.cell(row, COL_NO, idx)
         ws.cell(row, COL_DESC, it.name)
         _fit_desc_height(ws, row, it.name)
