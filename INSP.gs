@@ -2601,22 +2601,22 @@ function _cleanupInspPhotos(row) {
 //  관례(ccf686c·7f9d44b): 무인자 래퍼 → 편집기에서 dryRun 먼저 실행해 로그 확인 → 실행 → 커밋에서 제거.
 //  안전장치: 관리자만, withLock, docNo·PO번호 대조, 반려/폐기 행 스킵, 이미 기록된 행 스킵(멱등),
 //            RECEIVED_NOTE(입고 내역 원문)는 덮지 않는다. 같은 PRC는 회차 순으로 처리해 prev(기입고)를 채운다.
-//  ★ 표시 행은 입고 내역 텍스트만으로 품목·수량을 단정할 수 없어 사용자 확인 후 실행한다.
+//  매핑 11행은 2026-11-05 사용자가 전부 확인했다.
 // ================================================================
 var _TMP_INSP_BACKFILL_20261105 = [
   // TO-PO-26-229 TLC30 투입 팬아웃 — 0: G1PO1-021-A0_Fanout+LC Connector (30)
   { docNo: 'TO-AP-26-003-01', poNo: 'TO-PO-26-229', items: [{ idx: 0, qty: 29 }] },               // 'Fanout-LC_96ch 29ea'
   // TO-PO-26-238 양산 제품 구매_Fanout — 0: F4PO1-055-A1 (10) / 1: P1PO1-055-A2 (50) / 2: P1PO1-057-A0 (10)
-  { docNo: 'TO-AP-26-008-01', poNo: 'TO-PO-26-238', items: [{ idx: 1, qty: 49 }] },               // ★ 'FanOut-1.5m … (QDC08) 49ea' → P1PO1-055-A2?
+  { docNo: 'TO-AP-26-008-01', poNo: 'TO-PO-26-238', items: [{ idx: 1, qty: 49 }] },               // 'FanOut-1.5m … (QDC08) 49ea' → P1PO1-055-A2 (확인. 불량 1건 수리 입고 후 종결 예정)
   { docNo: 'TO-AP-26-008-02', poNo: 'TO-PO-26-238', items: [{ idx: 0, qty: 10 }] },               // 'F4PO1-055-A1 FanOut-1.8m … 10ea'
-  { docNo: 'TO-AP-26-008-03', poNo: 'TO-PO-26-238', items: [{ idx: 2, qty: 10 }] },               // ★ 'FanOut-1.5m … 10ea' → P1PO1-057-A0?
+  { docNo: 'TO-AP-26-008-03', poNo: 'TO-PO-26-238', items: [{ idx: 2, qty: 10 }] },               // 'FanOut-1.5m … 10ea' → P1PO1-057-A0 (확인)
   // TO-PO-26-239 양산 제품 투입 자재_Optics — 0: F4PO1-012-A1_M1 (300) / 1: F4PO1-013-A3_M2 (100)
   { docNo: 'TO-AP-26-009-01', poNo: 'TO-PO-26-239', items: [{ idx: 1, qty: 61 }] },               // 'M2 (Large Mirror) 61ea'
   { docNo: 'TO-AP-26-009-02', poNo: 'TO-PO-26-239', items: [{ idx: 0, qty: 300 }] },              // 'M1 300EA'
   // TO-PO-26-250 양산용 원자재 — 4: CLY_F4PO1-003-A (50)
   { docNo: 'TO-AP-26-012-01', poNo: 'TO-PO-26-250', items: [{ idx: 4, qty: 50 }] },               // 'Cly 50EA'
   // TO-PO-26-295 48CH Fiber Array + Feedthrough — 0: (150)
-  { docNo: 'TO-AP-26-024-01', poNo: 'TO-PO-26-295', items: [{ idx: 0, qty: 0 }] },                // ★ 'FA+FT 48ch' — 수량 미기재, 확인 후 입력
+  { docNo: 'TO-AP-26-024-01', poNo: 'TO-PO-26-295', items: [{ idx: 0, qty: 30 }] },               // 'FA+FT 48ch' — 30개 (2026-11-05 사용자 확인)
   // TO-PO-26-300 Small Mirror(M1) 외 3건 — 0: M1 (400) / 1: M2 (200) / 2: CLx1 (100) / 3: CLx2 (100)
   { docNo: 'TO-AP-26-028-01', poNo: 'TO-PO-26-300', items: [{ idx: 2, qty: 100 }] },              // 'CLx1 100ea'
   { docNo: 'TO-AP-26-028-02', poNo: 'TO-PO-26-300', items: [{ idx: 3, qty: 100 }] },              // 'CLx2 100ea'
