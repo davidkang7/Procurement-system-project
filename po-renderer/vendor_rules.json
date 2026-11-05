@@ -11,6 +11,8 @@
   ],
   "vendors": {
     "아이비전":        { "shipper": "㈜아이비전" },
+    "제놉스":          { "shipper": "제놉스㈜" },
+    "한국건설생활환경시험연구원": { "shipper": "한국건설생활환경시험연구원", "remark": "QUO NO." },
     "신광정보통신":     { "shipper": "㈜신광정보통신", "remark": "QUO NO." },
     "한화팩키지":      { "shipper": "㈜한화팩키지" },
     "한샘디지텍":      { "shipper": "㈜한샘디지텍", "remark": "QUO DATE" },

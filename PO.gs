@@ -683,3 +683,32 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-11-05 생성대기 주문서 마감 (xlsx + pdf, 2페이지, PDF 육안 확인 완료):
+ *    TO-PO-26-344_태성테크                 KRW 4,500,000
+ *    TO-PO-26-346_제놉스                   KRW 750,000
+ *    TO-PO-26-347_태성테크                 KRW 300,000
+ *    TO-PO-26-348_한국건설생활환경시험연구원 KRW 320,000
+ */
+function _tmp_markPoDone_20261105() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일 ID]
+    ['TO-PO-26-344', '5b271e35-09fd-403a-a531-9dd9277402a1', '1gjE2faNMHLr7Oa2LUXpWKKDHvCj-APeb'],
+    ['TO-PO-26-346', '058837e1-bad6-4791-8411-e51ba730577f', '1SxdIqGVUhYW7MouKZEH_oIocRO-LTC2z'],
+    ['TO-PO-26-347', 'e06c64f9-ee21-42da-8bf2-eeb58ecda095', '16MQ3pdWsoI66hH3JN4bc-YqGe0VzG2hC'],
+    ['TO-PO-26-348', 'c0aa2854-e9f0-4042-9f39-55d6bbea94ec', '14G8dlElxJcTLgDCAjYv9F1boGsd_AW0t'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
