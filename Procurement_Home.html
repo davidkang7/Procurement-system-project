@@ -71,6 +71,7 @@
   .role-pill.proc { background: var(--grad-prc); color: #fff; }
   .role-pill.admin { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
   .role-pill.gview { background: #0e8577; color: #fff; }  /* 전사조회(읽기 전용) — 부서 배지와 구분되는 틸/청록 */
+  .role-pill.scm { background: #b45309; color: #fff; }    /* SCM 담당(전 품의 검수보고서 제출) — 앰버 */
 
   .layout { display: grid; grid-template-columns: 230px 1fr; min-height: calc(100vh - 70px); }
   .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 12px; }
@@ -599,6 +600,7 @@ function renderUser(){
   var pills = '<span class="role-pill user">' + deptLabel + '</span>';
   if(u.isProcurement) pills += '<span class="role-pill proc">구매팀</span>';
   if(u.isGlobalViewer) pills += '<span class="role-pill gview">전사조회</span>';
+  if(u.isScm) pills += '<span class="role-pill scm">SCM</span>';
   if(u.isAdmin) pills += '<span class="role-pill admin">관리자</span>';
   document.getElementById('user-roles').innerHTML = pills;
 }
@@ -1847,11 +1849,14 @@ function renderCompleted(){
 
   var myDept  = (u.dept) || '';
   var isAdmin = !!u.isAdmin;
-  // 관리자는 '조회'만 전사로 넓어진다 — 검수보고서 제출권(canSubmit)은 서버에서 여전히
-  // 본인/같은 부서로 제한되므로 안내 문구도 조회 범위만 확장해 적는다.
-  var scopeNote = isAdmin ? '관리자 권한으로 전사 문서가 조회됩니다(검수보고서 제출은 본인·같은 부서 건만 가능).'
+  var isScm   = !!u.isScm;
+  // 관리자는 '조회'만 전사로 넓어진다 — 검수보고서 제출권(canSubmit)은 서버가 본인/같은 부서/SCM으로
+  // 판정하므로, SCM이 아닌 관리자에게는 제출 범위를 따로 적는다.
+  var scopeNote = isAdmin ? ('관리자 권한으로 전사 문서가 조회됩니다' + (isScm ? '.' : '(검수보고서 제출은 본인·같은 부서 건만 가능).'))
                 : isProc  ? '구매팀 권한으로 전체 문서가 표시됩니다.'
+                : isScm   ? '전사 문서가 표시됩니다.'
                 : ('본인이 기안했거나' + (myDept ? ' 같은 부서(' + escHtml(myDept) + ')에서' : '') + ' 기안한 품의가 표시되며, 같은 부서 건은 검수보고서도 제출할 수 있습니다.');
+  if(isScm) scopeNote += ' SCM 담당 권한으로 모든 품의의 검수보고서를 제출할 수 있습니다.';
   var sub = '최종승인(구매)된 구매 품의의 최종 승인 확인 및 검수보고서 제출 메뉴입니다. '
     + scopeNote
     + ' 행을 클릭하면 회차별 검수 이력이 펼쳐집니다.';
@@ -1913,7 +1918,7 @@ function poInspState(x){
 
 // 아코디언 하위 — 회차별 검수보고서 목록
 function inspSubRows(x){
-  // canSubmit: 본인 기안 또는 같은 부서(서버 판정). 검수보고서 제출/재상신 가능 여부
+  // canSubmit: 본인 기안·같은 부서·SCM 담당(서버 _inspSubmitBasis_ 판정). 검수보고서 제출/재상신 가능 여부
   var canSubmit = !!x.canSubmit;
   var inner;
 
@@ -1968,7 +1973,7 @@ function inspSubRows(x){
 
   var footer;
   if(!canSubmit){
-    footer = '<div style="margin-top:9px;font-size:11px;color:var(--ink-mute);">검수보고서 제출은 품의 기안자(' + escHtml(x.drafterName || x.drafter) + ') 또는 같은 부서 담당자만 가능합니다.</div>';
+    footer = '<div style="margin-top:9px;font-size:11px;color:var(--ink-mute);">검수보고서 제출은 품의 기안자(' + escHtml(x.drafterName || x.drafter) + '), 같은 부서 담당자 또는 SCM 담당만 가능합니다.</div>';
   } else if(x.inspClosed){
     footer = '<div style="margin-top:9px;font-size:11px;color:#0e7d72;font-weight:700;">★ 최종 검수가 승인되어 종결된 품의입니다. (추가 제출 불가)</div>';
   } else if(x.inspLocked){

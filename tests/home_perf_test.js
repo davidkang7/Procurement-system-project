@@ -291,6 +291,17 @@ function firstDiff(a, b, p = '') {
   return null;
 }
 
+// 2026-11-05 SCM 역할(검수보고서 전 품의 제출) — 그 뒤에 의도한 차이만 기준 응답에 반영해 비교한다 (나머지는 그대로 같아야 한다)
+//  · user.isScm 플래그 추가  · SCM 담당(작업 트리의 CONFIG.SCM_EMAILS)은 결재 완료 목록에서 기안자가 있는 건 모두 canSubmit=true
+function withScmRole(baseRes, wtEnv, email) {
+  const r = JSON.parse(JSON.stringify(baseRes));
+  wtEnv.sandbox.__scmEmail = email;
+  const scm = vm.runInContext('isScmUser(__scmEmail)', wtEnv.sandbox);
+  if (r.user) r.user.isScm = scm;
+  if (scm) (r.completedDocs || []).forEach(x => { x.canSubmit = !!x.drafter; });
+  return r;
+}
+
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
   if (cond) { pass++; console.log('  ✓ ' + name); }
@@ -319,12 +330,13 @@ const table = [];
 const results = {};
 for (const role of ROLES) {
   console.log(`[${role.name}] ${role.email}`);
-  const base = makeEnv('BASE', readBASE, role.email, PREFS).run();
-  const wt   = makeEnv('WT',   readWT,   role.email, PREFS).run();
+  const base  = makeEnv('BASE', readBASE, role.email, PREFS).run();
+  const wtEnv = makeEnv('WT',   readWT,   role.email, PREFS);
+  const wt    = wtEnv.run();
   results[role.email] = wt.res;
 
   check('기준·수정본 모두 ok=true', base.res.ok === true && wt.res.ok === true, base.res.message || wt.res.message);
-  const d = firstDiff(base.res, wt.res);
+  const d = firstDiff(withScmRole(base.res, wtEnv, role.email), wt.res);
   check('응답 페이로드 완전 동일', d === null, d);
   check('오류 로그·홈 경로 쓰기 없음 (수정본)', wt.errors.length === 0 && wt.writes === 0, wt.errors.join(' / ') + (wt.writes ? ` 쓰기 ${wt.writes}회` : ''));
 
@@ -446,7 +458,7 @@ console.log('\n[시트가 없거나 비었거나 읽기가 실패해도 기준�
     const b = makeEnv('BASE', readBASE, who, PREFS), w = makeEnv('WT', readWT, who, PREFS);
     mutate(b.ss); mutate(w.ss);
     const xb = b.run(), xw = w.run(), rb = xb.res, rw = xw.res;
-    const d = firstDiff(rb, rw);
+    const d = firstDiff(withScmRole(rb, w, who), rw);
     check(`${name} (${who === ADMIN ? '관리자' : '일반'}): 기준과 같은 응답·시트 쓰기 ${xb.writes}회 동일`,
       rb.ok === true && rw.ok === true && d === null && xb.writes === xw.writes, d || (rb.message + ' / ' + rw.message + ` / 쓰기 ${xb.writes}·${xw.writes}`));
   }

@@ -229,6 +229,7 @@ function makeEnv(label, read) {
   sandbox.CONFIG.PROCUREMENT_TEAM_EMAILS = [ADMIN, BUYER1, BUYER2];
   sandbox.CONFIG.ADMIN_EMAILS = [ADMIN];
   sandbox.CONFIG.GLOBAL_VIEW_EMAILS = [];
+  sandbox.CONFIG.SCM_EMAILS = [];   // 2026-11-05 SCM 역할 — 이 테스트는 SCM 밖의 동작만 본다 (tests/insp_submit_role_test.js)
 
   const env = {
     label, sb: sandbox, ss, state,
@@ -676,15 +677,18 @@ const inspPayload = (who, prcToken) => ({
   approvers: [{ label: '기안자', name: NAMES[who], email: who }, { label: '결재자 1', name: NAMES[LEE], email: LEE }], photos: [],
   receiptItems: [{ idx: 0, qty: 10, reason: '' }],   // v1.1 품목별 입고 (이전 코드는 이 키를 무시한다)
 });
+// 2026-11-05 SCM 역할: INSP_SUBMIT 행의 payload에 제출 근거(submitBasis)가 실린다 (그동안 빈칸)
+const fixInspSubmitBasis = basis => rows => rows.map(x => (x[AC.EV - 1] === 'INSP_SUBMIT' && x[AC.PAYLOAD - 1] === '')
+  ? Object.assign(x.slice(), { [AC.PAYLOAD - 1]: JSON.stringify({ submitBasis: basis }) }) : x);
 {
-  const r = compareFlow('B18 검수보고서 제출', env => { env.as(KIM); return env.call('submitInspForClient', inspPayload(KIM)); }, { deferred: ['INSP_SUBMIT'] });
+  const r = compareFlow('B18 검수보고서 제출', env => { env.as(KIM); return env.call('submitInspForClient', inspPayload(KIM)); }, { deferred: ['INSP_SUBMIT'], fixHeadAudit: fixInspSubmitBasis('self') });
   check('B18 INSP_SUBMIT 처리자=김기안 (지연 기록 경유)', () => {
     const row = r.n.auditRows().find(x => x[AC.EV] === 'INSP_SUBMIT');
     return (row && row[AC.ACTOR] === KIM) || row;
   });
 }
 {
-  const r = compareFlow('B18b 검수보고서 제출 — 사진 저장 실패', env => { env.as(KIM); env.state.flags.photoFail = true; const x = env.call('submitInspForClient', inspPayload(KIM)); env.state.flags.photoFail = false; return x; }, { extraEvents: ['DRIVE_SAVE_FAIL'], deferred: ['INSP_SUBMIT'], immediate: ['DRIVE_SAVE_FAIL'] });
+  const r = compareFlow('B18b 검수보고서 제출 — 사진 저장 실패', env => { env.as(KIM); env.state.flags.photoFail = true; const x = env.call('submitInspForClient', inspPayload(KIM)); env.state.flags.photoFail = false; return x; }, { extraEvents: ['DRIVE_SAVE_FAIL'], deferred: ['INSP_SUBMIT'], immediate: ['DRIVE_SAVE_FAIL'], fixHeadAudit: fixInspSubmitBasis('self') });
   check('B18b DRIVE_SAVE_FAIL (stage=insp_photo) + 관리자 알림은 HEAD와 동일', () => {
     const row = r.n.auditRows().find(x => x[AC.EV] === 'DRIVE_SAVE_FAIL');
     return (row && JSON.parse(row[AC.PAYLOAD]).stage === 'insp_photo' && same(r.h.state.adminErrors, r.n.state.adminErrors) === true) || row;
@@ -933,9 +937,10 @@ console.log('\n[H] 홈 데이터 — HEAD 대비');
 // =================================================================
 {
   const p = pair(env => { env.as(KIM); return env.call('getHomeDataForClient'); });
-  check('H1 폐기 건이 없으면 홈 응답은 HEAD와 같음 (insps[].submitter만 추가)', () => {
+  check('H1 폐기 건이 없으면 홈 응답은 HEAD와 같음 (insps[].submitter · user.isScm만 추가)', () => {
     const x = JSON.parse(JSON.stringify(p.rn));
     (x.completedDocs || []).forEach(c => (c.insps || []).forEach(s => { delete s.submitter; }));
+    if (x.user) delete x.user.isScm;   // 2026-11-05 SCM 역할 배지용 플래그
     return same(p.rh, x);
   });
   check('H1 submitter = 결재란 0번 이메일(소문자)', () => {

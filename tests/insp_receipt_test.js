@@ -179,6 +179,7 @@ function makeEnv(label, read) {
   sandbox.CONFIG.PROCUREMENT_TEAM_EMAILS = [ADMIN, BUYER1];
   sandbox.CONFIG.ADMIN_EMAILS = [ADMIN];
   sandbox.CONFIG.GLOBAL_VIEW_EMAILS = [];
+  sandbox.CONFIG.SCM_EMAILS = [];   // 2026-11-05 SCM 역할 — 이 테스트는 SCM 밖의 동작만 본다 (tests/insp_submit_role_test.js)
   const env = {
     label, sb: sandbox, ss, state,
     as(user) { state.active = user; return env; },
@@ -481,7 +482,9 @@ console.log('\n[N] 비회귀 — 이전 코드(' + BASE_REF + ')와 같은 응�
 // =================================================================
 {
   const b = seed(makeEnv('BASE', readBASE)), n = seed(makeEnv('NEW', readWT));
-  [KIM, PARK, BUYER1, ADMIN].forEach(u => check('N1 홈 페이로드 동일 — ' + NAMES[u], () => same(b.as(u).call('getHomeDataForClient'), n.as(u).call('getHomeDataForClient'))));
+  // user.isScm(2026-11-05 SCM 역할 배지용)은 이후 추가된 키라 비교에서 뺀다
+  const noScmFlag = r => { const x = JSON.parse(JSON.stringify(r)); if (x && x.user) delete x.user.isScm; return x; };
+  [KIM, PARK, BUYER1, ADMIN].forEach(u => check('N1 홈 페이로드 동일 — ' + NAMES[u], () => same(b.as(u).call('getHomeDataForClient'), noScmFlag(n.as(u).call('getHomeDataForClient')))));
   check('N2 레거시 회차 뷰어 응답 동일 (receipt·qtyDiffNote 키 제외)', () => {
     const vb = b.as(LEE).call('getInspViewerDataForClient', 'tok-i3', null), vn = n.as(LEE).call('getInspViewerDataForClient', 'tok-i3', null);
     const x = JSON.parse(JSON.stringify(vn)); delete x.doc.receipt; delete x.doc.qtyDiffNote;

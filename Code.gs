@@ -63,6 +63,14 @@ var CONFIG = {
     'david@inlct.com',   // 염선민 개발팀 상무 (유일 크로스팀 결재자)
     'logistics@inlct.com',  // 물류 담당 계정 (2026-09 추가)
   ],
+  // SCM 담당 (입고·검수 실무). 부서와 무관하게 모든 품의의 검수보고서를 제출·재상신한다.
+  //  판정은 INSP.gs _inspSubmitBasis_ 한 곳 — 제출할 수 있는 건은 결재 완료 목록에도 보인다.
+  //  ⚠ 결재·대리결재, 타인 제출 건 폐기(제출자 본인만), 락 점유·PRC 작성은 주지 않는다.
+  //    관리자·전사조회는 제출권이 없으므로(조회만 확장) 제출이 필요한 계정은 여기에 따로 둔다.
+  SCM_EMAILS: [
+    'davidkang@inlct.com',
+    'logistics@inlct.com',  // 물류 담당 계정 — 사용자 요청으로 상시 유지 (2026-11-05)
+  ],
 
   // ── 알림 수신처 (권한과 무관 — 순수 메일 수신 대상) ──
   // 구매팀 알림 (REQ 1차 승인 시 픽업 요청)
@@ -532,29 +540,37 @@ function assertDrafterIsSelf(data) {
   return null;
 }
 
+// 역할 배열 소속 판정 — 모든 is*User 판정이 공유한다.
+//  소문자 비교 + 원문 비교(배열에 대소문자가 섞여 들어간 경우). 빈 목록 폴백은 두지 않는다 —
+//  필요한 역할(isProcurementUser)만 호출 전에 스스로 처리한다.
+function _isListedEmail_(list, email) {
+  if (!email) return false;
+  list = list || [];
+  return list.indexOf(String(email).toLowerCase()) >= 0
+      || list.indexOf(email) >= 0;
+}
+
 function isProcurementUser(email) {
   if (!email) return false;
   var list = CONFIG.PROCUREMENT_TEAM_EMAILS || [];
   if (list.length === 0) return true; // 미설정 시 전원 허용 (개발 편의)
-  return list.indexOf(email.toLowerCase()) >= 0
-      || list.indexOf(email) >= 0;
+  return _isListedEmail_(list, email);
 }
 
 function isAdminUser(email) {
-  if (!email) return false;
-  var list = CONFIG.ADMIN_EMAILS || [];
   // ⚠ isProcurementUser와 달리 '빈 목록 = 전원 허용' 폴백을 두지 않는다.
   //   관리자는 미설정 시 '관리자 없음'이 안전한 기본값.
-  return list.indexOf(String(email).toLowerCase()) >= 0
-      || list.indexOf(email) >= 0;
+  return _isListedEmail_(CONFIG.ADMIN_EMAILS, email);
 }
 
 // 전사조회(읽기 전용) 권한 판정 — isAdminUser와 동일 패턴(빈 목록 폴백 없음 = 미설정 시 아무도 아님)
 function isGlobalViewer(email) {
-  if (!email) return false;
-  var list = CONFIG.GLOBAL_VIEW_EMAILS || [];
-  return list.indexOf(String(email).toLowerCase()) >= 0
-      || list.indexOf(email) >= 0;
+  return _isListedEmail_(CONFIG.GLOBAL_VIEW_EMAILS, email);
+}
+
+// SCM 담당 판정 — 전 품의 검수보고서 제출권 (빈 목록 폴백 없음). 쓰는 곳은 INSP.gs _inspSubmitBasis_
+function isScmUser(email) {
+  return _isListedEmail_(CONFIG.SCM_EMAILS, email);
 }
 
 
@@ -3848,7 +3864,7 @@ function getHomeDataForClient() {
     if (rows.length < 2) {
       return {
         ok: true,
-        user: { email: actor, isProcurement: isProcurementUser(actor), isAdmin: isAdminUser(actor), isGlobalViewer: isGlobalViewer(actor) },
+        user: { email: actor, isProcurement: isProcurementUser(actor), isAdmin: isAdminUser(actor), isGlobalViewer: isGlobalViewer(actor), isScm: isScmUser(actor) },
         myDrafts: [], myPending: [], myDocs: [],
         approvedInbox: [], myPrc: [],
         completedDocs: [],   // [INSP Step 2]
@@ -4036,10 +4052,13 @@ function getHomeDataForClient() {
         var req = reqMap[pf.parentToken] || null;
         var reqDrafter = req ? req.drafter : '';
         var completedMine = (String(reqDrafter).toLowerCase() === String(actor || '').toLowerCase());
-        // 가시성: 관리자·구매팀 전체 / 본인 기안 / 같은 부서 기안 (검수보고서 제출도 같은 부서 허용)
-        // ⚠ 관리자는 '조회'만 확장한다 — canSubmit(검수보고서 제출권)은 아래에서 그대로 두어
-        //   서버 INSP 게이트(본인/같은 부서)와 기준을 어긋나게 하지 않는다.
-        if (!isAdmin && !isProc && !isGView && !completedMine && !sameDeptAsMe(reqDrafter)) continue;
+        // 검수보고서 제출 근거('self'|'dept'|'scm'|'') — 서버 INSP 관문(폼 열기·제출)과 같은 함수로 판정한다.
+        //  deptMap을 반드시 넘긴다: 없으면 건마다 결재자목록을 다시 읽는다(홈 N+1, 2026-10-28).
+        var submitBasis = _inspSubmitBasis_(ss, actorLc, reqDrafter, deptMap);
+        // 가시성: 관리자·구매팀·전사조회 전체 + 제출할 수 있는 건(본인·같은 부서·SCM) — 제출 가능하면 반드시 보인다
+        // ⚠ 관리자·전사조회는 '조회'만 확장한다 — canSubmit(검수보고서 제출권)은 submitBasis로만 정해
+        //   서버 INSP 관문과 기준을 어긋나게 하지 않는다. 관리자가 제출하려면 SCM_EMAILS에 있어야 한다.
+        if (!isAdmin && !isProc && !isGView && !submitBasis) continue;
 
         var insps = inspGroups[pf.token] || [];
         // 종결(최종 승인 완료) / 잠금대기(최종 검수가 반려 외 상태로 진행중) 구분
@@ -4069,8 +4088,8 @@ function getHomeDataForClient() {
           inspClosed:  inspClosed,
           inspLocked:  inspLockedPending,   // [INSP Step 4 보강] 최종 검수 진행중 추가제출 차단
           mine:        completedMine,        // 내 기안 여부(부서 공유 목록에서 구분 표시용)
-          // 검수보고서 제출 권한: 본인 기안 또는 같은 부서(서버 INSP 게이트와 동일 기준)
-          canSubmit:   (completedMine || sameDeptAsMe(reqDrafter)),
+          // 검수보고서 제출 권한: 본인 기안·같은 부서·SCM 담당 (서버 INSP 관문과 동일 함수)
+          canSubmit:   !!submitBasis,
         });
       }
       // 최신 PRC 순
@@ -4118,6 +4137,7 @@ function getHomeDataForClient() {
         isProcurement: isProc,
         isAdmin: isAdmin,
         isGlobalViewer: isGView,
+        isScm: isScmUser(actor),
         dept: myDept,
       },
       myDrafts:      myDrafts,

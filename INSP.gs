@@ -525,12 +525,16 @@ function _getInspGroupsByPrc(ss, inspRows) {
 }
 
 // ================================================================
-// [INSP 부서 공유] 같은 부서 판정 (검수보고서 제출 권한 확장)
-// - 결재자목록 부서 열 기준. Code.gs의 getDeptByEmailMap 재사용.
+// [INSP 제출 권한] 검수보고서 제출·재상신 권한 판정 — 기준은 이 섹션 하나뿐이다
+// - 홈 '결재 완료' 목록 노출·버튼(canSubmit), 작성 폼 열기, 제출 서버 검증이 모두 _inspSubmitBasis_를 부른다.
+//   새 권한이 필요하면 여기에만 근거를 추가한다 (관문마다 조건을 따로 붙이지 말 것).
+// - 폐기는 별개 — 제출자 본인만 (_discardInspCore, 2026-10-14 결정).
+// ================================================================
+
+// 같은 부서 판정 (결재자목록 부서 열 기준. Code.gs의 getDeptByEmailMap 재사용)
 // - 두 이메일이 모두 등록되어 있고 부서가 같으면 true
 // - deptMap(선택): 이미 만든 부서 맵. 반복문에서 부를 때는 반드시 넘길 것 —
 //   없으면 호출마다 결재자목록 시트를 통째로 다시 읽는다(홈 로딩 N+1, 2026-10-28).
-// ================================================================
 function _isSameDeptEmail(ss, emailA, emailB, deptMap) {
   if (!emailA || !emailB) return false;
   if (typeof getDeptByEmailMap !== 'function') return false;
@@ -540,6 +544,30 @@ function _isSameDeptEmail(ss, emailA, emailB, deptMap) {
   return !!da && !!db && da === db;
 }
 
+var INSP_SUBMIT_DENIED_MSG = '검수보고서는 원본 품의 기안자, 같은 부서 담당자 또는 SCM 담당만 제출할 수 있습니다.';
+
+/**
+ * 검수보고서 제출 근거 — 좁은 근거부터 판정해 감사 로그에 그대로 남긴다
+ *  'self' 원본 REQ 기안자 본인 / 'dept' 같은 부서 / 'scm' SCM 담당(CONFIG.SCM_EMAILS) / '' 거부
+ * - 기안자 이메일이 비어 있으면(원본 REQ 누락) SCM이어도 거부한다.
+ * - actor는 인가 전용 신원(getRequestUserEmail_)이어야 한다 — 배포 계정 폴백값이 들어오면
+ *   SCM인 배포 계정으로 전 품의 관문이 열린다.
+ * @param {Spreadsheet} ss 열린 스프레드시트 (deptMap이 없을 때만 결재자목록을 읽는 데 쓴다)
+ * @param {string} actor 로그인 이메일
+ * @param {string} drafterEmail 원본 REQ 기안자 이메일
+ * @param {Object=} deptMap 이미 만든 부서 맵 — 반복문에서는 반드시 넘길 것
+ * @returns {string}
+ */
+function _inspSubmitBasis_(ss, actor, drafterEmail, deptMap) {
+  var a = String(actor || '').trim().toLowerCase();
+  var d = String(drafterEmail || '').trim().toLowerCase();
+  if (!a || !d) return '';
+  if (a === d) return 'self';
+  if (_isSameDeptEmail(ss, d, a, deptMap)) return 'dept';
+  if (isScmUser(a)) return 'scm';
+  return '';
+}
+
 // ================================================================
 // [INSP Step 3] 작성 폼 데이터 조회
 // ================================================================
@@ -547,7 +575,7 @@ function _isSameDeptEmail(ss, emailA, emailB, deptMap) {
 /**
  * 검수보고서 작성 폼 초기 데이터
  * - PRC token으로 품의(PRC)+원본(REQ) 스냅샷 필드를 모아 폼에 자동 채움
- * - 권한: 원본 REQ 기안자 본인만 (이메일 소문자 정규화 비교)
+ * - 권한: _inspSubmitBasis_ (원본 REQ 기안자 본인 / 같은 부서 / SCM 담당)
  * - 종결 차단: 동일 PRC에 최종 검수(IS_FINAL=Y)가 최종승인(INSP)이면 추가 작성 불가
  * - 재상신: resubToken이 있으면 기존 반려 건의 값을 불러와 prefill
  * @param {string} prcToken 대상 PRC token
@@ -556,7 +584,8 @@ function _isSameDeptEmail(ss, emailA, emailB, deptMap) {
  */
 function getInspFormDataForClient(prcToken, resubToken) {
   try {
-    var actor = (getActiveUserEmail() || '').toLowerCase();
+    var actor = getRequestUserEmail_();   // 인가 전용 — 배포 계정 폴백 없음 (SCM 관문이 폴백값으로 열리지 않게)
+    if (!actor) return { ok: false, message: '로그인 사용자를 확인할 수 없습니다. 다시 로그인 후 시도해 주세요.' };
     if (!prcToken) return { ok: false, message: '구매 문서 토큰이 필요합니다.' };
 
     var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
@@ -602,10 +631,9 @@ function getInspFormDataForClient(prcToken, resubToken) {
     var req = reqByToken[prc.parentToken] || null;
     var drafterEmail = req ? String(req.drafterEmail || '') : '';
 
-    // 권한: 원본 REQ 기안자 본인 또는 같은 부서 담당자 (부서 공유)
-    if (!drafterEmail ||
-        (drafterEmail.toLowerCase() !== actor && !_isSameDeptEmail(ss, drafterEmail, actor))) {
-      return { ok: false, message: '검수보고서는 원본 품의 기안자 또는 같은 부서 담당자만 제출할 수 있습니다.' };
+    // 권한: 원본 REQ 기안자 본인 / 같은 부서 / SCM 담당 — [INSP 제출 권한] 섹션
+    if (!_inspSubmitBasis_(ss, actor, drafterEmail)) {
+      return { ok: false, message: INSP_SUBMIT_DENIED_MSG };
     }
 
     // 기존 검수보고서 그룹 (회차 채번 + 종결 차단 + 재상신 prefill) — 행은 한 번만 읽어 품목 장부와 공유
@@ -736,7 +764,7 @@ function submitInspForClient(data) {
 
 function _submitInspCore(data) {
   try {
-    var actor = (getActiveUserEmail() || '').toLowerCase();
+    var actor = getRequestUserEmail_();   // 인가 전용 — 배포 계정 폴백 없음 (SCM 관문이 폴백값으로 열리지 않게)
     if (!actor) return { ok: false, message: '로그인 사용자를 확인할 수 없습니다.' };
 
     // 판정 필수
@@ -792,10 +820,8 @@ function _submitInspCore(data) {
         var parentToken = String(prc.row[COL.PARENT_DOC_ID] || '');
         var reqInfo = _findRowByTokenInDoc(docSheet, parentToken);
         var drafterEmail = reqInfo ? String(reqInfo.row[COL.APPR_START + 2] || '') : '';
-        if (!drafterEmail ||
-            (drafterEmail.toLowerCase() !== actor && !_isSameDeptEmail(ss, drafterEmail, actor))) {
-          return { ok: false, message: '원본 품의 기안자 또는 같은 부서 담당자만 제출할 수 있습니다.' };
-        }
+        var submitBasis  = _inspSubmitBasis_(ss, actor, drafterEmail);   // [INSP 제출 권한] — 근거는 감사 로그에 남긴다
+        if (!submitBasis) return { ok: false, message: INSP_SUBMIT_DENIED_MSG };
 
         // 기존 INSP 그룹 (회차 + 종결) — 행은 한 번만 읽어 품목 장부와 공유
         var inspRows = _readInspRows_(ss);
@@ -917,7 +943,7 @@ function _submitInspCore(data) {
         }
 
         return { ok: true, rowNum: targetRowNum, token: token, docNo: docNo,
-                 folderId: folderId, seq: seq, isResub: isResub,
+                 folderId: folderId, seq: seq, isResub: isResub, submitBasis: submitBasis,
                  firstApprover: approvers[0], snapshot: {
                    reqNo: reqNo, poNo: poNo, subject: subject, vendorName: vendorName,
                    drafterName: drafterName, dept: dept,
@@ -968,6 +994,8 @@ function _submitInspCore(data) {
         eventType: lockResult.isResub ? AUDIT_EVENT.INSP_RESUBMIT : AUDIT_EVENT.INSP_SUBMIT,
         docNo: lockResult.docNo, docToken: lockResult.token, docType: 'INSP',
         actor: actor, reason: '검수보고서 ' + (lockResult.isResub ? '재상신' : '제출') + ' (' + lockResult.seq + '회차)',
+        // 제출 근거('self'|'dept'|'scm') — 다른 팀 건을 SCM 권한으로 낸 경우를 사후에 가려낼 수 있게
+        payload: { submitBasis: lockResult.submitBasis },
       });
     } catch (_) {}
 
