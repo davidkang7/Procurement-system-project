@@ -712,3 +712,14 @@ function _tmp_markPoDone_20261105() {
   console.log(out.join('\n'));
   return out;
 }
+
+/**
+ * 2026-11-05 TO-PO-26-345 한빛테크 Wire bonding — 사용자 지시로 생성불요 처리.
+ */
+function _tmp_markPoNotRequired_20261105() {
+  var r = markPoNotRequired('7236308b-9597-47b4-92a6-d1d83e2dc110', '사용자 지시 — 한빛테크 Wire bonding 주문서 생성불요');
+  var msg = 'TO-PO-26-345 → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  Logger.log(msg);
+  console.log(msg);
+  return msg;
+}
