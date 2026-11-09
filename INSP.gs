@@ -2620,3 +2620,45 @@ function _cleanupInspPhotos(row) {
 
   return '사진 ' + deleted + '장 삭제';
 }
+
+// ================================================================
+// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-11-09 PENDING_PDF 3건 마감 (모두 판정 합격).
+ *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료 → moveStatus를 FINAL로 마감한다.
+ */
+function _tmp_markInspPdfDone_20261109() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
+    ['TO-PO-26-229', 'TO-AP-26-003-02', '1106cc8a-6486-47e0-b602-158a6efcce3a', '1QDk9Pk7hoR45mxjvzmWuR990_TCWdwvD'],
+    ['TO-PO-26-310', 'TO-AP-26-032-01', 'ff033399-84ad-4351-80d0-29425b302eae', '12vSH1pjp9siwkoPTwJUkJ1bIF4SMXCD5'],
+    ['TO-PO-26-261', 'TO-AP-26-014-01', 'af1bd68e-d2b2-4b13-8c6c-c0d5f2758b2c', '1FygugVXcRz9HTVYXEEF66ybZC8BI5er5'],
+  ];
+
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2], fileId = j[3];
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return poNo + ' → SKIP / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return poNo + ' → SKIP / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return poNo + ' → SKIP / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return poNo + ' → SKIP / 이미 FINAL 마감됨';
+    }
+    var res = markInspPdfDone(token, fileId);
+    return poNo + ' → ' + (res.ok ? 'OK' : 'FAIL') + ' / ' + res.message;
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
