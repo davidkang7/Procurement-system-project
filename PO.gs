@@ -683,30 +683,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감 래퍼 — GAS 편집기는 인자를 못 넘겨서 무인자 래퍼를 둔다.
-//  실행 후 제거·push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-11-10 생성 대기 주문서 마감 (xlsx + pdf, 2페이지, PDF 육안 확인 완료):
- *    TO-PO-26-349_디엠테크무역               KRW 1,402,000
- *    TO-PO-26-350_Hitronics                  USD 2,637.00
- *    TO-PO-26-351_아이비전                   KRW 216,000
- */
-function _tmp_markPoDone_20261110() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일ID]
-    ['TO-PO-26-349', '24a45846-2dda-45b7-88d8-9ee8a315ea47', '1aj_Do5cV_KTRz2sdIrvMwfUL-z0onhUh'],
-    ['TO-PO-26-350', 'b226c42f-682f-48aa-996b-aa8ba9f61a5e', '14UC1Adc18mQ8gs4iW6gsikCNVnV66SSz'],
-    ['TO-PO-26-351', 'b4a14bc2-2d22-44d7-b4dc-94b8d26fb18c', '124YW3lsCSF9xN2ASG_PSBfn0VGTq9nhk'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
