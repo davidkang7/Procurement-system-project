@@ -683,3 +683,28 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감 래퍼 — GAS 편집기는 인자를 못 넘겨서 무인자 래퍼를 둔다.
+//  실행 후 제거·push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-11-12 생성 대기 주문서 마감 (xlsx + pdf, 2페이지, PDF 육안 확인 완료):
+ *    TO-PO-26-352_한국미스미                 KRW 1,744,544 (부가세별도)
+ *    TO-PO-26-353_큐알티                     KRW 1,320,000 (부가세포함)
+ */
+function _tmp_markPoDone_20261112() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일ID]
+    ['TO-PO-26-352', '9086a048-5a37-4551-b1d7-2d5036a3791b', '1SUPPxeXKVrdPfZdU8RTqX8ZTs0Nd2Fcv'],
+    ['TO-PO-26-353', '0c18a4a6-143e-4afa-96da-59f54d7eef2a', '1-0OMpdNZCMKaq3MN35UMcFkd7vXYM-RJ'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}

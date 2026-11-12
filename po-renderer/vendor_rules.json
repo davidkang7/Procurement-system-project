@@ -36,6 +36,8 @@
     "파이버피아":      { "shipper": "㈜파이버피아", "remark": "QUO NO." },
     "파이버링크":      { "shipper": "㈜파이버링크" },
     "옵텔콤":          { "shipper": "(주)옵텔콤", "remark": "견적일자" },
+    "큐알티":          { "shipper": "큐알티", "remark": "QUO DATE" },
+    "미스미":          { "shipper": "한국미스미", "file": "한국미스미", "remark": "견적 내역" },
     "선인씨엔에스":    { "shipper": "선인씨엔에스" },
     "아마다웰드테크코리아": { "shipper": "아마다웰드테크코리아", "remark": "QUO NO." },
     "디씨피":          { "shipper": "디씨피 주식회사", "file": "디씨피", "remark": "QUO NO." },
