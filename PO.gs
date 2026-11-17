@@ -683,3 +683,32 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감 래퍼 — GAS 편집기는 인자를 못 넘겨서 무인자 래퍼를 둔다.
+//  실행 후 제거·push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-11-17 생성 대기 주문서 마감 (xlsx + pdf, 2페이지, PDF 육안 확인 완료):
+ *    TO-PO-26-354_태성테크                   KRW 680,000 (부가세별도)
+ *    TO-PO-26-355_한국쓰리본드               KRW 750,000 (부가세별도)
+ *    TO-PO-26-356_신광정보통신               KRW 1,304,000 (부가세별도)
+ *    TO-PO-26-357_코리아인스트루먼트         KRW 67,100 (부가세포함)
+ */
+function _tmp_markPoDone_20261117() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일ID]
+    ['TO-PO-26-354', '994049cb-81a0-4061-af00-378e2539e944', '1IWTPe8_m-r15vqI2MKiwmSAjJBiILvc2'],
+    ['TO-PO-26-355', 'df602fcc-39a4-4072-8fc6-f01ab1210be0', '137sgQFS4KZjI6XSJ05n6FCSeCEJ4K-f_'],
+    ['TO-PO-26-356', '822fb666-072c-414c-b814-c52072860a81', '1xPLC5BFIa7_z_u51zn91tDRZ2wsNxaMN'],
+    ['TO-PO-26-357', '893362ef-29a5-4291-858b-91a5a67f4ead', '1qvl89kGLKJ-GgS8sm5znb6RAkjGowyJQ'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
