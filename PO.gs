@@ -683,3 +683,32 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
+
+// ================================================================
+// [임시] 주문서 마감 래퍼 — GAS 편집기는 인자를 못 넘겨서 무인자 래퍼를 둔다.
+//  실행 후 제거·push 한다. (INSP 마감 래퍼와 같은 관례)
+// ================================================================
+
+/**
+ * 2026-11-23 생성 대기 주문서 마감 (xlsx + pdf, 2페이지, PDF 육안 확인 완료):
+ *    TO-PO-26-358_환화                       KRW 611,000 (부가세별도)
+ *    TO-PO-26-359_코리아인스트루먼트         KRW 67,100 (부가세포함)
+ *    TO-PO-26-360_환화                       KRW 217,000 (부가세별도)
+ *    TO-PO-26-361_대전산업가스               KRW 480,000 (부가세별도)
+ */
+function _tmp_markPoDone_20261123() {
+  var jobs = [
+    // [PO번호, prcToken, xlsx 파일ID]
+    ['TO-PO-26-358', '76ca5021-5166-4947-b491-d1fef1e13dbd', '1W1qalTyLGCCuTPcoRA5QVG41pdg8Ewyn'],
+    ['TO-PO-26-359', 'fcb5d0db-3713-4344-8b60-7448c7a70ddc', '1PuPvCPcfpx_OP3MWnS5rweYR-7d66oAU'],
+    ['TO-PO-26-360', '078bd304-bc71-4a5c-a58c-9831cae726f5', '1HEBnyjZvrwztWdK0RlMMbGEqCk1xWAXE'],
+    ['TO-PO-26-361', 'bf3b9fbe-db56-4945-886b-82d617fc2750', '15TTn19RSY6cvhF29mTR-LX2JCLIossm6'],
+  ];
+  var out = jobs.map(function (j) {
+    var r = markPoDone(j[1], j[2]);
+    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
+  });
+  Logger.log(out.join('\n'));
+  console.log(out.join('\n'));
+  return out;
+}
