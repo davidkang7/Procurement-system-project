@@ -28,6 +28,7 @@
                         "terms": "eatek-2026-10" },
     "아트테크":        { "shipper": "아트테크" },
     "라인테크":        { "shipper": "라인테크" },
+    "linetech":       { "shipper": "라인테크", "file": "라인테크" },
     "유사이드":        { "shipper": "유사이드" },
     "에이피피":        { "shipper": "에이피피" },
     "아이브리지닷컴":   { "shipper": "아이브리지닷컴", "base": "krw" },
