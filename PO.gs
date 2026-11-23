@@ -683,32 +683,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감 래퍼 — GAS 편집기는 인자를 못 넘겨서 무인자 래퍼를 둔다.
-//  실행 후 제거·push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-11-23 생성 대기 주문서 마감 (xlsx + pdf, 2페이지, PDF 육안 확인 완료):
- *    TO-PO-26-362_한화팩키지                 KRW 1,600,000 (부가세별도)
- *    TO-PO-26-363_코리아인스트루먼트         KRW 447,000 (부가세포함)
- *    TO-PO-26-364_씨제이켐                   KRW 831,000 (부가세별도)
- *    TO-PO-26-365_라인테크                   KRW 840,000 (부가세별도)
- */
-function _tmp_markPoDone_20261123b() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일ID]
-    ['TO-PO-26-362', '1198cbb6-0296-40bb-be0a-4132af0bba27', '1ETePLnPorUdjsqehIZmt9MjWe9aamwEk'],
-    ['TO-PO-26-363', 'faa5a1b0-0f4e-4c65-83d4-1ec632ecaa4b', '13h4EedKTLdX9x6KQ1yovPwTjbfDFi96Q'],
-    ['TO-PO-26-364', '5a143698-5a25-4c21-854a-6c078c8f8bae', '1QPL8u6gmmDfBsn_S1eozGsk28xj8QkOU'],
-    ['TO-PO-26-365', 'c5f9c495-9348-4c86-b2cc-333093414cf5', '17G_jhB-c1pTa9w8IoxzccfGldgq-o2kV'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
