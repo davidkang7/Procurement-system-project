@@ -218,6 +218,10 @@
   .aa-age { color: var(--ink-mute); font-size: 11px; white-space: nowrap; }
   .aa-link { font-size: 11px; font-weight: 700; color: var(--brand); text-decoration: none; white-space: nowrap; }
   .aa-link:hover { text-decoration: underline; }
+  .aa-btn { margin-left: auto; background: #fff; border: 1px solid var(--line); color: var(--ink-soft); font-family: inherit; font-size: 11px; font-weight: 700;
+            padding: 3px 10px; border-radius: var(--radius-btn); cursor: pointer; white-space: nowrap; }
+  .aa-btn:hover { background: var(--line-soft); color: var(--ink); }
+  .aa-btn:disabled { opacity: .6; cursor: default; }
   /* [설정 유지] 컬럼 필터 적용 표시 · 일괄 해제 칩 */
   .cf-chip-slot { display: inline-flex; align-items: center; }
   .cf-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 10.5px; font-weight: 700;
@@ -1547,6 +1551,10 @@ function _aaAge(iso){
   if(h < 24) return h + '시간 경과';
   return Math.floor(h / 24) + '일 경과';
 }
+function _aaShortName(name){
+  name = String(name || '');
+  return name.length > 28 ? name.substring(0, 26) + '…' : name;
+}
 function _aaFolderLink(id, label){
   return id ? '<a class="aa-link" href="https://drive.google.com/drive/folders/' + escAttr(id) + '" target="_blank" rel="noopener">' + escHtml(label || '폴더 열기') + '</a>' : '';
 }
@@ -1563,6 +1571,23 @@ function adminTaskAlert(){
   var rows = '';
   // 견적서 PDF
   rows += '<div class="aa-panel" id="aa-panel-quote">' + q.map(function(x){
+    // 견적서 미지정 제출 — 첨부 중 견적서가 있으면 QUO_ 로 올리고(자동 인식), 없으면 [견적서 아님]으로 정리
+    if(x.state === 'UNPICKED'){
+      var files = (x.files || []).map(function(f){
+        return f.id ? '<a class="aa-link" href="https://drive.google.com/file/d/' + escAttr(f.id) + '/view" target="_blank" rel="noopener" title="' + escAttr(f.name) + '">' + escHtml(_aaShortName(f.name)) + '</a>' : '';
+      }).join('');
+      var more = (x.fileCount || 0) > (x.files || []).length ? '<span class="aa-age">외 ' + ((x.fileCount || 0) - (x.files || []).length) + '건</span>' : '';
+      return '<div class="aa-row">'
+        + '<span class="aa-doc">' + escHtml(x.docNo) + '</span>'
+        + '<span class="aa-sub">' + escHtml(x.subject) + ' · ' + escHtml(x.drafter) + '</span>'
+        + '<span class="aa-state">견적서 미지정</span>'
+        + '<span class="aa-age">' + escHtml(_aaAge(x.since)) + '</span>'
+        + files + more
+        + _aaFolderLink(x.folderId, '폴더 열기')
+        + '<span class="aa-age" style="font-family:monospace">' + escHtml(x.fileName || '') + '</span>'
+        + '<button type="button" class="aa-btn" data-token="' + escAttr(x.token) + '" data-docno="' + escAttr(x.docNo) + '" onclick="quoteDismiss(this)">견적서 아님</button>'
+        + '</div>';
+    }
     var st = x.state === 'PENDING'
       ? '<span class="aa-state err">생성 요청</span>'
       : '<span class="aa-state">변환 중</span>';
@@ -2367,6 +2392,83 @@ function regenRenderSuccess(res){
     + '</div>'
     + '<p class="pkmodal-detail">기존 파일은 그대로 유지되고 새 버전이 추가되었습니다.</p>';
   pkmodalSetFooter('<button type="button" class="pkmodal-btn primary" onclick="regenCancel()">닫기</button>');
+}
+
+// [견적서 미지정 정리] 관리자 배너의 [견적서 아님] — 확인 → 처리 중 → 완료/실패 (pkmodal 재사용, 브라우저 confirm 미사용)
+//   서버는 그 품의의 '견적서 미지정' 표시만 지운다(첨부·결재 영향 없음). 성공하면 배너에서 해당 행을 뺀다.
+var QDISMISS = { token: null, docNo: null, btnEl: null };
+
+function quoteDismiss(btnEl){
+  var token = btnEl ? btnEl.getAttribute('data-token') : '';
+  if(!token) return;
+  QDISMISS.token = token;
+  QDISMISS.docNo = btnEl.getAttribute('data-docno') || '';
+  QDISMISS.btnEl = btnEl;
+  pkmodalOpen();
+  pkmodalClearStepTimers();
+  pkmodalSetTitle('견적서 미지정 정리');
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-confirm">📎</div>'
+    + '<p class="pkmodal-message">이 품의에 견적서가 없는 것으로 정리할까요?</p>'
+    + '<div class="pkmodal-info"><div class="pkmodal-info-row"><span class="lbl">품의번호</span><span class="val">' + escHtml(QDISMISS.docNo) + '</span></div></div>'
+    + '<p class="pkmodal-detail">관리자 처리 대기 목록에서만 빠집니다. 첨부 파일과 결재 진행에는 영향이 없습니다.</p>';
+  pkmodalSetFooter(
+    '<button type="button" class="pkmodal-btn secondary" onclick="quoteDismissClose()">취소</button>'
+    + '<button type="button" class="pkmodal-btn primary" onclick="quoteDismissConfirm()">견적서 아님</button>'
+  );
+}
+
+function quoteDismissClose(){
+  pkmodalClose();
+  QDISMISS.token = null; QDISMISS.docNo = null; QDISMISS.btnEl = null;
+}
+
+function quoteDismissConfirm(){
+  var token = QDISMISS.token, btnEl = QDISMISS.btnEl;
+  if(!token) return;
+  if(btnEl) btnEl.disabled = true;
+  pkmodalSetTitle('정리 중');
+  pkmodalSetFooter('');
+  PKMODAL.body.innerHTML = '<div class="pkmodal-spinner"></div><p class="pkmodal-message">처리 중...</p>';
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res && res.ok){
+        // 배너 목록에서 빼고 다시 그린다(서버 재조회 없음)
+        var t = (STATE.data || {}).adminTasks;
+        if(t && t.quotePdf) t.quotePdf = t.quotePdf.filter(function(x){ return x.token !== token; });
+        pkmodalSetTitle('정리 완료');
+        PKMODAL.body.innerHTML =
+          '<div class="pkmodal-success"><svg viewBox="0 0 24 24"><polyline points="5 12 10 17 19 8"/></svg></div>'
+          + '<p class="pkmodal-message ok">' + (res.already ? '이미 정리된 건입니다' : '견적서 없음으로 정리했습니다') + '</p>'
+          + '<div class="pkmodal-info"><div class="pkmodal-info-row"><span class="lbl">품의번호</span><span class="val">' + escHtml(QDISMISS.docNo || res.docNo || '') + '</span></div></div>';
+        pkmodalSetFooter('<button type="button" class="pkmodal-btn primary" onclick="quoteDismissDone()">닫기</button>');
+      } else {
+        if(btnEl) btnEl.disabled = false;
+        quoteDismissError((res && res.message) ? res.message : '처리 실패');
+      }
+    })
+    .withFailureHandler(function(err){
+      if(btnEl) btnEl.disabled = false;
+      quoteDismissError((err && err.message) ? err.message : String(err));
+    })
+    .dismissQuoteUnpickedForClient({ token: token });
+}
+
+// 완료 후 닫기 — 배너를 다시 그리고, 남은 견적서 건이 있으면 그 목록을 다시 펼친다
+function quoteDismissDone(){
+  quoteDismissClose();
+  renderContent();
+  var chip = document.querySelector('[data-admin-task="quote"]');
+  if(chip) chip.click();
+}
+
+function quoteDismissError(msg){
+  pkmodalSetTitle('정리 실패');
+  PKMODAL.body.innerHTML =
+    '<div class="pkmodal-error">!</div>'
+    + '<p class="pkmodal-message err">정리하지 못했습니다</p>'
+    + '<p class="pkmodal-detail">' + escHtml(msg) + '</p>';
+  pkmodalSetFooter('<button type="button" class="pkmodal-btn secondary" onclick="quoteDismissClose()">닫기</button>');
 }
 
 // 실패 안내 모달

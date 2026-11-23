@@ -69,6 +69,9 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .quote-pick input{margin:0;cursor:pointer;}
 .quote-pick.off{color:#bbb;cursor:not-allowed;}
 .quote-pick.off input{cursor:not-allowed;}
+/* 견적서 안내 모달에서 [지정하러 가기]/[첨부하러 가기] → 해당 영역을 잠시 강조 */
+.quote-pick.hint{background:#fff3cd;outline:2px solid #e0a800;border-radius:4px;padding:1px 5px;color:#7a5600;font-weight:700;}
+.attach-zone.hint{border-color:#83161A;border-style:solid;background:#fdf2f2;}
 .appr-table{border-collapse:collapse;}
 .appr-table th{background:#f0f0f0;font-size:10px;font-weight:700;color:#444;padding:4px 6px;border:1px solid #ccc;text-align:center;min-width:110px;}
 .appr-table td{border:1px solid #ccc;padding:3px 6px;font-size:11px;text-align:center;}
@@ -126,6 +129,8 @@ table.items tr.foot-row td{background:#f0f0f0;font-weight:700;font-size:11px;pad
 .pm-q{width:54px;height:54px;border-radius:50%;background:#83161A;color:#fff;font-size:30px;font-weight:700;line-height:54px;margin:0 auto 18px;animation:pm-pop .35s cubic-bezier(.34,1.56,.64,1);}
 .pm-cancel{margin:22px 10px 0 0;padding:9px 28px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#555;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
 .pm-cancel:hover{background:#f3f3f3;}
+.pm-card.wide{width:440px;}
+.pm-card.wide .pm-cancel,.pm-card.wide .pm-confirm{white-space:nowrap;padding-left:22px;padding-right:22px;}
 /* 공급업체 조회 (섹션 헤더 '조회' 버튼 + 중앙 모달) */
 .vd-lookup-btn{font-family:inherit;font-size:10px;font-weight:700;letter-spacing:.5px;color:#fff;background:#1a6fc4;border:1px solid #1a6fc4;border-radius:4px;padding:2px 10px;cursor:pointer;line-height:1.5;flex-shrink:0;}
 .vd-lookup-btn:hover{background:#fff;color:#1a6fc4;}
@@ -1033,18 +1038,55 @@ function showErrorModal(detail){
 }
 function closeModal(){
   document.getElementById('pm-backdrop').classList.remove('show');
+  document.querySelector('#pm-backdrop .pm-card').classList.remove('wide');
 }
 // 확인창 — 브라우저 confirm() 대신 같은 pm-backdrop 안에서 [취소][확인]을 받는다 (Reject의 showDiscardConfirm 패턴).
 // subHtml은 호출부에서 escHtml 처리한 HTML. 확인을 누르면 모달을 닫고 onOk를 실행한다 (이어지는 처리 모달은 onOk가 다시 연다).
-function showConfirmModal(msg, subHtml, onOk, okLabel){
+// opts(선택): { cancelLabel, onCancel, wide } — 취소 버튼 문구·동작(모달을 닫은 뒤 실행), 넓은 카드(긴 버튼 문구용)
+function showConfirmModal(msg, subHtml, onOk, okLabel, opts){
+  opts = opts || {};
+  document.querySelector('#pm-backdrop .pm-card').classList.toggle('wide', !!opts.wide);
   document.getElementById('pm-icon').innerHTML = '<div class="pm-q">?</div>';
   document.getElementById('pm-msg').textContent = msg;
   document.getElementById('pm-sub').innerHTML = subHtml || '';
   document.getElementById('pm-actions').innerHTML =
-    '<button class="pm-cancel" onclick="closeModal()">취소</button>' +
+    '<button class="pm-cancel" id="pm-cancel-btn">' + escHtml(opts.cancelLabel || '취소') + '</button>' +
     '<button class="pm-confirm" id="pm-ok-btn">' + escHtml(okLabel || '확인') + '</button>';
+  document.getElementById('pm-cancel-btn').onclick = function(){ closeModal(); if(opts.onCancel) opts.onCancel(); };
   document.getElementById('pm-ok-btn').onclick = function(){ closeModal(); onOk(); };
   document.getElementById('pm-backdrop').classList.add('show');
+}
+
+// ─── 제출 전 견적서 안내 (2026-11-23) ─────────────────────────────
+// 첨부 0건 / 첨부 있음·견적서 미지정을 나눠 묻는다. 계속 제출하면 서버가 관리자에게 알리고,
+// 미지정 건은 관리자 처리 대기(견적서 PDF)에 올라간다(서버 saveAttachmentsToFolder 의 quoteUnpicked).
+//  반환: '' (지정됨) | 'none' (첨부 0건) | 'unpicked' (첨부 있음·미지정)
+function quoteWarnCase(){
+  if(getQuotePickIdx() >= 0) return '';
+  return attachedFiles.some(function(f){ return f; }) ? 'unpicked' : 'none';
+}
+var QUOTE_WARN = {
+  none:     { title: '첨부된 파일이 없습니다.',       body: '견적서 없이 기안을 올리시겠습니까?',
+              brief: '견적서 없이 기안이 올라갑니다.',
+              ok: '견적서 없이 제출',       cancel: '첨부하러 가기' },
+  unpicked: { title: '견적서가 지정되지 않았습니다.', body: '첨부 중 견적서가 있다면 파일 옆 \'견적서\'를 선택해 주세요.',
+              brief: '첨부 중 견적서가 있다면 파일 옆 \'견적서\'를 선택해 주세요.',
+              ok: '견적서 아님 — 계속 제출', cancel: '지정하러 가기' }
+};
+// [첨부하러 가기]/[지정하러 가기] — 첨부 영역으로 스크롤하고 잠시 강조한다
+function focusQuoteArea(kind){
+  var targets = kind === 'none'
+    ? [document.getElementById('attach-zone')]
+    : Array.prototype.slice.call(document.querySelectorAll('#attach-list .quote-pick:not(.off)'));
+  targets = targets.filter(function(el){ return el; });
+  if(!targets.length){   // 첨부가 전부 hwp/zip(지정 불가) — 목록으로만 이동
+    var list = document.getElementById('attach-list');
+    if(list) list.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  targets[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  targets.forEach(function(el){ el.classList.add('hint'); });
+  setTimeout(function(){ targets.forEach(function(el){ el.classList.remove('hint'); }); }, 3000);
 }
 
 // ─── 제출 ─────────────────────────────
@@ -1120,24 +1162,33 @@ function submitForm(){
       dupEmailSet[em] = true;
     }
   }
-  // 제출 전 확인 사항(모달 1개로 통합): 결재자 중복 · 견적서 미지정
-  var warnings = [];
-  if(dupNames.length > 0){
-    warnings.push('<b>동일한 결재자가 여러 단계에 배정되어 있습니다.</b><br>'
-      + dupNames.map(function(n){ return '· ' + escHtml(n); }).join('<br>'));
-  }
-  if(getQuotePickIdx() < 0){
-    warnings.push('<b>견적서로 지정된 첨부가 없습니다.</b><br>'
-      + '견적서를 지정하면 QUO_{품의번호}.pdf로 자동 변환·보관됩니다(회계 자료용).');
-  }
-  if(warnings.length > 0){
-    showConfirmModal(warnings.length > 1 ? '제출 전 확인해 주세요.' : (dupNames.length > 0 ? '동일한 결재자가 여러 단계에 배정되어 있습니다.' : '견적서로 지정된 첨부가 없습니다.'),
-      (warnings.length > 1 ? warnings.join('<br><br>') : warnings[0].replace(/^<b>.*?<\/b><br>/, ''))
+  // 제출 전 확인 사항(모달 1개로 통합): 결재자 중복 · 견적서(첨부 0건 / 미지정)
+  var proceed = function(){ submitFormConfirmed(docNo, drafter, subject, approvers); };
+  var dupHtml = dupNames.length > 0
+    ? dupNames.map(function(n){ return '· ' + escHtml(n); }).join('<br>')
+    : '';
+  var qCase = quoteWarnCase();
+  var qw = qCase ? QUOTE_WARN[qCase] : null;
+  if(dupHtml && qw){
+    // 둘 다 — 한 모달에 모아 묻는다(버튼은 일반 문구)
+    showConfirmModal('제출 전 확인해 주세요.',
+      '<b>동일한 결재자가 여러 단계에 배정되어 있습니다.</b><br>' + dupHtml
+        + '<br><br><b>' + escHtml(qw.title) + '</b><br>' + escHtml(qw.brief)
         + '<br><br>이대로 제출하시겠습니까?',
-      function(){ submitFormConfirmed(docNo, drafter, subject, approvers); }, '계속 제출');
+      proceed, '계속 제출');
     return;
   }
-  submitFormConfirmed(docNo, drafter, subject, approvers);
+  if(dupHtml){
+    showConfirmModal('동일한 결재자가 여러 단계에 배정되어 있습니다.',
+      dupHtml + '<br><br>이대로 제출하시겠습니까?', proceed, '계속 제출');
+    return;
+  }
+  if(qw){
+    showConfirmModal(qw.title, escHtml(qw.body), proceed, qw.ok,
+      { cancelLabel: qw.cancel, onCancel: function(){ focusQuoteArea(qCase); }, wide: true });
+    return;
+  }
+  proceed();
 }
 
 // 결재자 중복 확인 이후 단계 — 모달 응답이 비동기라 분리했다. 검증·페이로드는 분리 전과 동일.

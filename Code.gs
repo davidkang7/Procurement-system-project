@@ -651,6 +651,8 @@ var AUDIT_EVENT = {
   // 견적서 PDF (QUO_) — 섹션 15-1
   QUOTE_PDF_GENERATED: 'QUOTE_PDF_GENERATED',   // 자동 변환 또는 관리자 업로드본 등록
   QUOTE_PDF_PENDING:   'QUOTE_PDF_PENDING',     // 변환 실패 → 관리자 핸드오프
+  QUOTE_UNPICKED_MARKED:    'QUOTE_UNPICKED_MARKED',     // 관리자가 기존 품의를 '견적서 미지정'으로 표시(markQuoteUnpicked)
+  QUOTE_UNPICKED_DISMISSED: 'QUOTE_UNPICKED_DISMISSED',  // 관리자 확인: 견적서 미지정 건이 견적서 없음 → 대기 목록에서 정리
 
   // 지연 기록 버퍼 항목이 깨져 원래 행으로 되살릴 수 없을 때 — 원문을 남겨 유실을 막는다
   AUDIT_BUF_CORRUPT:   'AUDIT_BUF_CORRUPT',
@@ -5455,6 +5457,7 @@ function _shareFileDomainView_(file, label) {
  *                     · pdf 원본: 변환 불필요 → QUO_{docNo}.pdf 로 바로 저장 (role:'quote', DONE)
  *                     · 그 외   : 원본 그대로 저장 + role:'quote-src', quotePdf:'QUEUED' → 큐가 변환
  *                     · hwp/zip : 변환 불가 → 거부
+ *                     · 첨부는 있는데 지정이 없으면: 모든 항목에 quoteUnpicked(시각) — 관리자 QUO_ 업로드 자동 인식용
  *                     여기서는 변환을 하지 않는다 — 제출 응답 시간을 늘리지 않기 위함.
  * @returns 저장된 메타 배열 (Y열 JSON). 실패 시 이 호출에서 만든 파일을 전부 휴지통으로 보내고 throw.
  */
@@ -5502,6 +5505,12 @@ function saveAttachmentsToFolder(folder, attachments, opts) {
       if (isQuote) quoteTaken = true;
       saved.push(meta);
     });
+    // 견적서 미지정 제출(기안자가 모달에서 '견적서 아님 — 계속 제출') — 첨부 중 견적서가 있었는지는 관리자가 판단한다.
+    //  표시를 남겨 두면 관리자가 폴더에 QUO_ 를 올릴 때 자동 인식되고(reconcileQuotePdf), 관리자 홈 배너에 뜬다.
+    if (quoteDocNo && !quoteTaken && saved.length) {
+      var unpickedAt = new Date().toISOString();
+      saved.forEach(function(m) { m.quoteUnpicked = unpickedAt; });
+    }
   } catch(e) {
     // 호출부의 savedFiles는 아직 []라 거기서 롤백하면 아무것도 지워지지 않는다 → 여기서 지운다.
     rollbackFiles(saved);
@@ -5562,6 +5571,10 @@ function parseAttachments(json) {
 //                폴더의 QUO_ 파일을 Y열에 등록. STAGING에 남아 있으면 FINAL로 옮긴다.
 //  Y열 메타: 원본 {role:'quote-src', quotePdf:'QUEUED'|'PENDING'|'DONE', quoteReason?, quotePendingAt?}
 //            PDF  {role:'quote', origName, quotePdf:'DONE', source:'upload'|'auto'|'admin'}
+//  견적서 미지정 제출(2026-11-23): 첨부는 있는데 지정이 없으면 모든 항목에 quoteUnpicked(ISO 시각).
+//            → PENDING 처럼 관리자 홈 배너(state 'UNPICKED')·자동 인식 대상. QUO_ 등록 또는 [견적서 아님]
+//              (dismissQuoteUnpickedForClient)으로 표시가 지워진다. 반려되면 Y열이 비워져 함께 사라진다.
+//            기존 제출분 구제: markQuoteUnpicked(docNo, pdf첨부명?) — 임시 래퍼에서 호출.
 //  ⚠ FINAL 이동은 Y열이 아니라 STAGING 폴더의 모든 파일을 옮기므로(섹션 19) 원본·PDF가 함께 간다.
 // ================================================================
 
@@ -5591,6 +5604,15 @@ function _findQuoteEntry_(list) {
   for (var i = 0; i < list.length; i++) if (list[i] && list[i].role === 'quote') return list[i];
   return null;
 }
+// 견적서 미지정 표시(quoteUnpicked) — 견적서 항목(quote/quote-src)이 없을 때만 유효. 표시 시각(ISO), 없으면 ''.
+function _quoteUnpickedSince_(list) {
+  if (_findQuoteSrc_(list) || _findQuoteEntry_(list)) return '';
+  for (var i = 0; i < list.length; i++) if (list[i] && list[i].quoteUnpicked) return String(list[i].quoteUnpicked);
+  return '';
+}
+function _clearQuoteUnpicked_(list) {
+  (list || []).forEach(function(f) { if (f) delete f.quoteUnpicked; });
+}
 
 /**
  * 제출·재상신 직후: 견적서가 지정되지 않은 채 기안이 올라갔으면 관리자에게 알린다.
@@ -5616,29 +5638,48 @@ function _notifyQuoteMissingIfNeeded_(savedFiles, data, folderId, kind) {
   return true;
 }
 
+// 두 경우를 나눠 알린다 (기안 폼 모달과 같은 구분):
+//  · 첨부 0건        [견적서 미첨부 제출] — 기안자가 '견적서 없이 제출'을 확인. 관리자 할 일 없음(필요하면 기안자 확인).
+//  · 첨부 있음·미지정 [견적서 미지정 제출] — 기안자가 '견적서 아님 — 계속 제출'을 확인. 행에 quoteUnpicked 표시가 있어
+//                    관리자 홈 배너에 뜨고, QUO_ 를 올리면(또는 첨부 PDF 이름을 바꾸면) 자동 인식된다.
 function _sendQuoteMissingEmail_(info) {
   var toList = CONFIG.ADMIN_NOTIFY_EMAILS || [];
   if (!toList.length) return;
+  var noFiles   = !info.files.length;
   var folderUrl = info.folderId ? 'https://drive.google.com/drive/folders/' + info.folderId : '';
-  var subj = '[견적서 미지정 ' + info.kind + '] ' + info.docNo + ' - ' + info.subject;
+  var quoteName = quotePdfFileName(info.docNo);
+  var subj = (noFiles ? '[견적서 미첨부 ' : '[견적서 미지정 ') + info.kind + '] ' + info.docNo + ' - ' + info.subject;
+  var head = noFiles
+    ? '첨부 파일 없이 기안이 ' + escapeHtml(info.kind) + '되었습니다'
+    : '견적서가 지정되지 않은 채 기안이 ' + escapeHtml(info.kind) + '되었습니다';
+  var lead = noFiles
+    ? '기안자가 첨부 파일 없이 ' + escapeHtml(info.kind) + '했습니다(제출 화면에서 \'견적서 없이 제출\'을 확인). '
+      + '견적서가 필요한 품의라면 기안자에게 확인해 주세요. 결재 진행에는 영향이 없습니다.'
+    : '기안자가 첨부 중 견적서를 지정하지 않고 ' + escapeHtml(info.kind) + '했습니다(제출 화면에서 \'견적서 아님 — 계속 제출\'을 확인). '
+      + '이 건은 관리자 홈 \'관리자 처리 대기 → 견적서 PDF\'에 <b>견적서 미지정</b>으로 표시됩니다. 결재 진행에는 영향이 없습니다.';
+  var guide = noFiles
+    ? '· 견적서가 필요한 품의라면 기안자에게 확인해 주세요.<br>'
+      + '· 견적서 자체가 없는 품의라면 조치할 것이 없습니다.'
+    : '· 첨부 중 견적서가 있다면 위 폴더에 <b style="font-family:monospace;">' + escapeHtml(quoteName) + '</b> 이름으로 PDF를 올리면 자동 인식됩니다. '
+      + 'PDF 첨부라면 그 파일 이름만 이렇게 바꿔도 됩니다.<br>'
+      + '· 견적서가 아니라면 관리자 홈 배너의 <b>[견적서 아님]</b> 버튼으로 목록에서 정리해 주세요.';
   var html = '<div style="font-family:sans-serif;max-width:620px;">'
-    + '<h2 style="color:#B86A00;">견적서가 지정되지 않은 채 기안이 ' + escapeHtml(info.kind) + '되었습니다</h2>'
-    + '<p>기안자가 첨부 중 견적서를 지정하지 않고 ' + escapeHtml(info.kind) + '했습니다. 회계용 QUO_ PDF 가 만들어지지 않으니 '
-    + '필요하면 기안자에게 견적서를 확인해 주세요. 결재 진행에는 영향이 없습니다.</p>'
+    + '<h2 style="color:#B86A00;">' + head + '</h2>'
+    + '<p>' + lead + '</p>'
     + '<table style="border-collapse:collapse;font-size:14px;">'
     + _quoteMailRows_([
         ['품의번호', escapeHtml(info.docNo)],
         ['기안자',   escapeHtml(info.drafter) + (info.dept ? ' (' + escapeHtml(info.dept) + ')' : '')],
         ['품의제목', escapeHtml(info.subject)],
-        ['첨부',     info.files.length ? escapeHtml(info.files.join(', ')) : '<span style="color:#c0392b;">첨부 없음</span>'],
+        ['첨부',     noFiles ? '<span style="color:#c0392b;">첨부 없음</span>' : escapeHtml(info.files.join(', '))],
         ['품의 폴더', folderUrl ? '<a href="' + folderUrl + '">' + folderUrl + '</a>' : '-'],
       ])
     + '</table>'
-    + '<p style="margin-top:14px;font-size:13px;">· 견적서가 첨부 중에 있다면 관리자가 PDF로 만들어 위 폴더에 <b style="font-family:monospace;">' + escapeHtml(quotePdfFileName(info.docNo)) + '</b> 이름으로 올리면 됩니다(자동 인식).<br>'
-    + '· 견적서 자체가 없는 품의라면 조치할 것이 없습니다.</p>'
+    + '<p style="margin-top:14px;font-size:13px;">' + guide + '</p>'
     + '</div>';
-  var plain = '견적서 미지정 ' + info.kind + '\n품의번호: ' + info.docNo + '\n기안자: ' + info.drafter + '\n품의제목: ' + info.subject
-    + '\n첨부: ' + (info.files.join(', ') || '없음') + (folderUrl ? '\n폴더: ' + folderUrl : '');
+  var plain = (noFiles ? '견적서 미첨부 ' : '견적서 미지정 ') + info.kind + '\n품의번호: ' + info.docNo + '\n기안자: ' + info.drafter + '\n품의제목: ' + info.subject
+    + '\n첨부: ' + (info.files.join(', ') || '없음') + (folderUrl ? '\n폴더: ' + folderUrl : '')
+    + (noFiles ? '' : '\n(첨부 중 견적서가 있으면 폴더에 ' + quoteName + ' 로 올리면 자동 인식 / 아니면 관리자 홈에서 [견적서 아님])');
   sendEmailWithRetry(toList.join(','), subj, plain, html);
 }
 
@@ -5801,7 +5842,9 @@ function _registerQuotePdf_(token, pdfMeta, lockHeld, pdfFolderId) {
     var r    = readRow(sheet, rowNum);
     var list = parseAttachments(r[COL.ATTACH_LIST]);
     var src  = _findQuoteSrc_(list);
-    if (!src) return { ok: false, message: '견적서 원본 항목 없음(반려로 첨부 교체됨)' };
+    // 견적서 미지정 제출(quoteUnpicked)이면 원본 항목 없이 관리자 업로드본만 등록한다
+    var unpicked = !src && !!_quoteUnpickedSince_(list);
+    if (!src && !unpicked) return { ok: false, message: '견적서 원본 항목 없음(반려로 첨부 교체됨)' };
 
     var curFolderId = String(r[COL.DRIVE_ID] || '');
     if (pdfFolderId && curFolderId && pdfFolderId !== curFolderId) {
@@ -5809,11 +5852,21 @@ function _registerQuotePdf_(token, pdfMeta, lockHeld, pdfFolderId) {
       catch(e) { Logger.log('[QUO] PDF 폴더 보정 실패 ' + pdfMeta.name + ': ' + e); }
     }
 
-    var next = list.filter(function(f) { return !(f && f.role === 'quote'); });
+    // 관리자가 첨부 PDF 자체의 이름을 QUO_ 로 바꾼 경우(같은 파일 id) — 그 항목이 견적서 항목으로 바뀐다
+    //  (기안 때 PDF 를 견적서로 지정한 것과 같은 모양: 항목 1개, origName = 원래 이름)
+    var renamed = null;
+    var next = list.filter(function(f) {
+      if (f && f.role !== 'quote' && f.id && f.id === pdfMeta.id) { renamed = f; return false; }
+      return !(f && f.role === 'quote');
+    });
+    if (renamed && !pdfMeta.origName) pdfMeta.origName = String(renamed.name || '');
     next.push(pdfMeta);
-    src.quotePdf = 'DONE';
-    delete src.quoteReason;
-    delete src.quotePendingAt;
+    if (src) {
+      src.quotePdf = 'DONE';
+      delete src.quoteReason;
+      delete src.quotePendingAt;
+    }
+    _clearQuoteUnpicked_(next);
     sheet.getRange(rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(next));
 
     var info = _quoteRowInfo_(r, rowNum);
@@ -5955,6 +6008,7 @@ function _moveFileToFolder_(fileId, dstFolderId) {
  * 관리자가 폴더에 직접 올린 QUO_{docNo}.pdf 를 Y열에 등록(자동 인식).
  *  동작 조건(그 외 즉시 return false — 비용 0):
  *   · quote-src 가 있고 quotePdf 가 QUEUED/PENDING (PDF 미등록)
+ *   · 또는 견적서 미지정 제출(quoteUnpicked 표시, 견적서 항목 없음) — PENDING 과 같게 다룬다
  *   · opts.checkReplaced: 등록된 PDF가 휴지통에 갔는지도 확인(품질 불량 교체 케이스). Drive 호출 1회가 들므로
  *     FINAL 통합 이동(consolidateToFinalByPrc)에서만 켠다. 권장 교체 방법은 '버전 관리 → 새 버전 업로드'(id 유지).
  *  탐색: 현재 DRIVE_ID 폴더 → 없으면 STAGING 경로(조회 전용). STAGING에서 찾았는데 행이 FINAL이면 FINAL로 옮긴다.
@@ -5968,16 +6022,18 @@ function reconcileQuotePdf(sheet, rowNum, r, opts) {
   try {
     var list = parseAttachments(r[COL.ATTACH_LIST]);
     var src  = _findQuoteSrc_(list);
-    if (!src) return false;
+    // 견적서 미지정 제출(quoteUnpicked) — 원본 항목은 없지만 관리자 업로드를 기다리는 상태. PENDING 과 같게 다룬다(quick 포함).
+    var unpicked = !src && !!_quoteUnpickedSince_(list);
+    if (!src && !unpicked) return false;
     var cur = _findQuoteEntry_(list);
     if (cur) {
       if (!opts.checkReplaced) return false;
       var alive = false;
       try { alive = !DriveApp.getFileById(cur.id).isTrashed(); } catch(_) {}
       if (alive) return false;
-    } else if (src.quotePdf !== 'QUEUED' && src.quotePdf !== 'PENDING') {
+    } else if (src && src.quotePdf !== 'QUEUED' && src.quotePdf !== 'PENDING') {
       return false;
-    } else if (opts.quick && src.quotePdf !== 'PENDING') {
+    } else if (opts.quick && src && src.quotePdf !== 'PENDING') {
       return false;
     }
 
@@ -6004,7 +6060,7 @@ function reconcileQuotePdf(sheet, rowNum, r, opts) {
     _shareFileDomainView_(found, fileName);
     var meta = {
       name: fileName, id: found.getId(), size: found.getSize(), type: 'application/pdf',
-      role: 'quote', origName: src.name, quotePdf: 'DONE', source: 'admin',
+      role: 'quote', origName: src ? src.name : '', quotePdf: 'DONE', source: 'admin',
     };
     var reg = _registerQuotePdf_(String(r[COL.TOKEN] || ''), meta, !!opts.lockHeld);
     if (reg.ok) Logger.log('[QUO] 관리자 업로드 PDF 자동 인식: ' + docNo);
@@ -6031,9 +6087,35 @@ function listPendingQuotePdf(rows) {
     if (String(r[COL.STATUS] || '') === '폐기') continue;
     var list = parseAttachments(r[COL.ATTACH_LIST]);
     var src  = _findQuoteSrc_(list);
-    if (!src || !src.quotePdf || src.quotePdf === 'DONE') continue;
     var docNo = String(r[COL.DOC_NO] || '');
     var token = String(r[COL.TOKEN] || '');
+
+    // 견적서 미지정 제출 — 관리자가 QUO_ 를 올리거나(자동 인식) [견적서 아님]으로 정리할 때까지 남는다.
+    //  홈 로딩 비용 때문에 현재 폴더만 본다(quick, Drive 호출 ≤2). STAGING 에 남은 업로드는 FINAL 이동 때 잡힌다.
+    var unpickedSince = src ? '' : _quoteUnpickedSince_(list);
+    if (unpickedSince) {
+      if (reconcileQuotePdf(sheet, i + 1, r, { quick: true })) continue;
+      if (ADMIN_TASK_EXCLUDE_DOCNOS.indexOf(docNo) >= 0) continue;
+      out.push({
+        docNo:    docNo,
+        token:    token,
+        drafter:  String(r[COL.DRAFTER] || ''),
+        subject:  String(r[COL.SUBJECT] || ''),
+        status:   String(r[COL.STATUS]  || ''),
+        state:    'UNPICKED',
+        reason:   '',
+        since:    unpickedSince,
+        folderId: String(r[COL.DRIVE_ID] || ''),
+        origName: '',
+        origId:   '',
+        files:    list.slice(0, 5).map(function(f) { return { name: String((f && f.name) || ''), id: String((f && f.id) || '') }; }),
+        fileCount: list.length,
+        fileName: quotePdfFileName(docNo),
+      });
+      continue;
+    }
+
+    if (!src || !src.quotePdf || src.quotePdf === 'DONE') continue;
     if (src.quotePdf === 'PENDING') {
       if (reconcileQuotePdf(sheet, i + 1, r)) continue;
     } else if (src.quotePdf === 'QUEUED') {
@@ -6076,6 +6158,133 @@ function listPendingQuotePdf(rows) {
   }
   Logger.log('[QUO] 미처리 ' + out.length + '건: ' + out.map(function(x) { return x.docNo + '(' + x.state + ')'; }).join(', '));
   return out;
+}
+
+/**
+ * [관리자 홈 배너] 견적서 미지정 건 정리 — 확인해 보니 견적서가 없는 품의일 때 대기 목록에서 뺀다.
+ *  quoteUnpicked 표시만 지운다(첨부 파일·결재에는 손대지 않음). 이미 정리·등록된 건이면 ok + already.
+ */
+function dismissQuoteUnpickedForClient(payload) {
+  var token = String((payload && payload.token) || '');
+  if (!token) return { ok: false, message: 'token이 필요합니다.' };
+  var actor = getRequestUserEmail_();
+  if (!isAdminUser(actor)) return { ok: false, message: '관리자만 처리할 수 있습니다.' };
+  var res;
+  try {
+    res = withLock(function() {
+      var ss     = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+      var sheet  = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+      var rowNum = findRowNumByToken(sheet, token);
+      if (rowNum < 0) return { ok: false, message: '문서를 찾을 수 없습니다(재상신·폐기로 바뀌었을 수 있습니다). 새로고침해 주세요.' };
+      var r     = readRow(sheet, rowNum);
+      var list  = parseAttachments(r[COL.ATTACH_LIST]);
+      var docNo = String(r[COL.DOC_NO] || '');
+      if (!_quoteUnpickedSince_(list)) return { ok: true, already: true, docNo: docNo };
+      _clearQuoteUnpicked_(list);
+      sheet.getRange(rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(list));
+      return { ok: true, docNo: docNo, files: list.map(function(f) { return f && f.name ? String(f.name) : ''; }).filter(Boolean) };
+    });
+  } catch(e) {
+    return { ok: false, message: (e && e.message) ? e.message : String(e) };
+  }
+  if (res && res.ok && !res.already) {
+    try {
+      writeAuditLog({
+        eventType: AUDIT_EVENT.QUOTE_UNPICKED_DISMISSED, actor: actor, actorRole: 'admin',
+        docNo: res.docNo, docToken: token, docType: 'REQ',
+        reason: '견적서 미지정 건 — 관리자 확인: 견적서 없음(대기 목록에서 정리)',
+        payload: { files: res.files },
+      });
+    } catch(_) {}
+  }
+  return res;
+}
+
+/**
+ * [관리자 · 임시 래퍼에서 호출] 이미 제출된 품의를 '견적서 미지정'으로 표시한다.
+ *  표시 기능(2026-11-23) 이전 제출분 등, 견적서가 첨부돼 있는데 지정이 빠진 건을 구제한다.
+ *  · quoteFileName 없음: 표시만 → 관리자 홈 배너에 뜨고, 폴더에 QUO_{품의번호}.pdf 를 올리면 자동 인식.
+ *                       (이미 올려 둔 QUO_ 가 있으면 여기서 바로 등록된다)
+ *  · quoteFileName 있음: 그 PDF 첨부의 이름을 QUO_{품의번호}.pdf 로 바꾸고 바로 등록까지 한다
+ *                       — 기안 때 그 PDF 를 견적서로 지정한 것과 같은 결과(항목 1개, origName = 원래 이름).
+ *  첨부가 없거나 이미 견적서가 지정·등록된 행, 폐기 행은 건드리지 않는다(예외로 알린다).
+ *  GAS 편집기는 인자를 못 넘기므로 무인자 임시 래퍼에서 부른다.
+ * @returns {string} 결과 요약
+ */
+function markQuoteUnpicked(docNo, quoteFileName) {
+  var actor = getRequestUserEmail_();
+  if (!isAdminUser(actor)) throw new Error('관리자만 실행할 수 있습니다.');
+  docNo = String(docNo || '').trim();
+  if (!docNo) throw new Error('품의번호가 필요합니다.');
+  quoteFileName = String(quoteFileName || '').trim();
+
+  var ss    = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var sheet = getOrCreateSheet(ss, CONFIG.SHEET_NAME);
+
+  var m = withLock(function() {
+    var rows = sheet.getDataRange().getValues();
+    var hits = [];
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][COL.DOC_NO] || '').trim() !== docNo) continue;
+      if (String(rows[i][COL.DOC_TYPE] || 'REQ') === 'PRC') continue;
+      if (String(rows[i][COL.STATUS] || '') === '폐기') continue;
+      hits.push(i + 1);
+    }
+    if (hits.length !== 1) throw new Error('품의(REQ) 행을 하나로 특정할 수 없습니다: ' + docNo + ' (' + hits.length + '건)');
+    var rowNum = hits[0];
+    var r    = readRow(sheet, rowNum);
+    var list = parseAttachments(r[COL.ATTACH_LIST]);
+    if (!list.length) throw new Error('첨부가 없는 행입니다(첨부 0건 또는 반려 상태): ' + docNo);
+    if (_findQuoteSrc_(list) || _findQuoteEntry_(list)) throw new Error('이미 견적서가 지정·등록된 행입니다: ' + docNo);
+    var target = null;
+    if (quoteFileName) {
+      for (var k = 0; k < list.length; k++) if (list[k] && String(list[k].name || '') === quoteFileName) { target = list[k]; break; }
+      if (!target) throw new Error('첨부 목록에 그 파일이 없습니다: ' + quoteFileName);
+      if (quoteFileName.split('.').pop().toLowerCase() !== 'pdf') throw new Error('PDF 첨부만 이름을 바꿔 바로 등록할 수 있습니다: ' + quoteFileName);
+    }
+    var already = !!_quoteUnpickedSince_(list);
+    if (!already) {
+      var at = new Date().toISOString();
+      list.forEach(function(f) { if (f) f.quoteUnpicked = at; });
+      sheet.getRange(rowNum, COL.ATTACH_LIST + 1).setValue(JSON.stringify(list));
+    }
+    return {
+      rowNum: rowNum, token: String(r[COL.TOKEN] || ''), folderId: String(r[COL.DRIVE_ID] || ''),
+      targetId: target ? String(target.id || '') : '', already: already,
+    };
+  });
+
+  if (!m.already) {
+    try {
+      writeAuditLog({
+        eventType: AUDIT_EVENT.QUOTE_UNPICKED_MARKED, actor: actor, actorRole: 'admin',
+        docNo: docNo, docToken: m.token, docType: 'REQ',
+        reason: '견적서 미지정 표시(관리자)' + (quoteFileName ? ' + 첨부 PDF 를 견적서로 등록: ' + quoteFileName : ''),
+        payload: { quoteFileName: quoteFileName },
+      });
+    } catch(_) {}
+  }
+
+  var quoteName = quotePdfFileName(docNo);
+  var msg;
+  if (m.targetId) {
+    var folder = DriveApp.getFolderById(m.folderId);
+    var exist  = _findLiveFileByName(folder, quoteName);
+    if (exist && exist.getId() !== m.targetId) {
+      throw new Error('폴더에 이미 다른 ' + quoteName + ' 이 있습니다 — 확인 후 정리해 주세요(표시는 남아 있음).');
+    }
+    DriveApp.getFileById(m.targetId).setName(quoteName);
+    var reg = reconcileQuotePdf(sheet, m.rowNum, readRow(sheet, m.rowNum));
+    msg = docNo + ' → ' + (reg ? 'OK / ' + quoteFileName + ' → ' + quoteName + ' 등록 완료'
+                               : 'FAIL / 이름은 바꿨으나 등록되지 않음 — 관리자 홈을 열면 다시 시도됩니다');
+  } else {
+    var got = reconcileQuotePdf(sheet, m.rowNum, readRow(sheet, m.rowNum));
+    msg = docNo + ' → ' + (got ? 'OK / 폴더의 ' + quoteName + ' 등록 완료'
+                               : 'OK / 견적서 미지정 표시' + (m.already ? '(이미 있음)' : '') + ' — 폴더에 ' + quoteName + ' 를 올리면 자동 인식');
+  }
+  Logger.log(msg);
+  console.log(msg);
+  return msg;
 }
 
 // ================================================================
