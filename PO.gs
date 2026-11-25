@@ -683,29 +683,3 @@ function _checkPoOrderFolder() {
   Logger.log('[PO] 주문서 폴더: ' + f.getName() + ' / 상위: ' + parentName + ' / id=' + PO_CONFIG.ORDER_FOLDER_ID);
   return { name: f.getName(), parent: parentName, id: PO_CONFIG.ORDER_FOLDER_ID };
 }
-
-// ================================================================
-// [임시] 주문서 마감 래퍼 — GAS 편집기는 인자를 못 넘겨서 무인자 래퍼를 둔다.
-//  실행 후 제거·push 한다. (INSP 마감 래퍼와 같은 관례)
-// ================================================================
-
-/**
- * 2026-11-25 생성 대기 주문서 마감 (xlsx + pdf, 2페이지, PDF 육안 확인 완료):
- *    TO-PO-26-366_Hitronics                  USD 2,597.80
- *    TO-PO-26-367_이에이텍                   KRW 4,460,000 (부가세별도)
- *  ※ TO-PO-26-368 한빛테크 Wire bonding은 생성 여부 미확정이라 제외.
- */
-function _tmp_markPoDone_20261125() {
-  var jobs = [
-    // [PO번호, prcToken, xlsx 파일ID]
-    ['TO-PO-26-366', 'd48eb863-356b-4644-aafe-f3b272cae33d', '1mOBVeg6670kV171O9D7Qp6FTHKtOR3kR'],
-    ['TO-PO-26-367', '18610a9f-4ba4-4253-8d21-c621a09e386d', '1867oJJMeK8EPXaaSY378pHsDp0TimDSZ'],
-  ];
-  var out = jobs.map(function (j) {
-    var r = markPoDone(j[1], j[2]);
-    return j[0] + ' → ' + (r.ok ? 'OK' : 'FAIL') + ' / ' + r.message;
-  });
-  Logger.log(out.join('\n'));
-  console.log(out.join('\n'));
-  return out;
-}
