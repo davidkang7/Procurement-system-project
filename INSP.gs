@@ -2620,3 +2620,47 @@ function _cleanupInspPhotos(row) {
 
   return '사진 ' + deleted + '장 삭제';
 }
+
+
+// ================================================================
+// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-11-25 PENDING_PDF 5건 마감 (전부 판정 합격, TG-AP-26-027은 2페이지).
+ *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료 → moveStatus를 FINAL로 마감한다.
+ */
+function _tmp_markInspPdfDone_20261125() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
+    ['TO-PO-26-302', 'TG-AP-26-027-01', '8d2438b4-e7ae-4e7f-9f0c-49abb62ebc45', '1KoTlTR8pdtwYpaBOJ76Xxx6iqMBa6cv9'],
+    ['TO-PO-26-311', 'TG-AP-26-028-01', 'fb4eac8a-2dc1-4813-9073-757f2a13fb36', '1HR6evG7GMg0MZgOoTnAwFrqOI0Uoc_ZC'],
+    ['TO-PO-26-336', 'TG-AP-26-029-01', '2d633435-bd03-4133-b923-384755f28c8d', '1RnijvpRdiGyoKcXArIg-FhPsculcE9dh'],
+    ['TO-PO-26-347', 'TL-AP-26-002-01', 'e421d589-1136-4b20-9622-14a4e9424d3c', '15jvZUKTteSPm5v9iLjqpi--9LPngdaqs'],
+    ['TO-PO-26-365', 'TH-AP-26-062-01', 'b2ca2fde-2c35-493e-b182-e4a3e994eadb', '1JNxXayHGw1vmwPFdR0horVUdT1aemWKX'],
+  ];
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2], fileId = j[3];
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return poNo + ' → SKIP / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return poNo + ' → SKIP / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return poNo + ' → SKIP / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return poNo + ' → SKIP / 이미 FINAL 마감됨';
+    }
+    var res = markInspPdfDone(token, fileId);
+    return poNo + ' → ' + (res.ok ? 'OK' : 'FAIL') + ' / ' + res.message;
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
