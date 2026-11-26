@@ -2620,3 +2620,47 @@ function _cleanupInspPhotos(row) {
 
   return '사진 ' + deleted + '장 삭제';
 }
+
+
+
+// ================================================================
+// [임시] 검수보고서 PDF 마감 래퍼 — GAS 편집기는 인자를 넘길 수 없어서 둔다.
+//  실행 후 제거하고 다시 push 한다.
+// ================================================================
+
+/**
+ * 2026-11-26 PENDING_PDF 4건 마감 (전부 판정 합격, TQ-AP-26-004는 2페이지).
+ *  로컬 렌더러로 렌더 → PO 폴더 업로드 완료 → moveStatus를 FINAL로 마감한다.
+ */
+function _tmp_markInspPdfDone_20261126() {
+  var jobs = [
+    // [PO번호, docNo(검증용), INSP token, 업로드된 PDF 파일 ID]
+    ['TO-PO-26-292', 'TR-AP-026-52-01', 'd0057623-77f1-4e2d-a678-5cd0a798699f', '1ZKW5dJ8ewG7tEW0cFMVt94KUw59uEKV1'],
+    ['TO-PO-26-346', 'TR-AP-26-060-01', 'c3e80be3-2b4a-44fd-996a-81de33704d9b', '1GZYlS39nI3iXfqwsaat1-Cb1t9Xs1YQ1'],
+    ['TO-PO-26-359', 'TQ-AP-26-003-01', 'fb405d5f-9489-469d-b4c8-37bdd68f22bf', '17G3-7IgWm056Am4GlAY9og-btTRpSNfM'],
+    ['TO-PO-26-363', 'TQ-AP-26-004-01', '3c963f8a-1376-4f78-a088-8a9ec6a865c2', '1nc1muztt3SssbBVbNimwgvvMPs_fbla5'],
+  ];
+  var ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  var out = jobs.map(function (j) {
+    var poNo = j[0], docNo = j[1], token = j[2], fileId = j[3];
+    var info = _readInspRowByToken(ss, token);
+    if (!info) return poNo + ' → SKIP / 검수보고서 행 없음 (token 확인)';
+    var r = info.row;
+    if (String(r[INSP_COL.DOC_NO] || '') !== docNo) {
+      return poNo + ' → SKIP / docNo 불일치: 시트=' + r[INSP_COL.DOC_NO] + ' 기대=' + docNo;
+    }
+    if (String(r[INSP_COL.PO_NO] || '') !== poNo) {
+      return poNo + ' → SKIP / poNo 불일치: 시트=' + r[INSP_COL.PO_NO];
+    }
+    if (String(r[INSP_COL.MOVE_STATUS] || '') === 'FINAL') {
+      return poNo + ' → SKIP / 이미 FINAL 마감됨';
+    }
+    var res = markInspPdfDone(token, fileId);
+    return poNo + ' → ' + (res.ok ? 'OK' : 'FAIL') + ' / ' + res.message;
+  });
+
+  var msg = out.join('\n');
+  Logger.log(msg);
+  console.log(msg);
+  return out;
+}
